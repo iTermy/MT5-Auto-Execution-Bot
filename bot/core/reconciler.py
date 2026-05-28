@@ -68,13 +68,20 @@ class Reconciler:
                 result.trailing_resumed += 1
                 logger.info("Reconcile trailing resumed: ticket=%d", ticket)
 
-        # Orphan check: MT5 orders with our magic number not tracked in SQLite
+        # Orphan sweep: cancel MT5 orders with our magic number not tracked in SQLite
         for order in mt5_orders:
             if order.ticket not in sqlite_tickets:
-                logger.warning(
-                    "Reconcile orphan: ticket=%d symbol=%s comment=%s",
-                    order.ticket, order.symbol, order.comment,
-                )
+                res = mt5_client.cancel_pending_order(order.ticket)
+                if res and res.retcode == 10009:  # TRADE_RETCODE_DONE
+                    logger.info(
+                        "Reconcile orphan cancelled: ticket=%d symbol=%s",
+                        order.ticket, order.symbol,
+                    )
+                else:
+                    logger.warning(
+                        "Reconcile orphan cancel failed: ticket=%d symbol=%s comment=%s",
+                        order.ticket, order.symbol, order.comment,
+                    )
                 result.orphans += 1
 
         logger.info(

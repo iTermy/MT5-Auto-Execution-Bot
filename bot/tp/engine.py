@@ -1,5 +1,8 @@
 import logging
 from collections import defaultdict
+from datetime import datetime, timezone
+
+import MetaTrader5 as mt5
 
 from bot.config.settings import Settings
 from bot.db.sqlite import SQLiteDB
@@ -73,3 +76,22 @@ class TPEngine:
                 )
                 for err in result.errors:
                     logger.error("TPEngine execute signal=%d: %s", signal_id, err)
+                if result.closed_tickets or result.trailed_tickets:
+                    await self._cancel_pending_for_signal(signal_id, mt5_client, sqlite)
+
+    async def _cancel_pending_for_signal(
+        self, signal_id: int, mt5_client: MT5Client, sqlite: SQLiteDB
+    ) -> None:
+        pending = await sqlite.get_pending_by_signal(signal_id)
+        if not pending:
+            return
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for row in pending:
+            ticket = row["mt5_ticket"]
+            res = mt5_client.cancel_pending_order(ticket)
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                await sqlite.mark_cancelled(ticket, now_iso, spread=False)
+                logger.info("TP fired signal=%d — cancelled pending ticket=%d", signal_id, ticket)
+            else:
+                retcode = res.retcode if res else "None"
+                logger.warning("TP cancel pending ticket=%d failed retcode=%s", ticket, retcode)

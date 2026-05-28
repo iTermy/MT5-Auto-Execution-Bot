@@ -126,7 +126,9 @@ class DefaultTPStrategy:
                 comment=f"s{signal_id}",
             )
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                await sqlite.set_trailing(newest.ticket)
                 result.closed_tickets.append(newest.ticket)
+                result.trailed_tickets.append(newest.ticket)
                 logger.info(
                     "TP partial close %d%% ticket=%d signal=%d vol=%.2f",
                     pct, newest.ticket, signal_id, close_vol,

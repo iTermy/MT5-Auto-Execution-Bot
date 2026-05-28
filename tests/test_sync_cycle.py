@@ -21,6 +21,7 @@ def _mock_supabase(signals=None, live_prices=None):
     sb = AsyncMock()
     sb.fetch_active_signals.return_value = signals or []
     sb.fetch_live_prices.return_value = live_prices or {}
+    sb.fetch_signal_statuses.return_value = {}
     return sb
 
 
@@ -131,8 +132,11 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
         name="US500", digits=1, point=0.1
     )
 
+    row = _make_supabase_row(limit_id=10, instrument="SPX500USD")
+    row["stop_loss"] = 4000.0
+    row["price_level"] = 4510.0
     supabase = _mock_supabase(
-        signals=[_make_supabase_row(limit_id=10, instrument="SPX500USD")],
+        signals=[row],
         live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
     )
     scheduler = _mock_scheduler(cancel_pending=False)

@@ -6,6 +6,8 @@ from bot.db.queries import (
     CREATE_ORDER_MAPPINGS,
     GET_ALL_ACTIVE,
     GET_FILLED_POSITIONS,
+    GET_FILLED_SIGNAL_IDS,
+    GET_PENDING_BY_SIGNAL,
     GET_PENDING_ORDERS,
     GET_TRAILING_POSITIONS,
     INSERT_ORDER,
@@ -13,6 +15,7 @@ from bot.db.queries import (
     MARK_CLOSED,
     MARK_FILLED,
     SET_TRAILING,
+    UPDATE_DB_STOP_LOSS,
     UPDATE_SL,
     UPDATE_TICKET,
 )
@@ -52,6 +55,12 @@ class SQLiteDB:
         mt5_price: float | None = None,
         offset: float | None = None,
     ) -> None:
+        # Remove any stale non-active record so re-placements after reconciler
+        # cancellations don't silently fail due to the UNIQUE constraint on limit_id.
+        await self._db.execute(
+            "DELETE FROM order_mappings WHERE limit_id = ? AND status NOT IN ('pending', 'filled')",
+            (limit_id,),
+        )
         await self._db.execute(
             INSERT_ORDER,
             (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
@@ -100,4 +109,17 @@ class SQLiteDB:
 
     async def update_ticket(self, old_ticket: int, new_ticket: int) -> None:
         await self._db.execute(UPDATE_TICKET, (new_ticket, old_ticket))
+        await self._db.commit()
+
+    async def get_pending_by_signal(self, signal_id: int) -> list[aiosqlite.Row]:
+        async with self._db.execute(GET_PENDING_BY_SIGNAL, (signal_id,)) as cursor:
+            return await cursor.fetchall()
+
+    async def get_filled_signal_ids(self) -> set[int]:
+        async with self._db.execute(GET_FILLED_SIGNAL_IDS) as cursor:
+            rows = await cursor.fetchall()
+        return {row["signal_id"] for row in rows}
+
+    async def update_db_stop_loss(self, mt5_ticket: int, new_db_sl: float, new_mt5_sl: float) -> None:
+        await self._db.execute(UPDATE_DB_STOP_LOSS, (new_db_sl, new_mt5_sl, mt5_ticket))
         await self._db.commit()

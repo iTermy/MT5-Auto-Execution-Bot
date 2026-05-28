@@ -125,11 +125,11 @@ class Engine:
                     self._scheduler,
                     placement_active=placement_active,
                 )
-                if result.placed or result.cancelled or result.filled or result.errors:
+                if result.placed or result.cancelled or result.filled or result.new_trailing or result.errors:
                     logger.info(
-                        "Sync: placed=%d cancelled=%d filled=%d trailing=%d errors=%d",
+                        "Sync: placed=%d cancelled=%d filled=%d trailing=%d errors=%d skipped=%d",
                         result.placed, result.cancelled, result.filled,
-                        result.new_trailing, result.errors,
+                        result.new_trailing, result.errors, result.skipped,
                     )
                 await self._broadcast_status()
             except Exception:
@@ -140,7 +140,8 @@ class Engine:
     async def _tp_loop(self) -> None:
         while True:
             try:
-                await self._tp.run_cycle(self._mt5, self._sqlite, self._config)
+                config = self._config
+                await self._tp.run_cycle(self._mt5, self._sqlite, config)
             except Exception:
                 logger.error("tp_loop error", exc_info=True)
 

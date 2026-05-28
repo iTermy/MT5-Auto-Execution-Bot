@@ -125,7 +125,7 @@ async def test_filled_trailing_in_mt5_resumes(sqlite_db, mock_mt5) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Orphan: MT5 order not in SQLite → log only, no cancel, orphans counted
+# Orphan: MT5 order not in SQLite → cancel and count
 # ---------------------------------------------------------------------------
 
 async def test_orphan_mt5_order_not_in_sqlite(sqlite_db, mock_mt5) -> None:
@@ -136,8 +136,7 @@ async def test_orphan_mt5_order_not_in_sqlite(sqlite_db, mock_mt5) -> None:
     result = await Reconciler().reconcile(mock_mt5, sqlite_db)
 
     assert result.orphans == 1
-    # Orphan order was NOT cancelled
-    mock_mt5.cancel_pending_order.assert_not_called()
+    mock_mt5.cancel_pending_order.assert_called_once_with(9999)
 
 
 # ---------------------------------------------------------------------------

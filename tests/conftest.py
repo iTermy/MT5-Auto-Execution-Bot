@@ -132,6 +132,8 @@ def mock_mt5() -> MagicMock:
     client.orders_get.return_value = []
     client.positions_get.return_value = []
     client.ensure_connected.return_value = True
+    client.symbol_info.return_value = make_symbol_info()
+    client.symbol_info_tick.return_value = make_tick()
     return client
 
 

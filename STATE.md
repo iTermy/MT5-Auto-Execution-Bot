@@ -1,8 +1,8 @@
-# Project State — 2026-05-26
+# Project State — 2026-05-28
 
-## Current Status: Phase 14 of 14 Complete — All 52 Steps Done
+## Current Status: Post-MVP Bug Fixes & Robustness Pass
 
-**Project is feature-complete.** All phases implemented.
+**Original 52 steps complete. Post-MVP fixes applied (decisions 31-37).**
 
 ---
 
@@ -236,10 +236,9 @@ These were clarified or resolved during implementation. Future Claude should tre
 15. **close_position() and modify_position_sl() added to MT5Client** — Required by DefaultTPStrategy
     and TrailingStopManager. close_position() retries up to 3x on transient retcodes.
 
-16. **Partial close does NOT set is_trailing in execute()** — When partial_close_percent is between
-    0 and 100, execute() sends the partial close order and returns. The original ticket disappears
-    from MT5; the reconciler marks it closed. fill_detector.detect_partial_close_tickets() finds the
-    new remainder ticket and inserts it into SQLite with is_trailing=1 on the next cycle.
+16. **~~Partial close does NOT set is_trailing in execute()~~** — **SUPERSEDED by decision #31.**
+    Original design was broken: remainder positions were never tracked because
+    detect_partial_close_tickets() only searches is_trailing=1 rows. See decision #31.
 
 17. **Trailing SL initial set when position.sl == 0** — TrailingStopManager checks `position.sl > 0`
     before the "don't retreat" guard, so positions with sl=0 always get the initial trailing SL set.
@@ -294,6 +293,34 @@ These were clarified or resolved during implementation. Future Claude should tre
 
 30. **PUT /api/config accepts full Settings** — the endpoint receives the complete Settings model.
     Frontend pattern: GET config, modify fields, PUT full config back. No partial-update mechanism.
+
+31. **Partial close NOW sets is_trailing in execute()** — Supersedes decision #16. After a successful
+    partial close (0 < pct < 100), execute() calls `sqlite.set_trailing(newest.ticket)`. This marks
+    the original as is_trailing=1 so detect_partial_close_tickets() finds the remainder on the next
+    sync cycle. Without this, the remainder was never tracked and trailing never started.
+
+32. **Original ticket marked closed when remainder found** — sync_cycle calls
+    `sqlite.mark_closed(evt.original_ticket)` after inserting the remainder row. Cleans up the stale
+    original entry so it doesn't appear in future queries.
+
+33. **Cancel pending orders when TP fires** — After execute() completes, TPEngine cancels all remaining
+    pending orders for that signal via `_cancel_pending_for_signal()`. Prevents additional fills after
+    the trade is concluded. Ported from V1.
+
+34. **SL sync for filled positions** — sync_cycle._sync_filled_sls() updates MT5 position SL when the
+    signal's stop_loss changes in Supabase. Skips is_trailing=1 positions (trail owns SL). Compares
+    stored db_stop_loss against current signal SL, only acts when drift exceeds 1 pip. Ported from V1.
+
+35. **Forced exit on signal cancellation** — sync_cycle._check_forced_exits() monitors filled signals
+    for status transitions to 'cancelled' or 'breakeven' (from 'hit' only). Closes all positions at
+    market via mt5_client.close_position(). Uses transition detection to avoid re-firing. Ported from V1.
+
+36. **Orphan sweep cancels orders** — Reconciler now cancels orphan MT5 orders (our magic number, not
+    tracked in SQLite) instead of just logging a warning. Matches V1 behavior.
+
+37. **Pending SL change detection** — sync_cycle cancels pending orders whose db_stop_loss differs from
+    the current signal stop_loss by >= 1 pip. The order is re-placed with the new SL on the next cycle.
+    Ported from V1.
 
 ---
 

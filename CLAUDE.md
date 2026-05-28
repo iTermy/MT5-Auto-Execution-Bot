@@ -66,6 +66,14 @@ These are not in ARCHITECTURE.md — they were decided during build:
 - **LicenseValidator dev bypass**: empty URL → returns VALID immediately, no HTTP call.
 - **SSEBroadcaster.last_msg**: GET /api/status reads cached last status; no MT5 call from route handler.
 
+## Post-MVP Fixes (decisions 31-37 in STATE.md)
+- **Partial close sets is_trailing immediately** — execute() calls set_trailing after partial close so remainder is tracked. Original decision #16 was buggy.
+- **Cancel pending on TP fire** — TPEngine cancels remaining pending orders for a signal after TP executes.
+- **SL sync for filled positions** — sync_cycle updates MT5 position SL when signal stop_loss changes in Supabase. Skips trailing positions.
+- **Forced exit on signal cancellation** — sync_cycle closes all positions when signal status transitions to 'cancelled'/'breakeven' from 'hit'.
+- **Orphan sweep cancels** — Reconciler cancels orphan orders instead of just logging.
+- **Pending SL change detection** — sync_cycle cancels pending orders with stale SL for re-placement.
+
 ## Database Access
 - **asyncpg** for Supabase: positional params unpacked (`$1, $2` as separate args, not a list)
 - **aiosqlite** for SQLite: `?` placeholders, tuple params, commit after writes

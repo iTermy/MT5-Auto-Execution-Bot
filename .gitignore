@@ -1,0 +1,14 @@
+orders.db
+.env
+config.json
+__pycache__/
+*.pyc
+*.exe
+dist/
+build/
+*.spec
+!bot.spec
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
+*.egg-info/

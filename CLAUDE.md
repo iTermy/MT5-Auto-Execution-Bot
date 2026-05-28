@@ -1,0 +1,115 @@
+# CLAUDE.md — Auto-Execution Bot V2
+
+## Current Implementation Status
+**All 14 phases complete (52/52 steps).** Project is feature-complete.
+Read STATE.md immediately — it lists all implementation decisions made during build that are not
+in the original ARCHITECTURE.md. Decisions 1–30 are recorded there.
+
+## What This Is
+Python Windows desktop app that reads trading signals from Supabase PostgreSQL and places/manages pending orders on MetaTrader 5 (MT5) via ICMarkets. FastAPI backend + React/TypeScript frontend served at `localhost:8501`, system tray icon via pystray.
+
+## How To Work In This Repo
+All decisions and context live in these repo files. Do not rely on chat history or memory.
+
+- **ARCHITECTURE.md** — system design, schemas, all technical decisions, config.json structure
+- **STATE.md** — what exists, what doesn't, all owner-approved decisions, known risks
+- **NEXT_STEPS.md** — ordered implementation steps (52 steps, 14 phases). Execute in order.
+- **CONVENTIONS.md** — code quality rules, naming, async patterns, API-specific conventions
+
+Read STATE.md first. It lists every owner decision and every known risk.
+
+## Build & Run
+```bash
+# Backend
+pip install -r requirements.txt
+python main.py
+
+# Frontend (dev)
+cd frontend && npm install && npm run dev
+
+# Frontend (production build)
+cd frontend && npm run build
+
+# PyInstaller
+pyinstaller bot.spec
+
+# Tests
+pytest tests/
+```
+
+## Key Constraints (Non-Negotiable)
+- Supabase tables are **read-only** — no INSERT/UPDATE/DELETE on signals, limits, live_prices, licenses
+- All mutable bot state lives in **local SQLite** (`orders.db`)
+- No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments
+- All MT5 orders use magic number `20250001`
+- `is_scalp` captured from signal at placement time, stored in SQLite, never re-read from DB
+- Idempotent sync — running a cycle twice must have no additional effect
+- TP engine must never crash the main loop — log errors and continue
+- Spread adjustment applied to every order placement (see ARCHITECTURE.md)
+
+## Concurrency (Critical)
+- Main thread: pystray (system tray icon, Windows message pump)
+- Engine thread: asyncio event loop + MT5 (bound to this thread)
+- MT5 calls are synchronous but <50ms, called directly in async loop
+- FastAPI runs as an async task in the engine thread's event loop
+- **Never call MT5 from a FastAPI request handler** — it will fail (wrong thread)
+
+## Critical Implementation Decisions (Phases 7–10)
+These are not in ARCHITECTURE.md — they were decided during build:
+
+- **ICMarkets hedging**: filled position ticket ≠ order ticket. After fill, call `sqlite.update_ticket(order_ticket, position_ticket)` so all downstream code (TP engine, trailing) can look up by `position.ticket`. See STATE.md decision #19.
+- **Partial close remainder**: synthetic `limit_id = -new_ticket` (negative integer). fill_detector detects it and insert_order is called with order_type="remainder". status is immediately set to filled+trailing.
+- **TP trigger metric**: compares **price movement** (not account P&L) to `profit_threshold`. Dollar threshold = raw price distance. Pip threshold = price_distance / pip_size. Only "others P&L >= 0" uses `position.profit` (account currency).
+- **db_symbol_from_mt5()** in `symbol_mapper.py`: reverse-maps MT5 symbol to DB symbol for asset-class detection. Needed because "BTCUSD" (len 6) fails the crypto rule without mapping back to "BTCUSDT".
+- **Adaptive sleep**: both sync_loop and tp_loop sleep 1s when `sqlite.get_all_active()` is non-empty, 30s when idle.
+- **Engine.app is set externally**: main.py calls `create_app(engine)` and assigns to `engine.app`. `run_forever()` starts uvicorn only if `engine.app is not None`.
+- **LicenseValidator dev bypass**: empty URL → returns VALID immediately, no HTTP call.
+- **SSEBroadcaster.last_msg**: GET /api/status reads cached last status; no MT5 call from route handler.
+
+## Database Access
+- **asyncpg** for Supabase: positional params unpacked (`$1, $2` as separate args, not a list)
+- **aiosqlite** for SQLite: `?` placeholders, tuple params, commit after writes
+- Supabase timestamps are native `datetime` — never pass to `datetime.fromisoformat()`
+- `ROUND(x, 2)` in Postgres requires `CAST(... AS NUMERIC)`
+
+## DSN Loading
+1. `.env` file with `SUPABASE_DSN` (contributor path)
+2. `_PRODUCTION_DSN` constant in `bot/config/constants.py` (production build, placeholder in repo)
+
+## Target File Layout
+```
+main.py                    — entry point (tray + thread launch)
+bot/config/constants.py    — magic number, enums, production DSN placeholder
+bot/config/settings.py     — Pydantic config model, DSN loading
+bot/core/engine.py         — orchestrator (three loops, start/stop)
+bot/core/sync_cycle.py     — idempotent sync iteration
+bot/core/reconciler.py     — startup reconciliation
+bot/core/scheduler.py      — spread hour gating
+bot/mt5/client.py          — all MT5 API calls
+bot/mt5/connection.py      — init/shutdown/reconnect
+bot/mt5/types.py           — dataclasses for MT5 return types
+bot/db/supabase.py         — asyncpg pool + queries
+bot/db/sqlite.py           — aiosqlite CRUD for order_mappings
+bot/db/queries.py          — SQL constants
+bot/trading/order_placer.py    — place orders (with spread adjustment)
+bot/trading/order_canceller.py — cancel orders
+bot/trading/fill_detector.py   — detect fills + partial close tickets
+bot/trading/lot_calculator.py  — risk % and fixed lot modes
+bot/trading/offset_calculator.py — feed offset for indices/crypto
+bot/trading/symbol_mapper.py   — DB->MT5 mapping + asset class detection
+bot/tp/engine.py           — TP monitor loop
+bot/tp/strategy.py         — TPStrategy Protocol
+bot/tp/default_strategy.py — trigger, partial close, trailing handoff
+bot/tp/trailing.py         — trailing stop SL ratchet
+bot/tp/asset_config.py     — per-asset-class TP thresholds
+bot/license/validator.py   — HTTP validation via Edge Function
+bot/license/models.py      — license status types
+bot/api/app.py             — FastAPI app, static serving
+bot/api/routes.py          — REST endpoints
+bot/api/sse.py             — SSE streaming (logs + status)
+bot/utils/logging.py       — structured logging + SSE broadcast hook
+bot/utils/time_utils.py    — EST conversion, market hours
+frontend/src/              — React TypeScript SPA (Vite)
+supabase/functions/        — Edge Function for license validation
+tests/                     — pytest suite
+```

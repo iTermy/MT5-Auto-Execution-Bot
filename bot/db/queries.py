@@ -1,0 +1,98 @@
+# Supabase (PostgreSQL) — asyncpg, positional params $1 $2 ...
+
+FETCH_ACTIVE_SIGNALS_WITH_LIMITS = """
+SELECT
+    s.id              AS signal_id,
+    s.instrument,
+    s.direction,
+    s.stop_loss,
+    s.status          AS signal_status,
+    s.scalp,
+    l.id              AS limit_id,
+    l.price_level,
+    l.sequence_number
+FROM signals s
+JOIN limits l ON l.signal_id = s.id
+WHERE s.status IN ('active', 'hit')
+  AND l.status = 'pending'
+ORDER BY s.id, l.sequence_number
+"""
+
+FETCH_LIVE_PRICES = """
+SELECT symbol, bid, ask, feed, updated_at
+FROM live_prices
+WHERE symbol = ANY($1)
+"""
+
+# SQLite — aiosqlite, ? placeholders
+
+CREATE_ORDER_MAPPINGS = """
+CREATE TABLE IF NOT EXISTS order_mappings (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    limit_id                BIGINT NOT NULL UNIQUE,
+    signal_id               BIGINT NOT NULL,
+    mt5_ticket              BIGINT NOT NULL UNIQUE,
+    order_type              TEXT NOT NULL,
+    lot_size                REAL,
+    placed_at               TEXT NOT NULL,
+    filled_at               TEXT,
+    cancelled_at            TEXT,
+    status                  TEXT NOT NULL DEFAULT 'pending',
+    feed_price_at_placement REAL,
+    mt5_price_at_placement  REAL,
+    offset_at_placement     REAL,
+    last_offset_check       TEXT,
+    db_stop_loss            REAL,
+    last_known_mt5_sl       REAL,
+    is_scalp                INTEGER NOT NULL DEFAULT 0,
+    is_trailing             INTEGER NOT NULL DEFAULT 0
+)
+"""
+
+INSERT_ORDER = """
+INSERT OR IGNORE INTO order_mappings
+    (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
+     db_stop_loss, is_scalp, feed_price_at_placement, mt5_price_at_placement,
+     offset_at_placement)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+MARK_FILLED = """
+UPDATE order_mappings SET status = 'filled', filled_at = ? WHERE mt5_ticket = ?
+"""
+
+MARK_CANCELLED = """
+UPDATE order_mappings SET status = ?, cancelled_at = ? WHERE mt5_ticket = ?
+"""
+
+MARK_CLOSED = """
+UPDATE order_mappings SET status = 'closed' WHERE mt5_ticket = ?
+"""
+
+SET_TRAILING = """
+UPDATE order_mappings SET is_trailing = ? WHERE mt5_ticket = ?
+"""
+
+GET_PENDING_ORDERS = """
+SELECT * FROM order_mappings WHERE status = 'pending'
+"""
+
+GET_FILLED_POSITIONS = """
+SELECT * FROM order_mappings WHERE status = 'filled'
+"""
+
+GET_TRAILING_POSITIONS = """
+SELECT * FROM order_mappings WHERE status = 'filled' AND is_trailing = 1
+"""
+
+GET_ALL_ACTIVE = """
+SELECT * FROM order_mappings WHERE status IN ('pending', 'filled')
+"""
+
+UPDATE_SL = """
+UPDATE order_mappings SET last_known_mt5_sl = ? WHERE mt5_ticket = ?
+"""
+
+UPDATE_TICKET = """
+UPDATE order_mappings SET mt5_ticket = ? WHERE mt5_ticket = ?
+"""

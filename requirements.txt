@@ -1,0 +1,15 @@
+MetaTrader5
+asyncpg
+aiosqlite
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+pydantic-settings
+python-dotenv
+pystray
+Pillow
+sse-starlette
+httpx
+pytz
+pytest
+pytest-asyncio

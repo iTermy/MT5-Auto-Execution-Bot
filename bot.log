@@ -1,0 +1,32 @@
+2026-05-28 11:23:23 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:23:23 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:23:23 INFO     bot.mt5.connection: MT5 shutdown
+2026-05-28 11:23:55 WARNING  __main__: FastAPI did not become ready within 30s — open http://localhost:8501 manually
+2026-05-28 11:26:49 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:26:49 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:26:49 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 11:26:49 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-28 11:29:44 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:29:44 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:29:44 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 11:29:44 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-28 11:31:56 INFO     bot.core.engine: Trading paused (position management continues)
+2026-05-28 11:35:25 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:35:25 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:35:25 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 11:35:25 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-28 11:35:33 INFO     bot.core.engine: Trading active
+2026-05-28 11:42:22 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:42:22 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:42:22 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 11:42:22 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-28 11:46:07 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:46:07 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:46:07 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 11:46:07 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-28 11:48:05 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 11:48:05 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 11:48:05 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 11:48:05 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-28 11:48:06 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-28 11:48:06 INFO     bot.license.validator: License: valid — OK

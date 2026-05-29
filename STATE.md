@@ -1,8 +1,8 @@
-# Project State — 2026-05-28
+# Project State — 2026-05-29
 
-## Current Status: V2 Dashboard Overhaul Complete
+## Current Status: V4 Integration & Bug Fix Plan Ready
 
-**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46).**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration/bug fix plan in NEXT_STEPS.md (19 steps, 5 phases — NOT YET IMPLEMENTED).**
 
 ---
 
@@ -180,27 +180,43 @@ Additions to existing modules during Phase 12:
 
 ---
 
-### V2 Dashboard Overhaul (decisions 38-46)
+### V2 Dashboard Overhaul (decisions 38-46) — backend
 ```
 bot/core/dashboard_cache.py       — DashboardCache + DashboardData dataclass
 bot/api/sse.py                    — 200-message replay buffer (deque)
 bot/api/routes.py                 — /api/dashboard, /api/history, /api/engine/shutdown
-frontend/src/App.tsx              — page-based navigation, log drawer toggle
-frontend/src/pages/DashboardPage.tsx   — account metrics, positions/orders tables
-frontend/src/pages/HistoryPage.tsx     — date picker, stats, recharts P&L chart, trades table
-frontend/src/pages/SettingsPage.tsx    — connection status, license, lot sizing, engine + shutdown
-frontend/src/components/NavSidebar.tsx — icon sidebar navigation (Dashboard/History/Settings/Logs)
-frontend/src/components/TopBar.tsx     — balance, equity, P&L, connection dots
-frontend/src/components/LogDrawer.tsx  — toggleable bottom log panel
-frontend/src/components/AccountMetrics.tsx   — 6 metric cards
-frontend/src/components/PositionsTable.tsx   — sortable open positions
-frontend/src/components/PendingOrdersTable.tsx — sortable pending orders with distance
-frontend/src/components/StatsCards.tsx       — win rate, P&L, trade count
-frontend/src/components/TradesTable.tsx      — filterable/sortable trade history
-frontend/src/hooks/useDashboard.ts     — polling hook (2s interval)
 ```
 
-Deleted V1 frontend components:
+### V3 Frontend Redesign (decision 47)
+```
+frontend/src/index.css                — full theme: light/dark CSS vars, all component classes
+frontend/src/App.tsx                  — app shell: top bar, sidebar rail, page routing, log drawer
+frontend/src/pages/DashboardPage.tsx  — hero P&L curve + donut, closest signals, positions, recent trades, daily bars
+frontend/src/pages/HistoryPage.tsx    — filters, 12-stat performance grid, sortable trades
+frontend/src/pages/SettingsPage.tsx   — engine controls, license, lot sizing, TP config, symbol mapping, save bar
+frontend/src/components/Icon.tsx      — SVG icon paths (stroke-based)
+frontend/src/components/NavSidebar.tsx — 72px icon sidebar rail with tooltips
+frontend/src/components/TopBar.tsx    — comfy-black bar: account figs, connection dots, engine toggle
+frontend/src/components/LogDrawer.tsx — slide-up log panel
+frontend/src/components/Seg.tsx       — segmented control
+frontend/src/components/ProxMeter.tsx — proximity bar for signal cards
+frontend/src/charts/EquityCurve.tsx   — hoverable SVG area chart
+frontend/src/charts/Donut.tsx         — animated win-rate donut
+frontend/src/charts/Bars.tsx          — hoverable daily P&L bars
+frontend/src/charts/smoothPath.ts     — Catmull-Rom path utility
+frontend/src/hooks/useSort.tsx        — generic sortable-table hook
+frontend/src/utils/money.ts           — money() and fmtBalance() formatters
+frontend/src/utils/stats.ts           — compute stats, daily bars, cumulative P&L from trades
+frontend/src/hooks/useSSE.ts          — SSE for logs + status (unchanged from V2)
+frontend/src/hooks/useDashboard.ts    — polling hook (unchanged from V2)
+frontend/src/api.ts                   — fetch wrappers (unchanged from V2)
+frontend/src/types.ts                 — TypeScript interfaces (unchanged from V2)
+```
+
+Deleted V2 frontend components (replaced by redesign):
+- AccountMetrics.tsx, PositionsTable.tsx, PendingOrdersTable.tsx, StatsCards.tsx, TradesTable.tsx
+
+Deleted V1 frontend components (in V2):
 - StatusBar.tsx, ControlPanel.tsx, LicensePanel.tsx, LogPanel.tsx
 
 ---
@@ -398,6 +414,66 @@ These were clarified or resolved during implementation. Future Claude should tre
     engine controls + shutdown button with confirmation. Toggleable log drawer at bottom. recharts added
     as dependency. Old components (StatusBar, ControlPanel, LicensePanel, LogPanel) deleted.
 
+47. **Frontend V3 redesign** — Complete visual overhaul from Claude Design handoff. Layout A (Command
+    Strip) chosen. Theme: warm light paper surfaces (#F7F4EE), comfy-black top bar (#262320), orange
+    accent (#E8824A). Typography: Schibsted Grotesk + JetBrains Mono via Google Fonts. Full-width top
+    bar spans above sidebar. 72px icon sidebar rail with hover tooltips. Custom SVG charts replace
+    recharts (removed as dependency): hoverable equity curve (Catmull-Rom smoothing), animated win/loss
+    donut, hoverable daily P&L bars. Dashboard hero row has cumulative P&L + win/loss with Day/Week/All
+    period toggles. Closest Signals section with proximity meter cards replaces flat pending orders table.
+    History page computes 12 detailed stats client-side (profit factor, expectancy, avg win/loss, streaks,
+    hold time, scalp share). Settings adds TP config table and symbol mapping table (shown when config
+    provides them). Floating unsaved-changes save bar + toast notification. Dark theme preserved in CSS
+    vars but not exposed in UI (no Tweaks panel — that was design-tool-only). V2 table components
+    (AccountMetrics, PositionsTable, PendingOrdersTable, StatsCards, TradesTable) deleted.
+
+---
+
+### V4 Integration & Bug Fix Plan (NOT YET IMPLEMENTED)
+```
+NEXT_STEPS.md — 19 steps, 5 phases. Addresses frontend integration bugs and missing features.
+```
+
+**Bugs discovered during V3 verification:**
+
+48. **MARK_CLOSED timestamp bug** — `MARK_CLOSED` query in `queries.py` never sets `cancelled_at`
+    for closed trades. SQLite uses `cancelled_at` as the close timestamp (no separate closed_at
+    column). Result: `/api/history` returns `closed_at: ""` for all closed trades. This breaks
+    equity curve, daily P&L bars, recent trades, and hold time stats (all filter on `closed_at`
+    being truthy, which it never is). Fix: add `cancelled_at = datetime('now')` to MARK_CLOSED.
+
+49. **SettingsPage TP config invisible** — `SettingsPage.tsx` reads `config.tp_config` as array
+    (`Array.isArray(tp)`) but the backend sends it as an object with named asset class keys.
+    Check always fails, TP section never renders.
+
+50. **SettingsPage symbol mapping invisible** — Code reads `config.symbol_overrides` which doesn't
+    exist in the Settings model. Correct field is `config.symbol_map`. Section never renders.
+
+51. **SettingsPage handleSave incomplete** — Only saves `license_key` and `lot_sizing`. TP config,
+    symbol map, partial close %, and all other settings are silently dropped. Must save full config.
+
+52. **Signal grouping** — Frontend treats individual limits as separate entries. Signals consist of
+    groups of limits sharing a `signal_id`. Owner wants Closest Signals, Recent Trades, and History
+    to group by signal and show aggregate P&L. `signal_id` is available on all data points.
+
+53. **Channel ID for signal types** — Supabase `signals` table has `channel_id` (Discord channel ID).
+    Not currently piped through SQLite/API. Channel IDs map to signal types: scalps→Scalp,
+    swing-trades→Swing, *tolls*→Tolls, others→Standard. V4 adds channel_id to the data pipeline
+    and creates a frontend mapping utility.
+
+54. **Dashboard section order** — Closest Signals appears before Open Positions. Owner wants
+    Open Positions first, then Closest Signals.
+
+55. **P&L period filtering broken** — Day/Week/All toggles change the label but don't filter data.
+    Must filter trades by period before computing curve/bars/win-loss stats.
+
+56. **History missing filters** — Design specifies Instrument dropdown, Sort by dropdown, and
+    expanded Type filter (Tolls/Swings/1-1). Current implementation only has Status and basic Type.
+
+57. **Fixed lot per instrument** — Design shows per-instrument fixed lot table when Fixed lot mode
+    selected. Current implementation shows single input. Requires `LotSizingConfig.fixed_lot` to
+    accept `float | dict[str, float]`.
+
 ---
 
 ## All Owner-Approved Decisions
@@ -441,7 +517,8 @@ These are final. Do not revisit or propose alternatives.
 - No React router — state-based page switching (`useState<Page>`) is sufficient for 3 pages
 - No state management library — useState/useEffect + polling hook for dashboard data
 
-### Frontend Dependencies (V2)
+### Frontend Dependencies (V3)
 - `react` + `react-dom` 18.x
-- `recharts` 2.x — P&L bar chart in history page (~45KB gzipped)
 - `vite` 5.x + TypeScript — build tooling
+- No chart library — custom SVG charts in `frontend/src/charts/` (recharts removed in V3)
+- Google Fonts: Schibsted Grotesk + JetBrains Mono (loaded in index.html, no npm dep)

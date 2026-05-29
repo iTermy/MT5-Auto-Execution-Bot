@@ -1,44 +1,54 @@
 import { useEffect, useRef } from 'react'
+import { Icon } from './Icon'
 import type { LogEntry } from '../types'
 
 interface Props {
+  open: boolean
+  onToggle: () => void
   logs: LogEntry[]
-  onClose: () => void
 }
 
-const LEVEL_COLORS: Record<string, string> = {
-  DEBUG: '#6b7280',
-  INFO: '#9ca3af',
-  WARNING: '#f59e0b',
-  ERROR: '#ef4444',
-  CRITICAL: '#ef4444',
+function levelClass(level: string): string {
+  switch (level) {
+    case 'INFO': return 'INFO'
+    case 'WARNING': return 'WARNING'
+    case 'ERROR':
+    case 'CRITICAL': return 'ERROR'
+    default: return 'INFO'
+  }
 }
 
-export function LogDrawer({ logs, onClose }: Props) {
+function levelLabel(level: string): string {
+  switch (level) {
+    case 'WARNING': return 'WARN'
+    case 'CRITICAL': return 'ERR'
+    default: return level
+  }
+}
+
+export function LogDrawer({ open, onToggle, logs }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
+    if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs, open])
 
   return (
-    <div className="log-drawer">
-      <div className="log-drawer-header">
-        <span className="log-drawer-title">Logs</span>
-        <span className="log-drawer-count">{logs.length}</span>
-        <button className="log-close-btn" onClick={onClose} title="Close logs">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-          </svg>
+    <div className={'logdrawer' + (open ? ' open' : '')}>
+      <div className="logdrawer-head">
+        <span className="lab"><Icon name="logs" size={15} /> Activity log</span>
+        <span className="pill">{logs.length} events</span>
+        <button className="close" onClick={onToggle} aria-label="Close log">
+          <Icon name="x" size={16} />
         </button>
       </div>
-      <div className="log-drawer-body">
-        {logs.length === 0 && <span className="muted">No log output yet.</span>}
-        {logs.map((entry, i) => (
-          <div key={i} className="log-line" style={{ color: LEVEL_COLORS[entry.level] ?? '#9ca3af' }}>
-            <span className="log-ts">{entry.timestamp.slice(11, 19)}</span>
-            <span className="log-level">{entry.level}</span>
-            {entry.message}
+      <div className="logfeed">
+        {logs.length === 0 && <span className="faint">No log output yet.</span>}
+        {logs.map((l, i) => (
+          <div className="logline" key={i}>
+            <span className="ts">{l.timestamp.slice(11, 19)}</span>
+            <span className={`lv ${levelClass(l.level)}`}>{levelLabel(l.level)}</span>
+            <span className="msg">{l.message}</span>
           </div>
         ))}
         <div ref={bottomRef} />

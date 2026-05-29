@@ -1,107 +1,227 @@
-# Post-MVP Fixes, V2 Dashboard Overhaul
+# V4 Frontend Integration & Bug Fix Plan
 
-Original 52 steps (14 phases) are complete. Post-MVP fixes applied (decisions 31-37).
-V2 dashboard overhaul applied (decisions 38-46).
+All previous phases complete. V3 frontend redesign done (decision 47).
+This plan addresses integration bugs and missing features found during verification.
 
 See STATE.md for rationale behind each change.
+See the Claude Design handoff bundle for the original design spec.
+
+**Design handoff URL:** `https://api.anthropic.com/v1/design/h/RPbvg2peILYI047ReM_z0A?open_file=Trading+Dashboard.html`
 
 ---
 
-## [DONE] Phase 1: Fix TP Partial Close (Critical Bug)
+## Phase 1: Critical Backend Fixes (unblocks everything else)
+
+### Step 1: Fix MARK_CLOSED timestamp bug
 ```
-1. bot/tp/default_strategy.py — set is_trailing after successful partial close
-2. bot/core/sync_cycle.py     — mark original closed when remainder found
+bot/db/queries.py — MARK_CLOSED must set cancelled_at = datetime('now')
+```
+**Bug:** `MARK_CLOSED` (line 70-72) sets `status='closed'` and `realized_pnl` but never sets
+`cancelled_at`. The SQLite schema has no `closed_at` column — `cancelled_at` doubles as the
+close timestamp. Since it's never set for closed trades, `/api/history` returns `closed_at: ""`
+for every closed trade.
+
+**Impact:** `computeCumulativePnl()` in `stats.ts:99` filters `t.status === 'closed' && t.closed_at`
+— the falsy `""` eliminates ALL closed trades. Equity curve, daily P&L bars, recent trades,
+and hold time calculations are all empty/broken.
+
+**Fix:** Change `MARK_CLOSED` to:
+```sql
+UPDATE order_mappings SET status = 'closed', cancelled_at = datetime('now'), realized_pnl = ? WHERE mt5_ticket = ?
 ```
 
-## [DONE] Phase 2: Cancel Pending Orders on TP Fire
+### Step 2: Add channel_id to data pipeline
 ```
-3. bot/db/queries.py + bot/db/sqlite.py — GET_PENDING_BY_SIGNAL query + method
-4. bot/tp/engine.py — _cancel_pending_for_signal() after execute()
+bot/db/queries.py              — Add s.channel_id to FETCH_ACTIVE_SIGNALS_WITH_LIMITS SELECT
+                                 Add channel_id column to CREATE_ORDER_MAPPINGS schema
+                                 Add channel_id to INSERT_ORDER and GET_ORDER_HISTORY
+bot/db/sqlite.py               — Column migration for channel_id; update insert_order signature
+bot/trading/order_placer.py    — Pass channel_id through to insert_order
+bot/core/dashboard_cache.py    — Include channel_id in position/pending_order dicts
+bot/api/routes.py              — Include channel_id in history trade objects
+frontend/src/types.ts          — Add channel_id: number to PendingOrderData, PositionData, TradeData
+```
+The Supabase `signals` table has `channel_id` (Discord channel ID). This enables showing
+channel names and deriving signal types (Scalp/Swing/Tolls/Standard) on the frontend.
+
+**Channel ID → Name/Type mapping** (hardcode in frontend `utils/channels.ts`):
+```
+1402971916339380244 → Daily Setup       (Standard)
+1402971964343320636 → Scalps            (Scalp)
+1402972132920787077 → Forex Exotics     (Standard)
+1402972164256432220 → Gold              (Standard)
+1402972289993019463 → Oil               (Standard)
+1402972348193177745 → Indices           (Standard)
+1402972426014429254 → Crypto            (Standard)
+1402972455990984774 → Stocks            (Standard)
+1402972635847200838 → Swings            (Swing)
+1402972674082476102 → OT Calls          (Standard)
+1406127169448575098 → Proper Calls      (Standard)
+1403532013511905434 → Crypto Alts       (Standard)
+1402972075446239303 → Price Action      (Standard)
+1402972221953019986 → Gold PA           (Standard)
+1472685381315989730 → Gold Tolls        (Tolls)
+1477339674166169911 → General Tolls     (Tolls)
+1484316173515489392 → Oil Tolls         (Tolls)
+1500246110491639818 → Legends           (Standard)
 ```
 
-## [DONE] Phase 3: SL Sync for Filled Positions
+### Step 3: Frontend timestamp fallback + utilities
 ```
-5. bot/db/queries.py + bot/db/sqlite.py — UPDATE_DB_STOP_LOSS query + method
-6. bot/core/sync_cycle.py — _sync_filled_sls() method, called from run()
+frontend/src/utils/stats.ts    — Fix timestamp fallbacks in computeCumulativePnl, computeDailyBars,
+                                 computeDetailedStats; add filterTradesByPeriod(), groupBySignalId()
+frontend/src/utils/channels.ts — New file: channel ID mapping, getChannelName(), getSignalType()
 ```
+Existing closed rows in SQLite have NULL `cancelled_at`. Frontend must use
+`t.closed_at || t.filled_at || t.placed_at` as fallback everywhere.
 
-## [DONE] Phase 4: Forced Exit on Signal Cancellation
-```
-7. bot/db/queries.py + bot/db/supabase.py — FETCH_SIGNAL_STATUSES + fetch_signal_statuses()
-8. bot/db/queries.py + bot/db/sqlite.py — GET_FILLED_SIGNAL_IDS + get_filled_signal_ids()
-9. bot/core/sync_cycle.py — _check_forced_exits() method, called from run()
-```
+Add `filterTradesByPeriod(trades, 'daily'|'weekly'|'all')` for P&L period toggles.
+Add `groupBySignalId(items)` — generic grouper reused by dashboard and history.
 
-## [DONE] Phase 5: Orphan Sweep + Pending SL Change Detection
-```
-10. bot/core/reconciler.py — cancel orphan orders instead of just logging
-11. bot/core/sync_cycle.py — detect SL changes on pending orders, cancel for re-placement
-```
+---
 
-## [DONE] Phase 6: Config Snapshot in TP Loop
-```
-12. bot/core/engine.py — snapshot config at cycle start in _tp_loop()
-```
+## Phase 2: Dashboard Page Fixes
 
-## [DONE] Phase 7: Documentation Update
+### Step 4: Reorder sections
 ```
-13. STATE.md — decisions 31-37, supersede decision #16
-14. NEXT_STEPS.md — this file (replaced original 52-step plan)
+frontend/src/pages/DashboardPage.tsx — Swap Positions and Closest Signals JSX blocks
+```
+Current order: Hero → Closest Signals → Positions → Recent+Daily
+New order: Hero → Positions → Closest Signals → Recent+Daily
+
+### Step 5: Fix P&L period filtering
+```
+frontend/src/pages/DashboardPage.tsx — Use filterTradesByPeriod before computing curve/bars/stats
+```
+Currently the Day/Week/All toggle changes the label but doesn't filter data.
+Must filter trades before computing curve, daily bars, and win/loss stats.
+Compute win/loss from filtered trades instead of backend `stats` (no period awareness).
+
+### Step 6: Group Closest Signals by signal_id
+```
+frontend/src/pages/DashboardPage.tsx — Group pendingOrders by signal_id for card display
+```
+Group pending orders by `signal_id`. Each card shows: symbol, direction, limit count,
+closest distance (min of all limits in group), proximity meter, channel name, signal type
+(from `channels.ts`).
+
+### Step 7: Group Recent Trades by signal_id
+```
+frontend/src/pages/DashboardPage.tsx — Group closed trades by signal_id in recent trades table
+```
+Each row: symbol, side, limit count, total P&L (aggregated), close time.
+
+### Step 8: Increase dashboard poll rate
+```
+frontend/src/hooks/useDashboard.ts — Change default interval from 2000 to 1000
 ```
 
 ---
 
-# V2 Dashboard Overhaul (decisions 38-46)
+## Phase 3: History Page Fixes
 
-## [DONE] Phase 8: Log Timing Fix
+### Step 9: Add missing filter controls
 ```
-15. bot/api/sse.py        — 200-message replay buffer in SSEBroadcaster
-16. bot/core/engine.py    — API-first startup (api_ready event, await before init)
-17. bot/api/app.py        — set engine.api_ready in FastAPI lifespan
+frontend/src/pages/HistoryPage.tsx — Add Instrument dropdown, expanded Type Seg, Sort by dropdown
 ```
+- **Instrument dropdown**: `<select>` with "All" + unique symbols from trades
+- **Type filter**: Expand Seg to All/Standard/Scalp/Tolls/Swings/1-1. Derive type from
+  `channel_id` via `getSignalType()`.
+- **Sort by**: Dropdown with Newest, Oldest, P&L High→Low, P&L Low→High, Symbol A→Z
 
-## [DONE] Phase 9: Symbol Handling
+### Step 10: Group trades by signal_id
 ```
-18. bot/config/settings.py      — excluded_symbols + stock_no_suffix fields
-19. config.json                 — excluded_symbols: ["USOILSPOT"], stock_no_suffix: []
-20. bot/core/sync_cycle.py      — filter excluded symbols early, stock suffix fallback + persist
-21. bot/trading/symbol_mapper.py — map_symbol checks stock_no_suffix before appending suffix
+frontend/src/pages/HistoryPage.tsx — Group filtered trades by signal_id, aggregate P&L/lots
 ```
+Define `SignalGroup`: `{signalId, symbol, direction, totalLots, totalPnl, tradeCount, closedAt,
+status, isScalp, channelId}`. Table columns: Closed, Symbol, Side, Limits, Total Lots, Type,
+Status, Total P&L.
 
-## [DONE] Phase 10: Shutdown Button
-```
-22. bot/core/engine.py   — _shutdown_callback + set_shutdown_callback(), invoked in shutdown()
-23. main.py              — tray icon created before engine thread, callback wired
-24. bot/api/routes.py    — POST /api/engine/shutdown endpoint
-```
+Performance stats grid (`computeDetailedStats`) stays trade-level — win rate, streaks, and
+expectancy are per-trade metrics.
 
-## [DONE] Phase 11: Dashboard Backend
-```
-25. bot/core/dashboard_cache.py — DashboardCache + DashboardData (new file)
-26. bot/core/engine.py          — dashboard_cache update at end of sync loop
-27. bot/db/queries.py           — realized_pnl + symbol in schema, GET_ORDER_HISTORY
-28. bot/db/sqlite.py            — migrations, mark_closed(+pnl), insert_order(+symbol), get_order_history()
-29. bot/api/routes.py           — GET /api/dashboard, GET /api/history
-30. bot/trading/order_placer.py — passes mt5_symbol to insert_order
-31. bot/tp/default_strategy.py  — passes pos.profit to mark_closed
-32. bot/core/sync_cycle.py      — passes pos.profit (forced exit), symbol (partial close) to SQLite
-```
+---
 
-## [DONE] Phase 12: Frontend Redesign
-```
-33. frontend/src/types.ts              — Dashboard, History, Position, Account interfaces
-34. frontend/src/api.ts                — fetchDashboard, fetchHistory, shutdownEngine
-35. frontend/src/hooks/useDashboard.ts — polling hook (2s)
-36. frontend/src/App.tsx               — page navigation, log drawer toggle
-37. frontend/src/pages/*               — DashboardPage, HistoryPage, SettingsPage
-38. frontend/src/components/*          — NavSidebar, TopBar, LogDrawer, tables, metrics, stats
-39. frontend/src/index.css             — professional dark theme overhaul
-40. Deleted: StatusBar, ControlPanel, LicensePanel, LogPanel
-```
+## Phase 4: Settings Page Fixes
 
-## [DONE] Phase 13: Documentation Update
+### Step 11: Update Config type
 ```
-41. CLAUDE.md      — updated status, concurrency, decisions, file layout
-42. STATE.md       — decisions 38-46, updated module listings
-43. NEXT_STEPS.md  — this section
+frontend/src/types.ts — Replace loose Config interface with full typed shape matching Settings model
 ```
+Add interfaces: `AssetTPConfig`, `ScalpOverrideConfig`, `TPConfig`, `PollingConfig`,
+`SpreadHourConfig`. Add all fields: `symbol_map`, `stock_suffix`, `tp_config`, etc.
+
+### Step 12: Fix TP Config rendering
+```
+frontend/src/pages/SettingsPage.tsx — Parse tp_config as object (not array), remove visibility guard
+```
+**Bug:** Code reads `config.tp_config` as array (`Array.isArray(tp)`) — it's an object with named
+asset class keys (forex, metals, etc.). Parse by iterating asset class keys. Exclude `oil` per
+design. Read `partial_close_percent` from `tp_config.partial_close_percent`, not `config.partial_close_pct`.
+
+### Step 13: Make TP Config editable and saveable
+```
+frontend/src/pages/SettingsPage.tsx — Replace defaultValue with controlled inputs, reconstruct
+                                      tp_config object on save
+```
+Replace all `defaultValue` with `value` + `onChange` handlers that update `tpRows` state.
+In `handleSave`, rebuild the `tp_config` object in Pydantic-compatible shape.
+Preserve `oil` from original config (hidden from UI but not deleted).
+
+### Step 14: Fix Symbol Mapping
+```
+frontend/src/pages/SettingsPage.tsx — Read from config.symbol_map (not symbol_overrides),
+                                      detect feed from offset_instruments, remove visibility guard
+```
+**Bug:** Code reads `config.symbol_overrides` — field doesn't exist. Correct field is `config.symbol_map`.
+
+### Step 15: Make Symbol Mapping editable
+```
+frontend/src/pages/SettingsPage.tsx — Controlled inputs, add/remove mapping rows, stock suffix input
+```
+Add mapping button (appends empty row), delete button per row, stock suffix field.
+Reconstruct `symbol_map` dict and `stock_suffix` in `handleSave`.
+
+### Step 16: Fixed Lot per instrument table
+```
+frontend/src/pages/SettingsPage.tsx — Show per-instrument fixed lot table when mode=fixed
+bot/config/settings.py              — Update LotSizingConfig.fixed_lot to accept float | dict
+```
+When "Fixed lot" mode selected, show table: Default row (always present) + per-instrument rows
+with add/remove. Backend `LotSizingConfig.fixed_lot` must become `float | dict[str, float]`.
+Implement UI to handle both formats (float from legacy config, dict from new).
+
+### Step 17: Wire Validate button
+```
+frontend/src/pages/SettingsPage.tsx — onClick: save license_key via PUT /api/config
+```
+Engine's heartbeat will re-validate. Status SSE updates `license_valid` indicator.
+
+### Step 18: Expand handleSave to save ALL settings
+```
+frontend/src/pages/SettingsPage.tsx — Include tp_config, symbol_map, stock_suffix in save payload
+```
+Current `handleSave` only saves `license_key` and `lot_sizing`. Must include all changed fields.
+Spread original config to preserve fields not shown in UI (polling, spread_hour, etc.).
+
+---
+
+## Phase 5: CSS Polish
+
+### Step 19: Select element styling + audit
+```
+frontend/src/index.css — Style <select> elements consistent with .inp class
+```
+Verify all new JSX references existing CSS classes. Add dropdown arrow styling for native selects.
+
+---
+
+## Implementation Order
+
+Phases should be executed in order (1→2→3→4→5). Within each phase, steps can be done
+sequentially. Phase 1 is critical — it unblocks the broken charts and enables signal grouping
+with channel/type data.
+
+**Backend changes (Phase 1) must be done before frontend phases can be fully verified.**
+
+Steps 4, 8, 11, and 19 are small/independent and can be done at any time.

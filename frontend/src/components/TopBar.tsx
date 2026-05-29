@@ -1,54 +1,59 @@
+import { Icon } from './Icon'
+import { fmtBalance, money } from '../utils/money'
 import type { DashboardData, StatusData } from '../types'
 
 interface Props {
   dashboard: DashboardData | null
   status: StatusData | null
   connected: boolean
+  engineRunning: boolean
+  onEngineToggle: () => void
 }
 
-export function TopBar({ dashboard, status, connected }: Props) {
+export function TopBar({ dashboard, status, connected, engineRunning, onEngineToggle }: Props) {
   const acct = dashboard?.account
-  const summary = dashboard?.summary
+  const totalProfit = dashboard?.summary?.total_profit ?? 0
   const mt5Ok = status?.mt5_connected ?? false
   const supaOk = status?.supabase_connected ?? false
-  const profit = summary?.total_profit ?? 0
+  const licenseOk = status?.license_valid ?? false
 
   return (
-    <div className="top-bar">
-      <div className="top-bar-metrics">
-        <Metric label="Balance" value={acct?.balance} currency={acct?.currency} />
-        <Metric label="Equity" value={acct?.equity} currency={acct?.currency} />
-        <Metric label="Unrealized P&L" value={profit} currency={acct?.currency} colored />
-        <Metric label="Free Margin" value={acct?.margin_free} currency={acct?.currency} />
+    <header className="topbar">
+      <div className="tb-title">
+        <span className="t">Auto-Execution Bot</span>
+        <span className="s">ICMarkets{acct ? ` · #${acct.login}` : ''}</span>
       </div>
-      <div className="top-bar-status">
-        <span className={`dot-sm ${mt5Ok ? 'green' : 'red'}`} />
-        <span className="status-label">MT5</span>
-        <span className={`dot-sm ${supaOk ? 'green' : 'red'}`} />
-        <span className="status-label">DB</span>
-        <span className={`dot-sm ${connected ? 'green' : 'red'}`} />
-        <span className="status-label">UI</span>
+      <div className="divider-v" />
+      <div className="tb-figs">
+        <div className="tb-fig">
+          <span className="l">Balance</span>
+          <span className="v mono">{acct ? fmtBalance(acct.balance) : '—'}</span>
+        </div>
+        <div className="tb-fig">
+          <span className="l">Equity</span>
+          <span className="v mono">{acct ? fmtBalance(acct.equity) : '—'}</span>
+        </div>
+        <div className="tb-fig">
+          <span className="l">Unrealized P&L</span>
+          <span className={`v mono ${totalProfit >= 0 ? 'pos' : 'neg'}`}>
+            {acct ? money(totalProfit) : '—'}
+          </span>
+        </div>
       </div>
-    </div>
-  )
-}
-
-function Metric({ label, value, currency, colored }: {
-  label: string
-  value?: number
-  currency?: string
-  colored?: boolean
-}) {
-  const fmt = value != null ? value.toFixed(2) : '—'
-  const suffix = currency ? ` ${currency}` : ''
-  let cls = 'metric-value'
-  if (colored && value != null) {
-    cls += value > 0 ? ' positive' : value < 0 ? ' negative' : ''
-  }
-  return (
-    <div className="top-metric">
-      <span className="metric-label">{label}</span>
-      <span className={cls}>{fmt}{suffix}</span>
-    </div>
+      <div className="tb-right">
+        <div className="conns">
+          <div className={`conn ${mt5Ok ? 'live' : 'off'}`}><span className="d" /> MT5</div>
+          <div className={`conn ${supaOk ? 'live' : 'off'}`}><span className="d" /> Database</div>
+          <div className={`conn ${licenseOk && connected ? 'live' : 'off'}`}><span className="d" /> License</div>
+        </div>
+        <div className="divider-v" />
+        <div className={'engine' + (engineRunning ? '' : ' stopped')}>
+          <span className="stat"><span className="d" /> {engineRunning ? 'Running' : 'Stopped'}</span>
+          <button className="toggle" onClick={onEngineToggle}>
+            <Icon name="power" size={13} strokeWidth={2.4} /> {engineRunning ? 'Stop' : 'Start'}
+          </button>
+        </div>
+      </div>
+    </header>
   )
 }

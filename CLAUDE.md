@@ -1,9 +1,14 @@
 # CLAUDE.md — Auto-Execution Bot V2
 
 ## Current Implementation Status
-**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46).**
+**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47). V4 integration & bug fix plan in NEXT_STEPS.md (19 steps, 5 phases).**
 Read STATE.md immediately — it lists all implementation decisions made during build that are not
 in the original ARCHITECTURE.md.
+
+## What To Do Now
+**Execute NEXT_STEPS.md** — V4 integration & bug fix plan. 19 steps across 5 phases.
+Phase 1 (backend fixes) must be done first — it unblocks broken charts and enables signal
+grouping with channel/type data. See NEXT_STEPS.md for full details and implementation order.
 
 ## What This Is
 Python Windows desktop app that reads trading signals from Supabase PostgreSQL and places/manages pending orders on MetaTrader 5 (MT5) via ICMarkets. FastAPI backend + React/TypeScript frontend served at `localhost:8501`, system tray icon via pystray.
@@ -13,7 +18,7 @@ All decisions and context live in these repo files. Do not rely on chat history 
 
 - **ARCHITECTURE.md** — system design, schemas, all technical decisions, config.json structure
 - **STATE.md** — what exists, what doesn't, all owner-approved decisions, known risks
-- **NEXT_STEPS.md** — ordered implementation steps (52 steps, 14 phases). Execute in order.
+- **NEXT_STEPS.md** — V4 integration & bug fix plan (19 steps, 5 phases). Execute in order.
 - **CONVENTIONS.md** — code quality rules, naming, async patterns, API-specific conventions
 
 Read STATE.md first. It lists every owner decision and every known risk.
@@ -85,7 +90,17 @@ These are not in ARCHITECTURE.md — they were decided during build:
 - **Stock suffix fallback** — When a `.NAS-24`/`.NYSE-24` symbol fails MT5 lookup, tries without suffix. On success, auto-persists to `stock_no_suffix` in config.json.
 - **Dashboard cache** — `DashboardCache` (new file) holds account, positions, orders, summary; updated each sync cycle. `GET /api/dashboard` reads from cache.
 - **Trade history with P&L** — `realized_pnl` and `symbol` columns added to `order_mappings`. `mark_closed()` accepts P&L. `GET /api/history` returns trades + win/loss stats.
-- **Frontend redesign** — Professional dark trading dashboard with 3-page navigation (Dashboard, History, Settings), recharts P&L chart, sortable tables, toggleable log drawer. Old 4-component layout replaced.
+
+## V3 Frontend Redesign (decision 47 in STATE.md)
+- **Design source** — Claude Design handoff bundle; Layout A (Command Strip) chosen by owner, iterated to light theme with comfy-black top bar.
+- **Theme** — Warm light paper surfaces (#F7F4EE bg, #FFFFFF panels), comfy-black top bar (#262320), orange accent (#E8824A). Dark theme preserved in CSS vars but light is default (`data-theme="light"` on `<html>`).
+- **Typography** — Schibsted Grotesk (body) + JetBrains Mono (numbers/code), loaded via Google Fonts in index.html.
+- **Layout** — Full-width dark top bar → grid below: 72px icon sidebar rail | main content. Log drawer slides up from bottom of main column.
+- **Custom SVG charts** — EquityCurve (hoverable Catmull-Rom area chart), Donut (animated win/loss), Bars (hoverable daily P&L). No chart library — `recharts` removed.
+- **Dashboard page** — Hero row (cumulative P&L curve + win/loss donut with Day/Week/All toggles), Closest Signals cards with proximity meters, sortable positions table, recent trades + daily P&L bars.
+- **History page** — Date/status/type filters, 12-cell performance stats grid (computed client-side from trade data), sortable trades table.
+- **Settings page** — Engine controls + connection status, license key, lot sizing (Risk%/Fixed toggle), TP config table, symbol mapping table, floating save bar + toast.
+- **Computed stats** — `utils/stats.ts` computes detailed stats (profit factor, expectancy, avg win/loss, streaks, hold time, scalp share) client-side from trade history.
 
 ## Database Access
 - **asyncpg** for Supabase: positional params unpacked (`$1, $2` as separate args, not a list)
@@ -131,10 +146,62 @@ bot/api/routes.py              — REST endpoints (incl /dashboard, /history, /e
 bot/api/sse.py                 — SSE streaming with 200-message replay buffer
 bot/utils/logging.py           — structured logging + SSE broadcast hook
 bot/utils/time_utils.py        — EST conversion, market hours
-frontend/src/App.tsx           — root: page navigation, log drawer toggle
-frontend/src/pages/            — DashboardPage, HistoryPage, SettingsPage
-frontend/src/components/       — NavSidebar, TopBar, LogDrawer, tables, metrics, stats
-frontend/src/hooks/            — useSSE (logs+status), useDashboard (polling)
+frontend/src/index.css         — full theme: CSS vars, light/dark, all component styles
+frontend/src/App.tsx           — root: app shell, top bar, sidebar, page routing, log drawer
+frontend/src/pages/DashboardPage.tsx  — hero P&L chart + donut, closest signals, positions, recent trades, daily bars
+frontend/src/pages/HistoryPage.tsx    — filters, 12-stat performance grid, sortable trades table
+frontend/src/pages/SettingsPage.tsx   — engine controls, license, lot sizing, TP config, symbol mapping, save bar
+frontend/src/components/Icon.tsx      — SVG icon paths (stroke-based, 24x24 viewBox)
+frontend/src/components/NavSidebar.tsx — icon sidebar rail (brand, 3 pages, logs toggle)
+frontend/src/components/TopBar.tsx    — comfy-black bar: account figs, connection dots, engine toggle
+frontend/src/components/LogDrawer.tsx — slide-up log panel with header + close
+frontend/src/components/Seg.tsx       — segmented control (Day/Week/All, filter toggles)
+frontend/src/components/ProxMeter.tsx — proximity bar for closest-signal cards
+frontend/src/charts/EquityCurve.tsx   — hoverable SVG area chart (Catmull-Rom smoothing)
+frontend/src/charts/Donut.tsx         — animated win-rate donut
+frontend/src/charts/Bars.tsx          — hoverable daily P&L bar chart
+frontend/src/charts/smoothPath.ts     — Catmull-Rom → cubic bezier path utility
+frontend/src/hooks/useSSE.ts          — SSE for logs + status
+frontend/src/hooks/useDashboard.ts    — polling hook (2s interval)
+frontend/src/hooks/useSort.tsx        — generic sortable-table hook with sort indicators
+frontend/src/utils/money.ts           — money() and fmtBalance() formatters
+frontend/src/utils/stats.ts           — compute detailed stats, daily bars, cumulative P&L from trades
+frontend/src/utils/channels.ts — channel ID → name/type mapping (TO BE CREATED in V4)
 supabase/functions/            — Edge Function for license validation
 tests/                         — pytest suite
 ```
+
+## V4 Known Bugs (to be fixed by NEXT_STEPS.md)
+
+### Critical: MARK_CLOSED timestamp bug
+`MARK_CLOSED` in `queries.py` never sets `cancelled_at` for closed trades. The SQLite schema
+uses `cancelled_at` as the close timestamp (no separate `closed_at` column). Result: `/api/history`
+returns `closed_at: ""` for every closed trade. This breaks:
+- `computeCumulativePnl()` — filters out ALL closed trades (empty string is falsy)
+- `computeDailyBars()` — same issue, daily P&L bars are empty
+- Recent trades on dashboard — no time displayed
+- Hold time calculation in stats — always 0
+
+### Settings: TP Config invisible
+`SettingsPage.tsx` reads `config.tp_config` as an array (`Array.isArray(tp)`) — it's actually an
+object with named asset keys (forex, metals, etc.). Check always fails, section never renders.
+
+### Settings: Symbol Mapping invisible
+Code reads `config.symbol_overrides` — field doesn't exist. Correct field is `config.symbol_map`.
+
+### Settings: handleSave incomplete
+`handleSave` only saves `license_key` and `lot_sizing`. TP config, symbol map, and all other
+settings are silently dropped on save.
+
+### Dashboard: signals not grouped
+Individual limits are shown separately. Signals consist of groups of limits (sharing `signal_id`)
+and should be displayed as signal groups in Closest Signals and Recent Trades.
+
+### History: missing filters
+Design specifies Instrument dropdown, Sort by dropdown, and Type filters (Tolls/Swings/1-1).
+Current implementation only has Status and Type (All/Standard/Scalp).
+
+### Channel ID availability
+Supabase `signals` table has `channel_id` (Discord channel ID number). Not currently piped
+through to SQLite/API/frontend. V4 Step 2 adds this. Channel IDs map to signal types:
+scalps channel → Scalp, swing-trades → Swing, *tolls* channels → Tolls, others → Standard.

@@ -79,6 +79,23 @@ def main() -> None:
     )
     engine.app = create_app(engine)
 
+    def on_open(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        webbrowser.open(_API_URL)
+
+    def on_exit(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        engine.shutdown()
+
+    tray = pystray.Icon(
+        name="mt5_bot",
+        icon=_make_tray_icon(),
+        title="MT5 Auto Execution Bot",
+        menu=pystray.Menu(
+            pystray.MenuItem("Open UI", on_open),
+            pystray.MenuItem("Exit", on_exit),
+        ),
+    )
+    engine.set_shutdown_callback(tray.stop)
+
     engine_thread = threading.Thread(
         target=_run_engine,
         args=(conn, engine),
@@ -92,22 +109,6 @@ def main() -> None:
     else:
         logger.warning("FastAPI did not become ready within 30s — open %s manually", _API_URL)
 
-    def on_open(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
-        webbrowser.open(_API_URL)
-
-    def on_exit(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
-        engine.shutdown()
-        _icon.stop()
-
-    tray = pystray.Icon(
-        name="mt5_bot",
-        icon=_make_tray_icon(),
-        title="MT5 Auto Execution Bot",
-        menu=pystray.Menu(
-            pystray.MenuItem("Open UI", on_open),
-            pystray.MenuItem("Exit", on_exit),
-        ),
-    )
     tray.run()
 
     # Reached after on_exit calls icon.stop()

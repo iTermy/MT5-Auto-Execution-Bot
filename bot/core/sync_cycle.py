@@ -1,8 +1,10 @@
+import json
 import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 import MetaTrader5 as mt5
 
@@ -82,6 +84,21 @@ class SyncResult:
 _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
 
 
+def _persist_stock_no_suffix(db_symbol: str, config: Settings) -> None:
+    try:
+        config_path = Path("config.json")
+        data = json.loads(config_path.read_text())
+        no_suffix = data.get("stock_no_suffix", [])
+        if db_symbol not in no_suffix:
+            no_suffix.append(db_symbol)
+            data["stock_no_suffix"] = no_suffix
+            config_path.write_text(json.dumps(data, indent=2))
+            config.stock_no_suffix = no_suffix
+            logger.info("Persisted %s to stock_no_suffix in config.json", db_symbol)
+    except Exception:
+        logger.error("Failed to persist stock_no_suffix", exc_info=True)
+
+
 class SyncCycle:
     def __init__(self) -> None:
         self._placer = OrderPlacer()
@@ -105,6 +122,11 @@ class SyncCycle:
         result = SyncResult()
 
         supabase_rows = await supabase.fetch_active_signals()
+
+        if config.excluded_symbols:
+            excluded = {s.upper() for s in config.excluded_symbols}
+            supabase_rows = [r for r in supabase_rows if r["instrument"].upper() not in excluded]
+
         sqlite_active = await sqlite.get_all_active()
         sqlite_pending = [r for r in sqlite_active if r["status"] == "pending"]
 
@@ -196,13 +218,30 @@ class SyncCycle:
                 sym_infos: dict = {}
                 newly_unavailable: set[str] = set()
                 now_mono = time.monotonic()
-                for mt5_sym in unique_syms:
+                for mt5_sym in list(unique_syms):
                     if now_mono < self._unavailable_until.get(mt5_sym, 0.0):
-                        # Known unavailable and cooldown not expired — skip silently
                         sym_ticks[mt5_sym] = None
                         sym_infos[mt5_sym] = None
                         continue
                     tick = mt5_client.symbol_info_tick(mt5_sym)
+
+                    # Stock suffix fallback: try without suffix
+                    if tick is None and config.stock_suffix and mt5_sym.endswith(config.stock_suffix):
+                        base_sym = mt5_sym[: -len(config.stock_suffix)]
+                        fallback_tick = mt5_client.symbol_info_tick(base_sym)
+                        if fallback_tick is not None:
+                            db_sym = unique_syms[mt5_sym]
+                            logger.info(
+                                "Stock suffix fallback: %s unavailable, using %s",
+                                mt5_sym, base_sym,
+                            )
+                            _persist_stock_no_suffix(db_sym, config)
+                            # Remap: remove old key, add base as the symbol for this cycle
+                            unique_syms[base_sym] = db_sym
+                            del unique_syms[mt5_sym]
+                            tick = fallback_tick
+                            mt5_sym = base_sym
+
                     sym_ticks[mt5_sym] = tick
                     sym_infos[mt5_sym] = mt5_client.symbol_info(mt5_sym) if tick is not None else None
                     if tick is None:
@@ -379,9 +418,11 @@ class SyncCycle:
             logger.info("Fill: order=%d pos=%d", fill.mt5_ticket, fill.position_ticket)
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
         new_tickets = await self._fill_detector.detect_partial_close_tickets(mt5_client, sqlite)
         for evt in new_tickets:
             await sqlite.mark_closed(evt.original_ticket)
+            remainder_pos = pos_by_ticket.get(evt.new_ticket)
             await sqlite.insert_order(
                 limit_id=-evt.new_ticket,
                 signal_id=evt.signal_id,
@@ -391,6 +432,7 @@ class SyncCycle:
                 placed_at=now_iso,
                 db_stop_loss=0.0,
                 is_scalp=evt.is_scalp,
+                symbol=remainder_pos.symbol if remainder_pos else None,
             )
             await sqlite.mark_filled(evt.new_ticket, now_iso)
             await sqlite.set_trailing(evt.new_ticket)
@@ -539,7 +581,7 @@ class SyncCycle:
                     comment=f"force_{current}",
                 )
                 if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                    await sqlite.mark_closed(ticket)
+                    await sqlite.mark_closed(ticket, pos.profit)
                     logger.info("Forced exit closed ticket=%d signal=%d", ticket, signal_id)
                 else:
                     retcode = res.retcode if res else "None"

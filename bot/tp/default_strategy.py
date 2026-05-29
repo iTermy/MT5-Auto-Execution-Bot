@@ -81,7 +81,7 @@ class DefaultTPStrategy:
                 comment=f"s{signal_id}",
             )
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                await sqlite.mark_closed(pos.ticket)
+                await sqlite.mark_closed(pos.ticket, pos.profit)
                 result.closed_tickets.append(pos.ticket)
                 logger.info("TP closed ticket=%d signal=%d", pos.ticket, signal_id)
             else:
@@ -105,7 +105,7 @@ class DefaultTPStrategy:
                 comment=f"s{signal_id}",
             )
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                await sqlite.mark_closed(newest.ticket)
+                await sqlite.mark_closed(newest.ticket, newest.profit)
                 result.closed_tickets.append(newest.ticket)
                 logger.info("TP fully closed ticket=%d signal=%d", newest.ticket, signal_id)
             else:

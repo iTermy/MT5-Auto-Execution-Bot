@@ -1,12 +1,14 @@
 import asyncio
 import json
+from collections import deque
 
 
 class SSEBroadcaster:
     """Fans out messages from a single source queue to all connected SSE clients."""
 
-    def __init__(self) -> None:
+    def __init__(self, buffer_size: int = 200) -> None:
         self._clients: set[asyncio.Queue] = set()
+        self._buffer: deque[dict] = deque(maxlen=buffer_size)
         self.last_msg: dict | None = None
 
     def add_client(self) -> asyncio.Queue:
@@ -19,6 +21,7 @@ class SSEBroadcaster:
 
     async def broadcast(self, data: dict) -> None:
         self.last_msg = data
+        self._buffer.append(data)
         for q in list(self._clients):
             try:
                 q.put_nowait(data)
@@ -32,11 +35,16 @@ class SSEBroadcaster:
             await self.broadcast(msg)
 
     def make_generator(self, event_type: str):
-        """Return an async generator for use with EventSourceResponse."""
+        """Return an async generator for use with EventSourceResponse.
+
+        Replays buffered messages first so late-connecting clients see init logs.
+        """
         client_q = self.add_client()
 
         async def _gen():
             try:
+                for msg in list(self._buffer):
+                    yield {"event": event_type, "data": json.dumps(msg)}
                 while True:
                     try:
                         msg = await asyncio.wait_for(client_q.get(), timeout=15)

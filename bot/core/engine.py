@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from bot.config.settings import Settings, load_config
+from bot.core.dashboard_cache import DashboardCache
 from bot.core.reconciler import Reconciler
 from bot.core.sync_cycle import SyncCycle
 from bot.db.sqlite import SQLiteDB
@@ -35,10 +36,13 @@ class Engine:
         self._reconciler = Reconciler()
         self._trading_active = True
         self._running = False
+        self._shutdown_callback: Any | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: list[asyncio.Task] = []
         # FastAPI app; set externally via create_app(engine) in main.py
         self.app: Any | None = None
+        self.api_ready = asyncio.Event()
+        self.dashboard_cache = DashboardCache()
         # SSE consumers read from this queue
         self.status_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
@@ -50,11 +54,16 @@ class Engine:
         self._trading_active = False
         logger.info("Trading paused (position management continues)")
 
+    def set_shutdown_callback(self, callback) -> None:
+        self._shutdown_callback = callback
+
     def shutdown(self) -> None:
         """Signal the engine to stop all tasks and exit. Safe to call from any thread."""
         self._trading_active = False
         if self._loop is not None and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._cancel_tasks)
+        if self._shutdown_callback is not None:
+            self._shutdown_callback()
 
     def _cancel_tasks(self) -> None:
         for task in self._tasks:
@@ -72,6 +81,12 @@ class Engine:
         self._loop = asyncio.get_running_loop()
         self._running = True
         try:
+            # Start API server first so the frontend can connect before init logs
+            api_task = None
+            if self.app is not None:
+                api_task = asyncio.create_task(self._serve_api(), name="api_server")
+                await self.api_ready.wait()
+
             await self._sqlite.init_schema()
             await self._supabase.create_pool()
             await self._reconciler.reconcile(self._mt5, self._sqlite)
@@ -92,10 +107,8 @@ class Engine:
                     ),
                     name="license_heartbeat",
                 ))
-            if self.app is not None:
-                tasks.append(asyncio.create_task(
-                    self._serve_api(), name="api_server"
-                ))
+            if api_task is not None:
+                tasks.append(api_task)
             self._tasks = tasks
 
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -132,6 +145,7 @@ class Engine:
                         result.new_trailing, result.errors, result.skipped,
                     )
                 await self._broadcast_status()
+                await self._update_dashboard()
             except Exception:
                 logger.error("sync_loop error", exc_info=True)
 
@@ -158,6 +172,16 @@ class Engine:
         )
         server = uvicorn.Server(cfg)
         await server.serve()
+
+    async def _update_dashboard(self) -> None:
+        try:
+            acct = self._mt5.account_info()
+            positions = self._mt5.positions_get()
+            orders = self._mt5.orders_get()
+            active = await self._sqlite.get_all_active()
+            self.dashboard_cache.update(acct, positions, orders, active, self._mt5)
+        except Exception:
+            logger.error("Dashboard cache update failed", exc_info=True)
 
     async def _active_interval(self) -> float:
         active = await self._sqlite.get_all_active()

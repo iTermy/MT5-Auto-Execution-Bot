@@ -90,6 +90,7 @@ class OrderPlacer:
             feed_price=db_price,
             mt5_price=adj_price,
             offset=offset,
+            symbol=mt5_symbol,
         )
         logger.info(
             "Placed %s ticket=%d signal=%d limit=%d price=%.5f lot=%.2f",

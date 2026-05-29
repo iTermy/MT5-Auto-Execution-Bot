@@ -1,8 +1,8 @@
 # Project State — 2026-05-28
 
-## Current Status: Post-MVP Bug Fixes & Robustness Pass
+## Current Status: V2 Dashboard Overhaul Complete
 
-**Original 52 steps complete. Post-MVP fixes applied (decisions 31-37).**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46).**
 
 ---
 
@@ -41,6 +41,7 @@ supabase/functions/validate-license/      — directory only, no files yet
 ```
 bot/config/constants.py   — MAGIC_NUMBER, AssetClass enum, OrderStatus enum, DEFAULT_TP_CONFIG
 bot/config/settings.py    — Pydantic Settings model, load_config(), load_dsn(), load_license_url()
+                            Fields: excluded_symbols, stock_no_suffix (added V2)
 ```
 
 ### MT5 Client (Phase 3)
@@ -56,10 +57,12 @@ bot/mt5/client.py       — MT5Client: order_send(), orders_get(), positions_get
 ### Database Modules (Phase 4)
 ```
 bot/db/queries.py    — all SQL constants (Supabase + SQLite), clearly separated
+                       V2: GET_ORDER_HISTORY, symbol+realized_pnl in INSERT_ORDER/MARK_CLOSED
 bot/db/supabase.py   — SupabaseDB: create_pool(), close(), fetch_active_signals(), fetch_live_prices()
-bot/db/sqlite.py     — SQLiteDB: init_schema(), insert_order(), mark_filled(), mark_cancelled(),
-                       mark_closed(), set_trailing(), get_pending_orders(), get_filled_positions(),
-                       get_trailing_positions(), get_all_active()
+bot/db/sqlite.py     — SQLiteDB: init_schema() (with column migrations), insert_order(+symbol),
+                       mark_filled(), mark_cancelled(), mark_closed(+realized_pnl), set_trailing(),
+                       get_pending_orders(), get_filled_positions(), get_trailing_positions(),
+                       get_all_active(), get_order_history()
 ```
 
 ### Utilities (Phase 5)
@@ -71,10 +74,10 @@ bot/utils/time_utils.py — to_est(), MarketScheduler (is_spread_hour, should_ca
 
 ### Trading Modules (Phase 6)
 ```
-bot/trading/symbol_mapper.py     — detect_asset_class(), map_symbol(), needs_offset()
+bot/trading/symbol_mapper.py     — detect_asset_class(), map_symbol(+stock_no_suffix), needs_offset()
 bot/trading/lot_calculator.py    — LotCalculator.calculate(stop_loss, limit_prices, mt5_symbol)
 bot/trading/offset_calculator.py — OffsetCalculator: get_offset(), apply_offset(), check_drift()
-bot/trading/order_placer.py      — OrderPlacer.place_order() [async]
+bot/trading/order_placer.py      — OrderPlacer.place_order() [async, passes symbol to SQLite]
 bot/trading/order_canceller.py   — OrderCanceller.cancel_order() [async]
 bot/trading/fill_detector.py     — FillDetector: detect_fills(), detect_partial_close_tickets()
                                    FillEvent, NewTicketEvent dataclasses
@@ -93,9 +96,10 @@ bot/tp/engine.py         — TPEngine.run_cycle(): groups by signal_id, delegate
 
 ### FastAPI Backend (Phase 10)
 ```
-bot/api/sse.py    — SSEBroadcaster: fan-out from source queue to per-client queues; make_generator()
-bot/api/routes.py — 7 endpoints; GET/PUT /api/config, /api/status, engine start/stop, 2 SSE streams
-bot/api/app.py    — create_app(engine): lifespan starts broadcaster tasks, CORS, StaticFiles mount
+bot/api/sse.py    — SSEBroadcaster: fan-out + 200-msg replay buffer; make_generator() replays on connect
+bot/api/routes.py — 11 endpoints: /status, /config (GET/PUT), engine start/stop/shutdown,
+                    /dashboard, /history, 2 SSE streams (/logs, /status/stream)
+bot/api/app.py    — create_app(engine): lifespan starts broadcasters + sets api_ready, CORS, StaticFiles
 ```
 
 ---
@@ -110,10 +114,12 @@ bot/license/validator.py — LicenseValidator: validate(), heartbeat_loop(); dev
 
 ### Core Orchestration (Phase 8)
 ```
-bot/core/scheduler.py    — re-exports MarketScheduler from bot.utils.time_utils
-bot/core/sync_cycle.py   — SyncCycle.run(): Supabase diff, placement, fill detection, drift cancel
-bot/core/reconciler.py   — Reconciler.reconcile(): 5 startup reconciliation cases
-bot/core/engine.py       — Engine: run_forever(), adaptive sync/TP loops, hot-reload config
+bot/core/scheduler.py       — re-exports MarketScheduler from bot.utils.time_utils
+bot/core/sync_cycle.py      — SyncCycle.run(): excluded symbols filter, stock suffix fallback,
+                               Supabase diff, placement, fill detection, drift cancel
+bot/core/reconciler.py      — Reconciler.reconcile(): 5 startup reconciliation cases
+bot/core/engine.py          — Engine: API-first startup, dashboard cache update, shutdown callback
+bot/core/dashboard_cache.py — DashboardCache: caches account/positions/orders (V2)
 ```
 
 Additions to existing modules during Phase 8:
@@ -164,13 +170,38 @@ bot.spec          — PyInstaller onefile/windowed; bundles frontend/dist; hidde
 
 ### Core Python (main.py) — Phase 12
 ```
-main.py   — entry point: setup_logging, create all deps, engine.app = create_app(engine),
-             start engine thread, poll :8501, open browser, pystray tray icon
+main.py   — entry point: setup_logging, create all deps, create tray icon, wire shutdown callback,
+             engine.app = create_app(engine), start engine thread, poll :8501, open browser, tray.run()
 ```
 
 Additions to existing modules during Phase 12:
 - `bot/core/engine.py`: `self._loop`, `self._tasks`, `shutdown()`, `_cancel_tasks()`
   Engine now stores its event loop and task list for clean cross-thread cancellation.
+
+---
+
+### V2 Dashboard Overhaul (decisions 38-46)
+```
+bot/core/dashboard_cache.py       — DashboardCache + DashboardData dataclass
+bot/api/sse.py                    — 200-message replay buffer (deque)
+bot/api/routes.py                 — /api/dashboard, /api/history, /api/engine/shutdown
+frontend/src/App.tsx              — page-based navigation, log drawer toggle
+frontend/src/pages/DashboardPage.tsx   — account metrics, positions/orders tables
+frontend/src/pages/HistoryPage.tsx     — date picker, stats, recharts P&L chart, trades table
+frontend/src/pages/SettingsPage.tsx    — connection status, license, lot sizing, engine + shutdown
+frontend/src/components/NavSidebar.tsx — icon sidebar navigation (Dashboard/History/Settings/Logs)
+frontend/src/components/TopBar.tsx     — balance, equity, P&L, connection dots
+frontend/src/components/LogDrawer.tsx  — toggleable bottom log panel
+frontend/src/components/AccountMetrics.tsx   — 6 metric cards
+frontend/src/components/PositionsTable.tsx   — sortable open positions
+frontend/src/components/PendingOrdersTable.tsx — sortable pending orders with distance
+frontend/src/components/StatsCards.tsx       — win rate, P&L, trade count
+frontend/src/components/TradesTable.tsx      — filterable/sortable trade history
+frontend/src/hooks/useDashboard.ts     — polling hook (2s interval)
+```
+
+Deleted V1 frontend components:
+- StatusBar.tsx, ControlPanel.tsx, LicensePanel.tsx, LogPanel.tsx
 
 ---
 
@@ -322,6 +353,51 @@ These were clarified or resolved during implementation. Future Claude should tre
     the current signal stop_loss by >= 1 pip. The order is re-placed with the new SL on the next cycle.
     Ported from V1.
 
+38. **SSE replay buffer** — SSEBroadcaster keeps a `deque(maxlen=200)` of recent broadcasts. When a
+    new SSE client connects via `make_generator()`, all buffered messages are yielded first (replay),
+    then live messages from the per-client queue. Solves the problem of init logs being lost before
+    the browser connects.
+
+39. **API-first engine startup** — `run_forever()` now starts the API server task FIRST and awaits
+    `self.api_ready` (an `asyncio.Event` set in the FastAPI lifespan). Only then does it proceed with
+    `init_schema()`, `create_pool()`, `reconcile()`, `validate()`. This ensures the frontend can
+    connect and SSE broadcasters are running before init logs start firing.
+
+40. **Shutdown from UI** — New `POST /api/engine/shutdown` endpoint calls `engine.shutdown()`.
+    `shutdown()` now also invokes `_shutdown_callback` (set to `tray.stop()` in main.py). This causes
+    `tray.run()` to return, leading to normal process exit. Main.py reordered: tray icon created before
+    engine thread starts, callback wired before `engine_thread.start()`.
+
+41. **Excluded symbols** — `excluded_symbols: list[str]` added to Settings. Sync cycle filters
+    `supabase_rows` early (before any MT5 calls) by removing rows whose `instrument` is in the list.
+    Currently configured: `["USOILSPOT"]` (oil not supported via live_prices yet).
+
+42. **Stock suffix fallback** — `stock_no_suffix: list[str]` added to Settings. `map_symbol()` checks
+    this list before appending `stock_suffix`. In sync_cycle pre-check phase: when a `.NAS-24`/`.NYSE-24`
+    symbol fails `symbol_info_tick()`, tries the base symbol (without suffix). On success, auto-persists
+    `db_symbol` to `stock_no_suffix` in config.json via `_persist_stock_no_suffix()`. First cycle with
+    a new stock fails (one-time); next cycle uses the cached no-suffix mapping.
+
+43. **DashboardCache** — New file `bot/core/dashboard_cache.py`. `DashboardCache` class holds
+    `DashboardData` (account, positions, pending_orders, summary). Engine calls
+    `dashboard_cache.update()` at end of each sync cycle with MT5 + SQLite data. `GET /api/dashboard`
+    reads from cache — no MT5 calls in the handler.
+
+44. **realized_pnl column** — Added `realized_pnl REAL` column to `order_mappings`. `mark_closed()`
+    now accepts `realized_pnl: float | None = None`. Callers updated: TP close passes `pos.profit`,
+    forced exit passes `pos.profit`, reconciler/partial-close pass `None`. Migration in `init_schema()`.
+
+45. **symbol column** — Added `symbol TEXT` column to `order_mappings`. `insert_order()` now accepts
+    `symbol: str | None = None`. `order_placer.py` passes `mt5_symbol`. Partial close remainder passes
+    symbol from the MT5 position. Migration in `init_schema()`. History endpoint uses this for display.
+
+46. **Frontend V2 redesign** — Professional dark trading dashboard replacing the minimal 4-component
+    layout. Three-page navigation (Dashboard, History, Settings) via state-based routing. Dashboard
+    shows account metrics, sortable positions/orders tables. History shows date-filtered trades with
+    stats cards and recharts P&L bar chart. Settings consolidates connection status, license, lot sizing,
+    engine controls + shutdown button with confirmation. Toggleable log drawer at bottom. recharts added
+    as dependency. Old components (StatusBar, ControlPanel, LicensePanel, LogPanel) deleted.
+
 ---
 
 ## All Owner-Approved Decisions
@@ -360,6 +436,12 @@ These are final. Do not revisit or propose alternatives.
 - No ORM — raw SQL for both asyncpg and aiosqlite
 - No dependency injection framework — manual constructor injection
 - No message queue — asyncio.Queue for internal log/status broadcasting
-- No SQLite migrations — CREATE TABLE IF NOT EXISTS is sufficient for a single-table schema
+- No migration framework — inline ALTER TABLE ADD COLUMN in init_schema() with try/except
 - No WebSocket — SSE is simpler and sufficient for one-way server-to-client streaming
-- No state management library in React — useState/useEffect is enough for this UI size
+- No React router — state-based page switching (`useState<Page>`) is sufficient for 3 pages
+- No state management library — useState/useEffect + polling hook for dashboard data
+
+### Frontend Dependencies (V2)
+- `react` + `react-dom` 18.x
+- `recharts` 2.x — P&L bar chart in history page (~45KB gzipped)
+- `vite` 5.x + TypeScript — build tooling

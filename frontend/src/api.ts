@@ -1,4 +1,4 @@
-import type { Config, StatusData } from './types'
+import type { Config, DashboardData, HistoryData, StatusData } from './types'
 
 export async function fetchStatus(): Promise<StatusData> {
   const r = await fetch('/api/status')
@@ -29,4 +29,25 @@ export async function startEngine(): Promise<void> {
 export async function stopEngine(): Promise<void> {
   const r = await fetch('/api/engine/stop', { method: 'POST' })
   if (!r.ok) throw new Error(`POST /api/engine/stop ${r.status}`)
+}
+
+export async function shutdownEngine(): Promise<void> {
+  const r = await fetch('/api/engine/shutdown', { method: 'POST' })
+  if (!r.ok) throw new Error(`POST /api/engine/shutdown ${r.status}`)
+}
+
+export async function fetchDashboard(): Promise<DashboardData> {
+  const r = await fetch('/api/dashboard')
+  if (!r.ok) throw new Error(`GET /api/dashboard ${r.status}`)
+  return r.json()
+}
+
+export async function fetchHistory(fromDate?: string, toDate?: string): Promise<HistoryData> {
+  const params = new URLSearchParams()
+  if (fromDate) params.set('from_date', fromDate)
+  if (toDate) params.set('to_date', toDate)
+  const q = params.toString()
+  const r = await fetch(`/api/history${q ? '?' + q : ''}`)
+  if (!r.ok) throw new Error(`GET /api/history ${r.status}`)
+  return r.json()
 }

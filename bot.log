@@ -2811,3 +2811,76 @@
 2026-05-28 13:08:49 WARNING  bot.core.sync_cycle: Symbol not in terminal: USOILSPOT — skipping 11 limit(s) (retrying in 300s)
 2026-05-28 13:08:49 WARNING  bot.core.sync_cycle: Symbol not in terminal: GGLS.NAS-24 — skipping 4 limit(s) (retrying in 300s)
 2026-05-28 13:08:49 WARNING  bot.core.sync_cycle: Symbol not in terminal: COST.NAS-24 — skipping 5 limit(s) (retrying in 300s)
+2026-05-28 13:08:50 INFO     bot.trading.order_placer: Placed sell_limit ticket=1673667145 signal=1944 limit=8706 price=4520.44000 lot=0.04
+2026-05-28 13:08:50 INFO     bot.trading.order_placer: Placed sell_limit ticket=1673667151 signal=1944 limit=8707 price=4521.74000 lot=0.04
+2026-05-28 13:08:51 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667154 signal=1948 limit=8734 price=0.78305 lot=0.19
+2026-05-28 13:08:51 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667162 signal=1948 limit=8735 price=0.78231 lot=0.19
+2026-05-28 13:08:51 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667170 signal=1948 limit=8736 price=0.78203 lot=0.19
+2026-05-28 13:08:52 INFO     bot.trading.order_placer: Placed sell_limit ticket=1673667177 signal=1906 limit=8518 price=4520.41000 lot=0.02
+2026-05-28 13:08:52 INFO     bot.trading.order_placer: Placed sell_limit ticket=1673667188 signal=1906 limit=8519 price=4520.82000 lot=0.02
+2026-05-28 13:09:03 INFO     bot.trading.order_placer: Placed sell_limit ticket=1673667196 signal=1906 limit=8520 price=4521.73000 lot=0.02
+2026-05-28 13:09:17 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667405 signal=1528 limit=6574 price=83.23000 lot=4.20
+2026-05-28 13:09:17 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667478 signal=1528 limit=6575 price=82.91000 lot=4.20
+2026-05-28 13:09:18 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667508 signal=1528 limit=6576 price=82.30000 lot=4.20
+2026-05-28 13:09:18 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667533 signal=1528 limit=6577 price=80.92000 lot=4.20
+2026-05-28 13:09:25 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667575 signal=1528 limit=6578 price=80.36000 lot=4.20
+2026-05-28 13:09:25 INFO     bot.trading.order_placer: Placed buy_limit ticket=1673667750 signal=1528 limit=6579 price=79.43000 lot=4.20
+2026-05-28 13:09:25 INFO     bot.core.engine: Sync: placed=14 cancelled=0 filled=0 trailing=0 errors=20 skipped=207
+2026-05-28 13:13:50 ERROR    bot.mt5.client: symbol_info_tick(USOILSPOT) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:13:50 ERROR    bot.mt5.client: symbol_info_tick(GGLS.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:13:50 ERROR    bot.mt5.client: symbol_info_tick(COST.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:13:50 WARNING  bot.core.sync_cycle: Symbol not in terminal: USOILSPOT — skipping 11 limit(s) (retrying in 300s)
+2026-05-28 13:13:50 WARNING  bot.core.sync_cycle: Symbol not in terminal: GGLS.NAS-24 — skipping 4 limit(s) (retrying in 300s)
+2026-05-28 13:13:50 WARNING  bot.core.sync_cycle: Symbol not in terminal: COST.NAS-24 — skipping 5 limit(s) (retrying in 300s)
+2026-05-28 13:13:50 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=20 skipped=207
+2026-05-28 13:18:51 ERROR    bot.mt5.client: symbol_info_tick(USOILSPOT) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:18:51 ERROR    bot.mt5.client: symbol_info_tick(GGLS.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:18:51 ERROR    bot.mt5.client: symbol_info_tick(COST.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:18:51 WARNING  bot.core.sync_cycle: Symbol not in terminal: USOILSPOT — skipping 11 limit(s) (retrying in 300s)
+2026-05-28 13:18:51 WARNING  bot.core.sync_cycle: Symbol not in terminal: GGLS.NAS-24 — skipping 4 limit(s) (retrying in 300s)
+2026-05-28 13:18:51 WARNING  bot.core.sync_cycle: Symbol not in terminal: COST.NAS-24 — skipping 5 limit(s) (retrying in 300s)
+2026-05-28 13:18:51 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=20 skipped=207
+2026-05-28 13:23:51 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-28 13:23:51 INFO     bot.license.validator: License: valid — OK
+2026-05-28 13:23:51 ERROR    bot.mt5.client: symbol_info_tick(USOILSPOT) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:23:51 ERROR    bot.mt5.client: symbol_info_tick(GGLS.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:23:51 ERROR    bot.mt5.client: symbol_info_tick(COST.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:23:51 WARNING  bot.core.sync_cycle: Symbol not in terminal: USOILSPOT — skipping 11 limit(s) (retrying in 300s)
+2026-05-28 13:23:51 WARNING  bot.core.sync_cycle: Symbol not in terminal: GGLS.NAS-24 — skipping 4 limit(s) (retrying in 300s)
+2026-05-28 13:23:51 WARNING  bot.core.sync_cycle: Symbol not in terminal: COST.NAS-24 — skipping 5 limit(s) (retrying in 300s)
+2026-05-28 13:23:51 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=20 skipped=207
+2026-05-28 13:28:52 ERROR    bot.mt5.client: symbol_info_tick(USOILSPOT) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:28:52 ERROR    bot.mt5.client: symbol_info_tick(GGLS.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:28:52 ERROR    bot.mt5.client: symbol_info_tick(COST.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:28:52 WARNING  bot.core.sync_cycle: Symbol not in terminal: USOILSPOT — skipping 11 limit(s) (retrying in 300s)
+2026-05-28 13:28:52 WARNING  bot.core.sync_cycle: Symbol not in terminal: GGLS.NAS-24 — skipping 4 limit(s) (retrying in 300s)
+2026-05-28 13:28:52 WARNING  bot.core.sync_cycle: Symbol not in terminal: COST.NAS-24 — skipping 5 limit(s) (retrying in 300s)
+2026-05-28 13:28:52 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=20 skipped=207
+2026-05-28 13:33:52 ERROR    bot.mt5.client: symbol_info_tick(USOILSPOT) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:33:52 ERROR    bot.mt5.client: symbol_info_tick(GGLS.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:33:52 ERROR    bot.mt5.client: symbol_info_tick(COST.NAS-24) failed: (-4, 'Terminal: Not found')
+2026-05-28 13:33:52 WARNING  bot.core.sync_cycle: Symbol not in terminal: USOILSPOT — skipping 11 limit(s) (retrying in 300s)
+2026-05-28 13:33:52 WARNING  bot.core.sync_cycle: Symbol not in terminal: GGLS.NAS-24 — skipping 4 limit(s) (retrying in 300s)
+2026-05-28 13:33:52 WARNING  bot.core.sync_cycle: Symbol not in terminal: COST.NAS-24 — skipping 5 limit(s) (retrying in 300s)
+2026-05-28 13:33:52 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=20 skipped=207
+2026-05-28 13:35:56 INFO     bot.core.engine: Trading paused (position management continues)
+2026-05-28 14:05:55 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-28 14:05:55 INFO     bot.db.sqlite: Migration: added symbol column
+2026-05-28 14:05:55 INFO     bot.db.sqlite: Migration: added realized_pnl column
+2026-05-28 14:05:55 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-28 14:05:55 INFO     bot.db.supabase: Supabase pool created
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667145
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667151
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667154
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667162
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667170
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667177
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667188
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667196
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667405
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667478
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667508
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667533
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667575
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconcile cancelled: ticket=1673667750
+2026-05-28 14:05:55 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=14 closed=0 trailing=0 orphans=0

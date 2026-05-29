@@ -22,6 +22,7 @@ def create_app(engine: Engine) -> FastAPI:
     async def lifespan(app: FastAPI):
         asyncio.create_task(log_broadcaster.run(get_log_queue()))
         asyncio.create_task(status_broadcaster.run(engine.status_queue))
+        engine.api_ready.set()
         yield
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)

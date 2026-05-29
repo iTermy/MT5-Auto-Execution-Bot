@@ -72,6 +72,8 @@ class Settings(BaseModel):
         "ETHUSDT": "ETHUSD",
     }
     stock_suffix: str = "-24"
+    stock_no_suffix: list[str] = []
+    excluded_symbols: list[str] = []
     offset_instruments: list[str] = ["SPX500USD", "NAS100USD", "BTCUSDT", "ETHUSDT"]
     offset_drift_threshold_pips: float = 5.0
     feed_max_staleness_seconds: int = 30

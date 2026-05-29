@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     db_stop_loss            REAL,
     last_known_mt5_sl       REAL,
     is_scalp                INTEGER NOT NULL DEFAULT 0,
-    is_trailing             INTEGER NOT NULL DEFAULT 0
+    is_trailing             INTEGER NOT NULL DEFAULT 0,
+    symbol                  TEXT,
+    realized_pnl            REAL
 )
 """
 
@@ -53,8 +55,8 @@ INSERT_ORDER = """
 INSERT OR IGNORE INTO order_mappings
     (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
      db_stop_loss, is_scalp, feed_price_at_placement, mt5_price_at_placement,
-     offset_at_placement)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     offset_at_placement, symbol)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 MARK_FILLED = """
@@ -66,7 +68,7 @@ UPDATE order_mappings SET status = ?, cancelled_at = ? WHERE mt5_ticket = ?
 """
 
 MARK_CLOSED = """
-UPDATE order_mappings SET status = 'closed' WHERE mt5_ticket = ?
+UPDATE order_mappings SET status = 'closed', realized_pnl = ? WHERE mt5_ticket = ?
 """
 
 SET_TRAILING = """
@@ -107,6 +109,13 @@ SELECT DISTINCT signal_id FROM order_mappings WHERE status = 'filled'
 
 UPDATE_DB_STOP_LOSS = """
 UPDATE order_mappings SET db_stop_loss = ?, last_known_mt5_sl = ? WHERE mt5_ticket = ?
+"""
+
+GET_ORDER_HISTORY = """
+SELECT * FROM order_mappings
+WHERE status IN ('closed', 'cancelled', 'spread_cancelled')
+  AND placed_at >= ? AND placed_at <= ?
+ORDER BY placed_at DESC
 """
 
 # Supabase — fetch signal statuses by IDs

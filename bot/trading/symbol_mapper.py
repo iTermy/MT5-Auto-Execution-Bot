@@ -29,6 +29,8 @@ def map_symbol(db_symbol: str, config: Settings) -> str:
     if db_symbol in config.symbol_map:
         return config.symbol_map[db_symbol]
     if db_symbol.upper().endswith((".NAS", ".NYSE")):
+        if db_symbol in config.stock_no_suffix:
+            return db_symbol
         return db_symbol + config.stock_suffix
     return db_symbol
 

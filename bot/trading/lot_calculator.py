@@ -32,14 +32,20 @@ class LotCalculator:
         self._client = mt5_client
         self._config = config
 
+    def _get_fixed_lot(self, mt5_symbol: str) -> float:
+        fl = self._config.lot_sizing.fixed_lot
+        if isinstance(fl, dict):
+            return fl.get(mt5_symbol) or fl.get("default") or 0.01
+        return float(fl)
+
     def calculate(self, stop_loss: float, limit_prices: list[float], mt5_symbol: str) -> float:
         info = self._client.symbol_info(mt5_symbol)
         if info is None:
             logger.error("symbol_info unavailable for %s, using fixed_lot fallback", mt5_symbol)
-            return self._config.lot_sizing.fixed_lot
+            return self._get_fixed_lot(mt5_symbol)
 
         if self._config.lot_sizing.mode != "risk_percent":
-            return _clamp(self._config.lot_sizing.fixed_lot, info)
+            return _clamp(self._get_fixed_lot(mt5_symbol), info)
 
         account = self._client.account_info()
         if account is None:

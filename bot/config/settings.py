@@ -18,7 +18,7 @@ _CONFIG_PATH = Path("config.json")
 class LotSizingConfig(BaseModel):
     mode: str = "risk_percent"
     risk_percent: float = 1.0
-    fixed_lot: float = 0.01
+    fixed_lot: float | dict[str, float] = 0.01
     max_lot_per_order: float = 5.0
 
 

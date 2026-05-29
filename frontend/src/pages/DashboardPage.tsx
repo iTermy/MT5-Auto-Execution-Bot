@@ -7,7 +7,14 @@ import { Donut } from '../charts/Donut'
 import { Bars } from '../charts/Bars'
 import { useSort } from '../hooks/useSort'
 import { money } from '../utils/money'
-import { computeCumulativePnl, computeDailyBars } from '../utils/stats'
+import {
+  computeCumulativePnl,
+  computeDailyBars,
+  filterTradesByPeriod,
+  groupBySignalId,
+} from '../utils/stats'
+import type { Period } from '../utils/stats'
+import { getChannelName, getSignalType } from '../utils/channels'
 import type { DashboardData, HistoryData, TradeData } from '../types'
 
 interface Props {
@@ -28,15 +35,39 @@ function formatDist(d: number): string {
   return (abs * 10000).toFixed(1) + ' pips'
 }
 
+function directionFromOrderType(dir: string): 'long' | 'short' {
+  return dir.includes('buy') || dir.includes('long') ? 'long' : 'short'
+}
+
 export function DashboardPage({ dashboard, history }: Props) {
-  const [pnlP, setPnlP] = useState('all')
-  const [wlP, setWlP] = useState('all')
+  const [pnlP, setPnlP] = useState<Period>('all')
+  const [wlP, setWlP] = useState<Period>('all')
   const [showAll, setShowAll] = useState(false)
 
   const positions = dashboard?.positions ?? []
   const pendingOrders = dashboard?.pending_orders ?? []
   const totalPnl = positions.reduce((s, p) => s + p.profit, 0)
 
+  const trades: TradeData[] = history?.trades ?? []
+
+  // Period-filtered slices
+  const filteredForCurve = useMemo(() => filterTradesByPeriod(trades, pnlP), [trades, pnlP])
+  const filteredForWL = useMemo(() => filterTradesByPeriod(trades, wlP), [trades, wlP])
+
+  const curve = useMemo(() => computeCumulativePnl(filteredForCurve), [filteredForCurve])
+  const dailyBars = useMemo(() => computeDailyBars(filteredForCurve), [filteredForCurve])
+
+  const curveData = curve.map(p => p.value)
+  const curveLabels = curve.map(p => p.label)
+  const pnlValue = curve.length > 0 ? curve[curve.length - 1].value : 0
+  const pnlLabel = pnlP === 'daily' ? "Today's P&L" : pnlP === 'weekly' ? 'P&L · this week' : 'Cumulative P&L · all time'
+
+  const wlClosed = useMemo(() => filteredForWL.filter(t => t.status === 'closed'), [filteredForWL])
+  const wins = wlClosed.filter(t => t.realized_pnl > 0).length
+  const losses = wlClosed.filter(t => t.realized_pnl < 0).length
+  const winRate = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
+
+  // Positions table
   const posRows = useMemo(() => positions.map(p => ({
     sym: p.symbol,
     side: p.direction as 'long' | 'short',
@@ -50,50 +81,62 @@ export function DashboardPage({ dashboard, history }: Props) {
 
   const pos = useSort(posRows, 'pnl')
 
-  const pending = useMemo(() =>
-    [...pendingOrders]
-      .sort((a, b) => Math.abs(a.distance) - Math.abs(b.distance))
-      .map(o => ({
-        sym: o.symbol,
-        side: o.direction as 'long' | 'short',
-        dist: formatDist(o.distance),
-        limit: o.price_level.toFixed(5),
-        lot: o.volume.toFixed(2),
-        pct: proximityPct(o),
-      })),
-    [pendingOrders]
-  )
+  // Closest Signals: grouped by signal_id, sorted by distance of closest limit
+  const signalGroups = useMemo(() => {
+    const grouped = groupBySignalId(pendingOrders)
+    return [...grouped.values()]
+      .map(orders => {
+        const closest = orders.reduce((a, b) =>
+          Math.abs(a.distance) < Math.abs(b.distance) ? a : b
+        )
+        const channelId = orders[0].channel_id
+        return {
+          signal_id: orders[0].signal_id,
+          sym: orders[0].symbol,
+          side: orders[0].direction as 'long' | 'short',
+          limitCount: orders.length,
+          closest,
+          pct: proximityPct(closest),
+          dist: formatDist(closest.distance),
+          channelName: getChannelName(channelId),
+          signalType: getSignalType(channelId),
+        }
+      })
+      .sort((a, b) => Math.abs(a.closest.distance) - Math.abs(b.closest.distance))
+  }, [pendingOrders])
 
-  const visible = showAll ? pending : pending.slice(0, 3)
+  const visibleGroups = showAll ? signalGroups : signalGroups.slice(0, 3)
 
-  const trades: TradeData[] = history?.trades ?? []
-  const curve = useMemo(() => computeCumulativePnl(trades), [trades])
-  const dailyBars = useMemo(() => computeDailyBars(trades), [trades])
-
-  const curveData = curve.map(p => p.value)
-  const curveLabels = curve.map(p => p.label)
-
-  const stats = history?.stats
-  const winRate = stats ? stats.win_rate : 0
-  const wins = stats?.wins ?? 0
-  const losses = stats?.losses ?? 0
-
-  const recentTrades = useMemo(() =>
-    trades
-      .filter(t => t.status === 'closed')
-      .sort((a, b) => (b.closed_at ?? '').localeCompare(a.closed_at ?? ''))
-      .slice(0, 5),
-    [trades]
-  )
+  // Recent Trades: grouped by signal_id, sorted by most recent close
+  const recentTradeGroups = useMemo(() => {
+    const closed = trades.filter(t => t.status === 'closed')
+    const grouped = groupBySignalId(closed)
+    return [...grouped.values()]
+      .map(group => {
+        const timestamps = group
+          .map(t => t.closed_at || t.filled_at || t.placed_at)
+          .filter(Boolean)
+        const closedAt = [...timestamps].sort().reverse()[0] ?? ''
+        const totalPnl = group.reduce((s, t) => s + t.realized_pnl, 0)
+        const sideOrder = group.find(t => t.direction !== 'remainder') ?? group[0]
+        return {
+          signal_id: group[0].signal_id,
+          symbol: group[0].symbol,
+          side: directionFromOrderType(sideOrder.direction),
+          limitCount: group.length,
+          totalPnl,
+          closedAt,
+        }
+      })
+      .sort((a, b) => b.closedAt.localeCompare(a.closedAt))
+      .slice(0, 5)
+  }, [trades])
 
   const periods = [
     { value: 'daily', label: 'Day' },
     { value: 'weekly', label: 'Week' },
     { value: 'all', label: 'All' },
   ]
-
-  const pnlValue = pnlP === 'all' ? (curve.length > 0 ? curve[curve.length - 1].value : 0) : totalPnl
-  const pnlLabel = pnlP === 'daily' ? "Today's P&L" : pnlP === 'weekly' ? 'P&L · this week' : 'Cumulative P&L · all time'
 
   return (
     <div className="page">
@@ -107,12 +150,18 @@ export function DashboardPage({ dashboard, history }: Props) {
                 <span className={`big mono ${pnlValue >= 0 ? 'pos' : 'neg'}`}>{money(pnlValue)}</span>
               </div>
             </div>
-            <Seg value={pnlP} options={periods} onChange={setPnlP} />
+            <Seg value={pnlP} options={periods} onChange={v => setPnlP(v as Period)} />
           </div>
           <EquityCurve data={curveData} labels={curveLabels} height={210} />
           {curveLabels.length > 2 && (
             <div className="axisrow">
-              {[curveLabels[0], curveLabels[Math.floor(curveLabels.length / 4)], curveLabels[Math.floor(curveLabels.length / 2)], curveLabels[Math.floor(curveLabels.length * 3 / 4)], curveLabels[curveLabels.length - 1]].filter(Boolean).map((a, i) => (
+              {[
+                curveLabels[0],
+                curveLabels[Math.floor(curveLabels.length / 4)],
+                curveLabels[Math.floor(curveLabels.length / 2)],
+                curveLabels[Math.floor(curveLabels.length * 3 / 4)],
+                curveLabels[curveLabels.length - 1],
+              ].filter(Boolean).map((a, i) => (
                 <span key={i} className="mono">{a}</span>
               ))}
             </div>
@@ -122,7 +171,7 @@ export function DashboardPage({ dashboard, history }: Props) {
         <div className="panel pad" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <div className="panel-head">
             <div className="eyebrow">Win / loss</div>
-            <Seg value={wlP} options={periods} onChange={setWlP} />
+            <Seg value={wlP} options={periods} onChange={v => setWlP(v as Period)} />
           </div>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
             <Donut pct={winRate} size={160} />
@@ -133,36 +182,6 @@ export function DashboardPage({ dashboard, history }: Props) {
           </div>
         </div>
       </div>
-
-      {/* CLOSEST SIGNALS */}
-      {pending.length > 0 && (
-        <div className="panel pad">
-          <div className="panel-head">
-            <h3><Icon name="bell" size={17} /> Closest Signals</h3>
-            {pending.length > 3 && (
-              <button className="btn sm ghost" onClick={() => setShowAll(!showAll)}>
-                {showAll ? 'Show fewer' : `Show all ${pending.length}`}{' '}
-                <Icon name="chevDown" size={14} style={{ transform: showAll ? 'rotate(180deg)' : '', transition: '.2s' }} />
-              </button>
-            )}
-          </div>
-          <div className="fill-grid">
-            {visible.map((o, i) => (
-              <div className={'fill-card' + (o.pct >= 75 ? ' hot' : '')} key={o.sym + i}>
-                <div className="top">
-                  <span className="sym">{o.sym}</span>
-                  <span className={'tag ' + o.side}>{o.side}</span>
-                </div>
-                <ProxMeter pct={o.pct} label={o.dist} />
-                <div className="fill-kv">
-                  <div className="r"><span className="k">Limit</span><span className="val mono">{o.limit}</span></div>
-                  <div className="r"><span className="k">Size</span><span className="val mono">{o.lot} lot</span></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* POSITIONS */}
       <div className="panel pad">
@@ -206,14 +225,45 @@ export function DashboardPage({ dashboard, history }: Props) {
         )}
       </div>
 
+      {/* CLOSEST SIGNALS */}
+      {signalGroups.length > 0 && (
+        <div className="panel pad">
+          <div className="panel-head">
+            <h3><Icon name="bell" size={17} /> Closest Signals</h3>
+            {signalGroups.length > 3 && (
+              <button className="btn sm ghost" onClick={() => setShowAll(!showAll)}>
+                {showAll ? 'Show fewer' : `Show all ${signalGroups.length}`}{' '}
+                <Icon name="chevDown" size={14} style={{ transform: showAll ? 'rotate(180deg)' : '', transition: '.2s' }} />
+              </button>
+            )}
+          </div>
+          <div className="fill-grid">
+            {visibleGroups.map(g => (
+              <div className={'fill-card' + (g.pct >= 75 ? ' hot' : '')} key={g.signal_id}>
+                <div className="top">
+                  <span className="sym">{g.sym}</span>
+                  <span className={'tag ' + g.side}>{g.side}</span>
+                </div>
+                <ProxMeter pct={g.pct} label={g.dist} />
+                <div className="fill-kv">
+                  <div className="r"><span className="k">Limits</span><span className="val mono">{g.limitCount}</span></div>
+                  <div className="r"><span className="k">Channel</span><span className="val">{g.channelName}</span></div>
+                  <div className="r"><span className="k">Type</span><span className="val">{g.signalType}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* RECENT + DAILY */}
       <div className="row">
         <div className="panel pad" style={{ flex: 1.25, minWidth: 0 }}>
           <div className="panel-head">
             <h3>Recent trades</h3>
-            <span className="sub">closed · last 24h</span>
+            <span className="sub">closed · last 5</span>
           </div>
-          {recentTrades.length === 0 ? (
+          {recentTradeGroups.length === 0 ? (
             <p className="faint">No recent trades</p>
           ) : (
             <table className="tbl">
@@ -221,22 +271,24 @@ export function DashboardPage({ dashboard, history }: Props) {
                 <tr>
                   <th>Symbol</th>
                   <th>Side</th>
+                  <th className="num">Limits</th>
                   <th className="num">Total P&L</th>
                   <th className="num">Time</th>
                 </tr>
               </thead>
               <tbody>
-                {recentTrades.map((r, i) => (
-                  <tr key={i}>
-                    <td><span className="sym">{r.symbol || '—'}</span></td>
-                    <td><span className={'tag ' + (r.direction.includes('buy') || r.direction.includes('long') ? 'long' : 'short')}>
-                      {r.direction.includes('buy') || r.direction.includes('long') ? 'long' : 'short'}
-                    </span></td>
-                    <td className="num mono" style={{ color: r.realized_pnl >= 0 ? 'var(--pos)' : 'var(--neg)', fontWeight: 600 }}>
-                      {money(r.realized_pnl)}
+                {recentTradeGroups.map(g => (
+                  <tr key={g.signal_id}>
+                    <td><span className="sym">{g.symbol || '—'}</span></td>
+                    <td><span className={'tag ' + g.side}>{g.side}</span></td>
+                    <td className="num mono dim">{g.limitCount}</td>
+                    <td className="num mono" style={{ color: g.totalPnl >= 0 ? 'var(--pos)' : 'var(--neg)', fontWeight: 600 }}>
+                      {money(g.totalPnl)}
                     </td>
                     <td className="num t-sub">
-                      {r.closed_at ? new Date(r.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {g.closedAt
+                        ? new Date(g.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : '—'}
                     </td>
                   </tr>
                 ))}

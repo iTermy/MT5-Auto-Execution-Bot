@@ -1,14 +1,13 @@
 # CLAUDE.md — Auto-Execution Bot V2
 
 ## Current Implementation Status
-**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47). V4 integration & bug fix plan in NEXT_STEPS.md (19 steps, 5 phases).**
+**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57, 19 steps, 5 phases — all done).**
 Read STATE.md immediately — it lists all implementation decisions made during build that are not
 in the original ARCHITECTURE.md.
 
 ## What To Do Now
-**Execute NEXT_STEPS.md** — V4 integration & bug fix plan. 19 steps across 5 phases.
-Phase 1 (backend fixes) must be done first — it unblocks broken charts and enables signal
-grouping with channel/type data. See NEXT_STEPS.md for full details and implementation order.
+All planned work is complete. NEXT_STEPS.md is fully executed. See STATE.md decisions 48–57 for
+a record of all V4 implementation choices.
 
 ## What This Is
 Python Windows desktop app that reads trading signals from Supabase PostgreSQL and places/manages pending orders on MetaTrader 5 (MT5) via ICMarkets. FastAPI backend + React/TypeScript frontend served at `localhost:8501`, system tray icon via pystray.
@@ -171,37 +170,20 @@ supabase/functions/            — Edge Function for license validation
 tests/                         — pytest suite
 ```
 
-## V4 Known Bugs (to be fixed by NEXT_STEPS.md)
+## V4 Completed Fixes
 
-### Critical: MARK_CLOSED timestamp bug
-`MARK_CLOSED` in `queries.py` never sets `cancelled_at` for closed trades. The SQLite schema
-uses `cancelled_at` as the close timestamp (no separate `closed_at` column). Result: `/api/history`
-returns `closed_at: ""` for every closed trade. This breaks:
-- `computeCumulativePnl()` — filters out ALL closed trades (empty string is falsy)
-- `computeDailyBars()` — same issue, daily P&L bars are empty
-- Recent trades on dashboard — no time displayed
-- Hold time calculation in stats — always 0
+All V4 bugs have been resolved. See STATE.md decisions 48–57 for full details.
 
-### Settings: TP Config invisible
-`SettingsPage.tsx` reads `config.tp_config` as an array (`Array.isArray(tp)`) — it's actually an
-object with named asset keys (forex, metals, etc.). Check always fails, section never renders.
-
-### Settings: Symbol Mapping invisible
-Code reads `config.symbol_overrides` — field doesn't exist. Correct field is `config.symbol_map`.
-
-### Settings: handleSave incomplete
-`handleSave` only saves `license_key` and `lot_sizing`. TP config, symbol map, and all other
-settings are silently dropped on save.
-
-### Dashboard: signals not grouped
-Individual limits are shown separately. Signals consist of groups of limits (sharing `signal_id`)
-and should be displayed as signal groups in Closest Signals and Recent Trades.
-
-### History: missing filters
-Design specifies Instrument dropdown, Sort by dropdown, and Type filters (Tolls/Swings/1-1).
-Current implementation only has Status and Type (All/Standard/Scalp).
-
-### Channel ID availability
-Supabase `signals` table has `channel_id` (Discord channel ID number). Not currently piped
-through to SQLite/API/frontend. V4 Step 2 adds this. Channel IDs map to signal types:
-scalps channel → Scalp, swing-trades → Swing, *tolls* channels → Tolls, others → Standard.
+- **MARK_CLOSED bug fixed** — `cancelled_at = datetime('now')` now set on close; charts work.
+- **channel_id pipeline** — Supabase → SQLite → API → frontend; serialised as string to preserve 64-bit Discord snowflake precision. `frontend/src/utils/channels.ts` maps IDs to names/types.
+- **Timestamp fallbacks** — `t.closed_at || t.filled_at || t.placed_at` used throughout `stats.ts`.
+- **Period filtering wired** — `filterTradesByPeriod()` drives Day/Week/All toggles on dashboard.
+- **Signal grouping** — `groupBySignalId()` used in Dashboard (Closest Signals + Recent Trades) and History table.
+- **Dashboard section order** — Positions before Closest Signals.
+- **History filters** — Instrument dropdown, expanded Type Seg (Standard/Scalp/Swing/Tolls), Sort by dropdown added.
+- **Settings: TP config** — reads object keyed by asset class; fully editable with controlled inputs; oil preserved on save.
+- **Settings: symbol map** — reads `config.symbol_map`; add/remove rows; stock suffix field.
+- **Settings: handleSave** — saves all fields (tp_config, symbol_map, stock_suffix, full lot_sizing).
+- **Settings: Validate button** — wired to save license_key via PUT /api/config.
+- **Fixed lot per instrument** — `LotSizingConfig.fixed_lot: float | dict[str, float]`; UI table with Default + per-instrument rows; `LotCalculator._get_fixed_lot()` handles both shapes.
+- **Select element CSS** — `select.inp` styled with `appearance: none` + custom SVG chevron arrow.

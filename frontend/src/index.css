@@ -276,6 +276,20 @@ button { font-family: inherit; cursor: pointer; }
 .inp.sel { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .inp.num { width: 88px; text-align: right; }
 
+select.inp {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ABA493' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  padding-right: 32px;
+}
+[data-theme="light"] select.inp {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236E675B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
 .btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text);
   border-radius: 10px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: .14s; }
 .btn:hover { background: var(--surface-3); }

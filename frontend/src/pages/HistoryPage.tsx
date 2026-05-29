@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react'
 import { fetchHistory } from '../api'
 import { Seg } from '../components/Seg'
-import { useSort } from '../hooks/useSort'
 import { money } from '../utils/money'
-import { computeDetailedStats, formatHoldTime } from '../utils/stats'
-import type { HistoryData } from '../types'
+import { computeDetailedStats, formatHoldTime, groupBySignalId } from '../utils/stats'
+import { getSignalType } from '../utils/channels'
+import type { SignalType } from '../utils/channels'
+import type { HistoryData, TradeData } from '../types'
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
@@ -23,12 +24,75 @@ function formatTime(iso: string): string {
     d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function directionFromOrderType(dir: string): 'long' | 'short' {
+  return dir.includes('buy') || dir.includes('long') ? 'long' : 'short'
+}
+
+interface SignalGroup {
+  signalId: number
+  symbol: string
+  direction: 'long' | 'short'
+  totalLots: number
+  totalPnl: number
+  tradeCount: number
+  closedAt: string
+  status: string
+  isScalp: boolean
+  channelId: string | null
+  signalType: SignalType
+}
+
+function buildGroups(trades: TradeData[]): SignalGroup[] {
+  const grouped = groupBySignalId(trades)
+  return [...grouped.values()].map(group => {
+    const timestamps = group
+      .map(t => t.closed_at || t.filled_at || t.placed_at)
+      .filter(Boolean)
+    const closedAt = [...timestamps].sort().reverse()[0] ?? ''
+    const totalPnl = group.reduce((s, t) => s + t.realized_pnl, 0)
+    const totalLots = group.reduce((s, t) => s + (t.lot_size ?? 0), 0)
+    const sideOrder = group.find(t => t.direction !== 'remainder') ?? group[0]
+    const status = group.some(t => t.status === 'closed') ? 'closed'
+      : group.every(t => t.status === 'cancelled') ? 'cancelled'
+      : group[0].status
+    const channelId = group[0].channel_id
+    return {
+      signalId: group[0].signal_id,
+      symbol: group[0].symbol,
+      direction: directionFromOrderType(sideOrder.direction),
+      totalLots,
+      totalPnl,
+      tradeCount: group.length,
+      closedAt,
+      status,
+      isScalp: group.some(t => t.is_scalp),
+      channelId,
+      signalType: getSignalType(channelId),
+    }
+  })
+}
+
+type SortKey = 'newest' | 'oldest' | 'pnl_high' | 'pnl_low' | 'symbol'
+
+function sortGroups(groups: SignalGroup[], by: SortKey): SignalGroup[] {
+  const s = [...groups]
+  switch (by) {
+    case 'newest':   return s.sort((a, b) => b.closedAt.localeCompare(a.closedAt))
+    case 'oldest':   return s.sort((a, b) => a.closedAt.localeCompare(b.closedAt))
+    case 'pnl_high': return s.sort((a, b) => b.totalPnl - a.totalPnl)
+    case 'pnl_low':  return s.sort((a, b) => a.totalPnl - b.totalPnl)
+    case 'symbol':   return s.sort((a, b) => a.symbol.localeCompare(b.symbol))
+  }
+}
+
 export function HistoryPage() {
   const [fromDate, setFromDate] = useState(monthAgoStr)
   const [toDate, setToDate] = useState(todayStr)
   const [data, setData] = useState<HistoryData | null>(null)
+  const [instrumentFilter, setInstrumentFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [sortBy, setSortBy] = useState<SortKey>('newest')
 
   useEffect(() => {
     const from = `${fromDate}T00:00:00`
@@ -36,36 +100,28 @@ export function HistoryPage() {
     fetchHistory(from, to).then(setData).catch(() => {})
   }, [fromDate, toDate])
 
-  const trades = data?.trades ?? []
+  const trades: TradeData[] = data?.trades ?? []
 
-  const filtered = useMemo(() => {
-    let rows = trades
+  const allGroups = useMemo(() => buildGroups(trades), [trades])
+
+  const uniqueSymbols = useMemo(() => {
+    const syms = [...new Set(allGroups.map(g => g.symbol).filter(Boolean))]
+    return syms.sort()
+  }, [allGroups])
+
+  const filteredGroups = useMemo(() => {
+    let rows = allGroups
+    if (instrumentFilter !== 'all') rows = rows.filter(g => g.symbol === instrumentFilter)
+    if (statusFilter !== 'all') rows = rows.filter(g => g.status === statusFilter)
     if (typeFilter !== 'all') {
-      rows = rows.filter(t => {
-        if (typeFilter === 'scalp') return t.is_scalp
-        return !t.is_scalp && typeFilter === 'standard'
-      })
+      if (typeFilter === 'scalp') rows = rows.filter(g => g.isScalp)
+      else rows = rows.filter(g => g.signalType.toLowerCase() === typeFilter)
     }
-    if (statusFilter !== 'all') {
-      rows = rows.filter(t => t.status === statusFilter)
-    }
-    return rows
-  }, [trades, typeFilter, statusFilter])
-
-  const h = useSort(
-    filtered.map(t => ({
-      ...t,
-      t: t.closed_at || t.placed_at,
-      sym: t.symbol,
-      side: t.direction,
-      lot: t.lot_size,
-      kind: t.is_scalp ? 'scalp' : 'standard',
-      pnl: t.realized_pnl,
-    })),
-    't'
-  )
+    return sortGroups(rows, sortBy)
+  }, [allGroups, instrumentFilter, statusFilter, typeFilter, sortBy])
 
   const detailedStats = useMemo(() => computeDetailedStats(trades), [trades])
+  const tradeCount = trades.filter(t => t.status === 'closed').length
 
   const stat = (label: string, value: string, cls?: string, note?: string, small?: boolean) => (
     <div className="statcell">
@@ -74,8 +130,6 @@ export function HistoryPage() {
       {note && <div className="n">{note}</div>}
     </div>
   )
-
-  const tradeCount = trades.filter(t => t.status === 'closed').length
 
   return (
     <div className="page">
@@ -108,6 +162,17 @@ export function HistoryPage() {
             />
           </div>
           <div className="field">
+            <label>Instrument</label>
+            <select
+              className="inp"
+              value={instrumentFilter}
+              onChange={e => setInstrumentFilter(e.target.value)}
+            >
+              <option value="all">All</option>
+              {uniqueSymbols.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="field">
             <label>Status</label>
             <Seg
               value={statusFilter}
@@ -127,14 +192,30 @@ export function HistoryPage() {
                 { value: 'all', label: 'All' },
                 { value: 'standard', label: 'Standard' },
                 { value: 'scalp', label: 'Scalp' },
+                { value: 'swing', label: 'Swing' },
+                { value: 'tolls', label: 'Tolls' },
               ]}
               onChange={setTypeFilter}
             />
           </div>
+          <div className="field">
+            <label>Sort by</label>
+            <select
+              className="inp"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as SortKey)}
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="pnl_high">P&amp;L High → Low</option>
+              <option value="pnl_low">P&amp;L Low → High</option>
+              <option value="symbol">Symbol A → Z</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* STATISTICS */}
+      {/* STATISTICS — trade-level, unaffected by filters */}
       {trades.length > 0 && (
         <div className="panel" style={{ overflow: 'hidden' }}>
           <div className="panel-head" style={{ padding: '20px 22px 0', marginBottom: 0 }}>
@@ -157,50 +238,50 @@ export function HistoryPage() {
         </div>
       )}
 
-      {/* TRADES TABLE */}
+      {/* SIGNALS TABLE */}
       <div className="panel pad">
         <div className="panel-head">
-          <h3>Trades</h3>
-          <span className="sub">{filtered.length} results · click any header to sort</span>
+          <h3>Signals</h3>
+          <span className="sub">{filteredGroups.length} groups</span>
         </div>
-        {filtered.length === 0 ? (
+        {filteredGroups.length === 0 ? (
           <p className="faint" style={{ padding: '12px 0' }}>No trades match filters</p>
         ) : (
           <table className="tbl">
             <thead>
               <tr>
-                <th onClick={() => h.onSort('t')}>Closed{h.ind('t')}</th>
-                <th onClick={() => h.onSort('sym')}>Symbol{h.ind('sym')}</th>
-                <th onClick={() => h.onSort('side')}>Side{h.ind('side')}</th>
-                <th className="num" onClick={() => h.onSort('lot')}>Lot{h.ind('lot')}</th>
-                <th onClick={() => h.onSort('kind')}>Type{h.ind('kind')}</th>
+                <th>Closed</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th className="num">Limits</th>
+                <th className="num">Total Lots</th>
+                <th>Type</th>
                 <th>Status</th>
-                <th className="num" onClick={() => h.onSort('pnl')}>Realized P&L{h.ind('pnl')}</th>
+                <th className="num">Total P&amp;L</th>
               </tr>
             </thead>
             <tbody>
-              {h.sorted.map((r, i) => (
-                <tr key={i}>
-                  <td className="t-sub mono">{formatTime(r.t)}</td>
-                  <td><span className="sym">{r.sym || '—'}</span></td>
+              {filteredGroups.map(g => (
+                <tr key={g.signalId}>
+                  <td className="t-sub mono">{formatTime(g.closedAt)}</td>
+                  <td><span className="sym">{g.symbol || '—'}</span></td>
+                  <td><span className={'tag ' + g.direction}>{g.direction}</span></td>
+                  <td className="num mono dim">{g.tradeCount}</td>
+                  <td className="num mono">{g.totalLots.toFixed(2)}</td>
                   <td>
-                    <span className={`tag ${r.side.includes('buy') || r.side.includes('long') ? 'long' : 'short'}`}>
-                      {r.side.includes('buy') || r.side.includes('long') ? 'long' : 'short'}
-                    </span>
-                  </td>
-                  <td className="num mono">{r.lot?.toFixed(2) ?? '—'}</td>
-                  <td>
-                    {r.kind === 'scalp'
+                    {g.isScalp
                       ? <span className="tag scalp">Scalp</span>
-                      : <span className="t-sub">Standard</span>}
+                      : g.signalType !== 'Standard'
+                        ? <span className="tag ghost">{g.signalType}</span>
+                        : <span className="t-sub">Standard</span>}
                   </td>
                   <td>
-                    {r.status === 'closed'
+                    {g.status === 'closed'
                       ? <span className="tag trail">closed</span>
-                      : <span className="tag ghost">{r.status}</span>}
+                      : <span className="tag ghost">{g.status}</span>}
                   </td>
-                  <td className={`num mono ${r.pnl > 0 ? 'pos' : r.pnl < 0 ? 'neg' : 'faint'}`} style={{ fontWeight: 600 }}>
-                    {r.pnl === 0 ? '—' : money(r.pnl)}
+                  <td className={`num mono ${g.totalPnl > 0 ? 'pos' : g.totalPnl < 0 ? 'neg' : 'faint'}`} style={{ fontWeight: 600 }}>
+                    {g.totalPnl === 0 ? '—' : money(g.totalPnl)}
                   </td>
                 </tr>
               ))}

@@ -51,6 +51,7 @@ class DashboardCache:
             tick = mt5_client.symbol_info_tick(pos.symbol)
             if tick:
                 current_price = tick.bid if pos.type == 0 else tick.ask
+            ch = row["channel_id"] if row else None
             positions.append({
                 "ticket": pos.ticket,
                 "symbol": pos.symbol,
@@ -62,6 +63,7 @@ class DashboardCache:
                 "profit": pos.profit,
                 "is_trailing": bool(row["is_trailing"]) if row else False,
                 "signal_id": row["signal_id"] if row else 0,
+                "channel_id": str(ch) if ch is not None else None,
             })
 
         pending = []
@@ -74,6 +76,7 @@ class DashboardCache:
                 mid = (tick.bid + tick.ask) / 2
                 current_price = mid
                 distance = abs(order.price_open - mid)
+            ch = row["channel_id"] if row else None
             pending.append({
                 "ticket": order.ticket,
                 "symbol": order.symbol,
@@ -84,6 +87,7 @@ class DashboardCache:
                 "sl": order.sl,
                 "distance": round(distance, 5),
                 "signal_id": row["signal_id"] if row else 0,
+                "channel_id": str(ch) if ch is not None else None,
             })
 
         total_profit = sum(p["profit"] for p in positions)

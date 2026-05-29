@@ -8,6 +8,7 @@ SELECT
     s.stop_loss,
     s.status          AS signal_status,
     s.scalp,
+    s.channel_id,
     l.id              AS limit_id,
     l.price_level,
     l.sequence_number
@@ -47,7 +48,8 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     is_scalp                INTEGER NOT NULL DEFAULT 0,
     is_trailing             INTEGER NOT NULL DEFAULT 0,
     symbol                  TEXT,
-    realized_pnl            REAL
+    realized_pnl            REAL,
+    channel_id              INTEGER
 )
 """
 
@@ -55,8 +57,8 @@ INSERT_ORDER = """
 INSERT OR IGNORE INTO order_mappings
     (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
      db_stop_loss, is_scalp, feed_price_at_placement, mt5_price_at_placement,
-     offset_at_placement, symbol)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     offset_at_placement, symbol, channel_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 MARK_FILLED = """
@@ -68,7 +70,7 @@ UPDATE order_mappings SET status = ?, cancelled_at = ? WHERE mt5_ticket = ?
 """
 
 MARK_CLOSED = """
-UPDATE order_mappings SET status = 'closed', realized_pnl = ? WHERE mt5_ticket = ?
+UPDATE order_mappings SET status = 'closed', cancelled_at = datetime('now'), realized_pnl = ? WHERE mt5_ticket = ?
 """
 
 SET_TRAILING = """

@@ -25,6 +25,7 @@ class OrderPlacer:
         offset: float | None,
         mt5_client: MT5Client,
         sqlite: SQLiteDB,
+        channel_id: int | None = None,
     ) -> bool:
         tick = mt5_client.symbol_info_tick(mt5_symbol)
         if tick is None:
@@ -91,6 +92,7 @@ class OrderPlacer:
             mt5_price=adj_price,
             offset=offset,
             symbol=mt5_symbol,
+            channel_id=channel_id,
         )
         logger.info(
             "Placed %s ticket=%d signal=%d limit=%d price=%.5f lot=%.2f",

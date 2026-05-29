@@ -37,7 +37,7 @@ class SQLiteDB:
         await self._db.execute(CREATE_ORDER_MAPPINGS)
         await self._db.commit()
         # Migrations for existing databases
-        for col in ("symbol TEXT", "realized_pnl REAL"):
+        for col in ("symbol TEXT", "realized_pnl REAL", "channel_id INTEGER"):
             name = col.split()[0]
             try:
                 await self._db.execute(f"SELECT {name} FROM order_mappings LIMIT 0")
@@ -65,6 +65,7 @@ class SQLiteDB:
         mt5_price: float | None = None,
         offset: float | None = None,
         symbol: str | None = None,
+        channel_id: int | None = None,
     ) -> None:
         await self._db.execute(
             "DELETE FROM order_mappings WHERE limit_id = ? AND status NOT IN ('pending', 'filled')",
@@ -73,7 +74,7 @@ class SQLiteDB:
         await self._db.execute(
             INSERT_ORDER,
             (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
-             db_stop_loss, is_scalp, feed_price, mt5_price, offset, symbol),
+             db_stop_loss, is_scalp, feed_price, mt5_price, offset, symbol, channel_id),
         )
         await self._db.commit()
 

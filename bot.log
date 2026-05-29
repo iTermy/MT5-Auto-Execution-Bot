@@ -22486,3 +22486,400 @@ TimeoutError
 2026-05-29 13:23:03 INFO     bot.core.reconciler: Reconcile closed: ticket=1674095982
 2026-05-29 13:23:03 INFO     bot.core.reconciler: Reconcile closed: ticket=1674095985
 2026-05-29 13:23:03 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=16 closed=5 trailing=0 orphans=0
+2026-05-29 13:23:05 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 13:23:05 INFO     bot.license.validator: License: valid — OK
+2026-05-29 13:23:05 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675843708 signal=1528 limit=6574 price=83.23000 lot=0.10
+2026-05-29 13:23:05 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675843712 signal=1528 limit=6575 price=82.91000 lot=0.10
+2026-05-29 13:23:06 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675843717 signal=1528 limit=6576 price=82.30000 lot=0.10
+2026-05-29 13:23:06 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675843720 signal=1528 limit=6577 price=80.92000 lot=0.10
+2026-05-29 13:23:06 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675843727 signal=1528 limit=6578 price=80.36000 lot=0.10
+2026-05-29 13:23:07 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675843731 signal=1528 limit=6579 price=79.43000 lot=0.10
+2026-05-29 13:23:07 INFO     bot.core.engine: Sync: placed=6 cancelled=0 filled=0 trailing=0 errors=0 skipped=223
+2026-05-29 13:30:38 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675854747 signal=1971 limit=8835 price=4541.50000 lot=0.01
+2026-05-29 13:30:39 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675854838 signal=1971 limit=8836 price=4537.51000 lot=0.01
+2026-05-29 13:30:39 INFO     bot.core.engine: Sync: placed=2 cancelled=0 filled=0 trailing=0 errors=0 skipped=221
+2026-05-29 13:38:06 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 13:38:06 INFO     bot.license.validator: License: valid — OK
+2026-05-29 13:53:08 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 13:53:08 INFO     bot.license.validator: License: valid — OK
+2026-05-29 14:08:09 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 14:08:09 INFO     bot.license.validator: License: valid — OK
+2026-05-29 14:23:11 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 14:23:11 INFO     bot.license.validator: License: valid — OK
+2026-05-29 14:38:12 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 14:38:12 INFO     bot.license.validator: License: valid — OK
+2026-05-29 14:53:14 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 14:53:14 INFO     bot.license.validator: License: valid — OK
+2026-05-29 15:08:16 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 15:08:16 INFO     bot.license.validator: License: valid — OK
+2026-05-29 15:17:27 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675978074 signal=1953 limit=8753 price=0.77910 lot=0.01
+2026-05-29 15:17:27 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675978121 signal=1953 limit=8754 price=0.77900 lot=0.01
+2026-05-29 15:17:28 INFO     bot.trading.order_placer: Placed buy_limit ticket=1675978150 signal=1953 limit=8755 price=0.77738 lot=0.01
+2026-05-29 15:17:28 INFO     bot.core.engine: Sync: placed=3 cancelled=0 filled=0 trailing=0 errors=0 skipped=218
+2026-05-29 15:23:17 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 15:23:17 INFO     bot.license.validator: License: valid — OK
+2026-05-29 15:38:19 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 15:38:19 INFO     bot.license.validator: License: valid — OK
+2026-05-29 15:53:20 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 15:53:20 INFO     bot.license.validator: License: valid — OK
+2026-05-29 15:53:49 INFO     bot.trading.order_placer: Placed sell_limit ticket=1676013645 signal=1526 limit=6563 price=451.58000 lot=0.10
+2026-05-29 15:53:50 INFO     bot.trading.order_placer: Placed sell_limit ticket=1676013648 signal=1526 limit=6564 price=452.40000 lot=0.10
+2026-05-29 15:53:50 INFO     bot.trading.order_placer: Placed sell_limit ticket=1676013650 signal=1526 limit=6565 price=456.48000 lot=0.10
+2026-05-29 15:53:50 INFO     bot.trading.order_placer: Placed sell_limit ticket=1676013654 signal=1526 limit=6566 price=460.69000 lot=0.10
+2026-05-29 15:53:51 INFO     bot.trading.order_placer: Placed sell_limit ticket=1676013663 signal=1526 limit=6567 price=461.51000 lot=0.10
+2026-05-29 15:53:51 INFO     bot.core.engine: Sync: placed=5 cancelled=0 filled=0 trailing=0 errors=0 skipped=213
+2026-05-29 16:08:21 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 16:08:21 INFO     bot.license.validator: License: valid — OK
+2026-05-29 16:14:23 INFO     bot.trading.order_canceller: Order cancelled: ticket=1675854747
+2026-05-29 16:14:23 INFO     bot.trading.order_canceller: Order cancelled: ticket=1675854838
+2026-05-29 16:14:23 INFO     bot.core.engine: Sync: placed=0 cancelled=2 filled=0 trailing=0 errors=0 skipped=213
+2026-05-29 16:23:23 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 16:23:23 INFO     bot.license.validator: License: valid — OK
+2026-05-29 16:23:45 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:23:45 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:46 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:23:46 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:47 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:23:47 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:48 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (34s) — skipping 5 limit(s)
+2026-05-29 16:23:48 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:49 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:23:49 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:50 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (36s) — skipping 5 limit(s)
+2026-05-29 16:23:50 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:52 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:23:52 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:53 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (39s) — skipping 5 limit(s)
+2026-05-29 16:23:53 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:54 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (40s) — skipping 5 limit(s)
+2026-05-29 16:23:54 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:23:55 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (41s) — skipping 5 limit(s)
+2026-05-29 16:23:55 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:27:06 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:27:06 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:27:08 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:27:08 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:31:42 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:31:42 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:31:43 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:31:43 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:31:44 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:31:44 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:35 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:34:35 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:36 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:34:36 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:37 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:34:37 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:38 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (34s) — skipping 5 limit(s)
+2026-05-29 16:34:38 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:40 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:34:40 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:41 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (37s) — skipping 5 limit(s)
+2026-05-29 16:34:41 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:34:42 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:34:42 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:46 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:35:46 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:47 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:35:47 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:48 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:35:48 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:49 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:35:49 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:51 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (36s) — skipping 5 limit(s)
+2026-05-29 16:35:51 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:52 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (37s) — skipping 5 limit(s)
+2026-05-29 16:35:52 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:53 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:35:53 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:54 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (39s) — skipping 5 limit(s)
+2026-05-29 16:35:54 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:55 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (40s) — skipping 5 limit(s)
+2026-05-29 16:35:55 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:56 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (42s) — skipping 5 limit(s)
+2026-05-29 16:35:56 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:58 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (43s) — skipping 5 limit(s)
+2026-05-29 16:35:58 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:35:59 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (44s) — skipping 5 limit(s)
+2026-05-29 16:35:59 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:36:00 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (45s) — skipping 5 limit(s)
+2026-05-29 16:36:00 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:37:04 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (30s) — skipping 5 limit(s)
+2026-05-29 16:37:04 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:37:05 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:37:05 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:37:06 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:37:06 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:37:08 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (34s) — skipping 5 limit(s)
+2026-05-29 16:37:08 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:18 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:38:19 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:20 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:38:20 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:21 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:38:21 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:22 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:38:22 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:23 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (36s) — skipping 5 limit(s)
+2026-05-29 16:38:23 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:25 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 16:38:25 INFO     bot.license.validator: License: valid — OK
+2026-05-29 16:38:25 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (37s) — skipping 5 limit(s)
+2026-05-29 16:38:25 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:38:26 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:38:26 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:03 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (30s) — skipping 5 limit(s)
+2026-05-29 16:39:03 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:04 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:39:04 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:06 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:39:06 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:07 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (34s) — skipping 5 limit(s)
+2026-05-29 16:39:07 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:08 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:39:08 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:09 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (36s) — skipping 5 limit(s)
+2026-05-29 16:39:09 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:10 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (37s) — skipping 5 limit(s)
+2026-05-29 16:39:10 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:11 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:39:11 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:12 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (39s) — skipping 5 limit(s)
+2026-05-29 16:39:12 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:14 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (41s) — skipping 5 limit(s)
+2026-05-29 16:39:14 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:15 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (42s) — skipping 5 limit(s)
+2026-05-29 16:39:15 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:16 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (43s) — skipping 5 limit(s)
+2026-05-29 16:39:16 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:17 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (44s) — skipping 5 limit(s)
+2026-05-29 16:39:17 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:18 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (45s) — skipping 5 limit(s)
+2026-05-29 16:39:18 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:19 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (46s) — skipping 5 limit(s)
+2026-05-29 16:39:19 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:21 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (48s) — skipping 5 limit(s)
+2026-05-29 16:39:21 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:22 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (49s) — skipping 5 limit(s)
+2026-05-29 16:39:22 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:23 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (50s) — skipping 5 limit(s)
+2026-05-29 16:39:23 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:24 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (51s) — skipping 5 limit(s)
+2026-05-29 16:39:24 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:25 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (52s) — skipping 5 limit(s)
+2026-05-29 16:39:25 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:26 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (53s) — skipping 5 limit(s)
+2026-05-29 16:39:26 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:28 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (54s) — skipping 5 limit(s)
+2026-05-29 16:39:28 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:29 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (56s) — skipping 5 limit(s)
+2026-05-29 16:39:29 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:30 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (57s) — skipping 5 limit(s)
+2026-05-29 16:39:30 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:31 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (58s) — skipping 5 limit(s)
+2026-05-29 16:39:31 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:32 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (59s) — skipping 5 limit(s)
+2026-05-29 16:39:32 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:33 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (60s) — skipping 5 limit(s)
+2026-05-29 16:39:33 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:34 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (61s) — skipping 5 limit(s)
+2026-05-29 16:39:34 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:36 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (63s) — skipping 5 limit(s)
+2026-05-29 16:39:36 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:37 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (64s) — skipping 5 limit(s)
+2026-05-29 16:39:37 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:38 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (65s) — skipping 5 limit(s)
+2026-05-29 16:39:38 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:39 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (66s) — skipping 5 limit(s)
+2026-05-29 16:39:39 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:40 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (67s) — skipping 5 limit(s)
+2026-05-29 16:39:40 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:41 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (68s) — skipping 5 limit(s)
+2026-05-29 16:39:41 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:43 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (70s) — skipping 5 limit(s)
+2026-05-29 16:39:43 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:44 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (71s) — skipping 5 limit(s)
+2026-05-29 16:39:44 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:45 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (72s) — skipping 5 limit(s)
+2026-05-29 16:39:45 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:46 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (73s) — skipping 5 limit(s)
+2026-05-29 16:39:46 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:47 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (74s) — skipping 5 limit(s)
+2026-05-29 16:39:47 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:48 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (75s) — skipping 5 limit(s)
+2026-05-29 16:39:48 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:50 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (77s) — skipping 5 limit(s)
+2026-05-29 16:39:50 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:51 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (78s) — skipping 5 limit(s)
+2026-05-29 16:39:51 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:52 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (79s) — skipping 5 limit(s)
+2026-05-29 16:39:52 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:53 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (80s) — skipping 5 limit(s)
+2026-05-29 16:39:53 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:54 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (81s) — skipping 5 limit(s)
+2026-05-29 16:39:54 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:55 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (82s) — skipping 5 limit(s)
+2026-05-29 16:39:55 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:57 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (84s) — skipping 5 limit(s)
+2026-05-29 16:39:57 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:58 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (85s) — skipping 5 limit(s)
+2026-05-29 16:39:58 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:39:59 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (86s) — skipping 5 limit(s)
+2026-05-29 16:39:59 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:00 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (87s) — skipping 5 limit(s)
+2026-05-29 16:40:00 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:01 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (88s) — skipping 5 limit(s)
+2026-05-29 16:40:01 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:02 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (89s) — skipping 5 limit(s)
+2026-05-29 16:40:02 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:04 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (91s) — skipping 5 limit(s)
+2026-05-29 16:40:04 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:05 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (92s) — skipping 5 limit(s)
+2026-05-29 16:40:05 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:30 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (30s) — skipping 5 limit(s)
+2026-05-29 16:40:30 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:32 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:40:32 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:33 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (33s) — skipping 5 limit(s)
+2026-05-29 16:40:33 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:34 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (34s) — skipping 5 limit(s)
+2026-05-29 16:40:34 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:35 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:40:35 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:36 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (36s) — skipping 5 limit(s)
+2026-05-29 16:40:36 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:37 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (37s) — skipping 5 limit(s)
+2026-05-29 16:40:37 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:38 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:40:38 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:40 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (40s) — skipping 5 limit(s)
+2026-05-29 16:40:40 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:41 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (41s) — skipping 5 limit(s)
+2026-05-29 16:40:41 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:42 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (42s) — skipping 5 limit(s)
+2026-05-29 16:40:42 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:43 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (43s) — skipping 5 limit(s)
+2026-05-29 16:40:43 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:44 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (44s) — skipping 5 limit(s)
+2026-05-29 16:40:44 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:45 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (45s) — skipping 5 limit(s)
+2026-05-29 16:40:45 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:40:47 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (47s) — skipping 5 limit(s)
+2026-05-29 16:40:47 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:42 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (30s) — skipping 5 limit(s)
+2026-05-29 16:43:42 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:43 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (31s) — skipping 5 limit(s)
+2026-05-29 16:43:43 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:44 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (32s) — skipping 5 limit(s)
+2026-05-29 16:43:44 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:45 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (34s) — skipping 5 limit(s)
+2026-05-29 16:43:45 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:46 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (35s) — skipping 5 limit(s)
+2026-05-29 16:43:46 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:48 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (36s) — skipping 5 limit(s)
+2026-05-29 16:43:48 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:49 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (37s) — skipping 5 limit(s)
+2026-05-29 16:43:49 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:50 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (38s) — skipping 5 limit(s)
+2026-05-29 16:43:50 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:51 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (39s) — skipping 5 limit(s)
+2026-05-29 16:43:51 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:52 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (40s) — skipping 5 limit(s)
+2026-05-29 16:43:52 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:53 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (42s) — skipping 5 limit(s)
+2026-05-29 16:43:53 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:55 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (43s) — skipping 5 limit(s)
+2026-05-29 16:43:55 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:56 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (44s) — skipping 5 limit(s)
+2026-05-29 16:43:56 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:57 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (45s) — skipping 5 limit(s)
+2026-05-29 16:43:57 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:58 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (46s) — skipping 5 limit(s)
+2026-05-29 16:43:58 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:43:59 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (47s) — skipping 5 limit(s)
+2026-05-29 16:43:59 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:00 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (49s) — skipping 5 limit(s)
+2026-05-29 16:44:00 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:02 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (50s) — skipping 5 limit(s)
+2026-05-29 16:44:02 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:03 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (51s) — skipping 5 limit(s)
+2026-05-29 16:44:03 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:04 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (52s) — skipping 5 limit(s)
+2026-05-29 16:44:04 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:05 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (53s) — skipping 5 limit(s)
+2026-05-29 16:44:05 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:06 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (54s) — skipping 5 limit(s)
+2026-05-29 16:44:06 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:07 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (56s) — skipping 5 limit(s)
+2026-05-29 16:44:07 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:09 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (57s) — skipping 5 limit(s)
+2026-05-29 16:44:09 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:10 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (58s) — skipping 5 limit(s)
+2026-05-29 16:44:10 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:11 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (59s) — skipping 5 limit(s)
+2026-05-29 16:44:11 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:12 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (60s) — skipping 5 limit(s)
+2026-05-29 16:44:12 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:13 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (61s) — skipping 5 limit(s)
+2026-05-29 16:44:13 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:14 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (63s) — skipping 5 limit(s)
+2026-05-29 16:44:14 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:15 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (64s) — skipping 5 limit(s)
+2026-05-29 16:44:15 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:17 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (65s) — skipping 5 limit(s)
+2026-05-29 16:44:17 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:18 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (66s) — skipping 5 limit(s)
+2026-05-29 16:44:18 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:44:19 WARNING  bot.core.sync_cycle: Live price stale for SPX500USD (67s) — skipping 5 limit(s)
+2026-05-29 16:44:19 INFO     bot.core.engine: Sync: placed=0 cancelled=0 filled=0 trailing=0 errors=5 skipped=208
+2026-05-29 16:45:00 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675843708
+2026-05-29 16:45:00 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675843712
+2026-05-29 16:45:00 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675843717
+2026-05-29 16:45:00 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675843720
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675843727
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675843731
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675978074
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675978121
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1675978150
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1676013645
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1676013648
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1676013650
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1676013654
+2026-05-29 16:45:01 INFO     bot.trading.order_canceller: Order spread_cancelled: ticket=1676013663
+2026-05-29 16:45:01 INFO     bot.core.engine: Sync: placed=0 cancelled=14 filled=0 trailing=0 errors=0 skipped=0
+2026-05-29 16:53:26 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 16:53:26 INFO     bot.license.validator: License: valid — OK
+2026-05-29 17:08:27 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 17:08:27 INFO     bot.license.validator: License: valid — OK
+2026-05-29 17:23:29 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 17:23:29 INFO     bot.license.validator: License: valid — OK
+2026-05-29 17:38:30 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 17:38:30 INFO     bot.license.validator: License: valid — OK
+2026-05-29 17:53:32 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 17:53:32 INFO     bot.license.validator: License: valid — OK
+2026-05-29 18:08:33 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 18:08:33 INFO     bot.license.validator: License: valid — OK
+2026-05-29 18:23:35 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 18:23:35 INFO     bot.license.validator: License: valid — OK
+2026-05-29 18:38:36 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 18:38:36 INFO     bot.license.validator: License: valid — OK
+2026-05-29 18:47:43 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-29 18:47:43 INFO     bot.db.sqlite: Migration: added channel_id column
+2026-05-29 18:47:43 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-29 18:47:44 INFO     bot.db.supabase: Supabase pool created
+2026-05-29 18:47:44 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-29 18:47:46 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 18:47:46 INFO     bot.license.validator: License: valid — OK
+2026-05-29 18:50:54 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-29 18:50:55 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-29 18:50:55 INFO     bot.db.supabase: Supabase pool created
+2026-05-29 18:50:55 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-29 18:50:56 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 18:50:56 INFO     bot.license.validator: License: valid — OK
+2026-05-29 18:54:48 INFO     bot.mt5.connection: MT5 initialized: account 52776073
+2026-05-29 18:54:48 INFO     bot.db.sqlite: SQLite schema ready: orders.db
+2026-05-29 18:54:49 INFO     bot.db.supabase: Supabase pool created
+2026-05-29 18:54:49 INFO     bot.core.reconciler: Reconciliation: filled=0 cancelled=0 closed=0 trailing=0 orphans=0
+2026-05-29 18:54:50 INFO     httpx: HTTP Request: POST https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license "HTTP/1.1 200 OK"
+2026-05-29 18:54:50 INFO     bot.license.validator: License: valid — OK

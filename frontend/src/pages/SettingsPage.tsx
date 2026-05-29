@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
 import { startEngine, stopEngine, shutdownEngine, updateConfig } from '../api'
-import type { Config, StatusData } from '../types'
+import type { Config, TPConfig, AssetTPConfig, ScalpOverrideConfig } from '../types'
+
+const ASSET_CLASSES = ['forex', 'forex_jpy', 'metals', 'indices', 'stocks', 'crypto'] as const
+type AssetKey = typeof ASSET_CLASSES[number]
 
 interface TpRow {
   asset: string
@@ -19,63 +22,159 @@ interface SymbolRow {
   feed: boolean
 }
 
+interface FixedLotRow {
+  instrument: string
+  lot: string
+}
+
 interface Props {
   config: Config | null
-  status: StatusData | null
+  status: { trading_active?: boolean; mt5_connected?: boolean; supabase_connected?: boolean; license_valid?: boolean } | null
   onConfigSaved: (config: Config) => void
 }
 
 export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [lotMode, setLotMode] = useState('risk_percent')
   const [riskPct, setRiskPct] = useState('1.0')
-  const [fixedLot, setFixedLot] = useState('0.01')
   const [maxLot, setMaxLot] = useState('5.0')
+  const [fixedLotRows, setFixedLotRows] = useState<FixedLotRow[]>([{ instrument: 'default', lot: '0.01' }])
   const [licenseKey, setLicenseKey] = useState('')
   const [partial, setPartial] = useState(50)
+  const [tpRows, setTpRows] = useState<TpRow[]>([])
+  const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
+  const [stockSuffix, setStockSuffix] = useState('-24')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [tpRows, setTpRows] = useState<TpRow[]>([])
-  const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
+  const touch = () => setDirty(true)
+
+  const initFromConfig = useCallback((cfg: Config) => {
+    setLotMode(cfg.lot_sizing.mode)
+    setRiskPct(String(cfg.lot_sizing.risk_percent))
+    setMaxLot(String(cfg.lot_sizing.max_lot_per_order))
+    setLicenseKey(cfg.license_key)
+
+    const fl = cfg.lot_sizing.fixed_lot
+    if (typeof fl === 'number') {
+      setFixedLotRows([{ instrument: 'default', lot: String(fl) }])
+    } else if (fl && typeof fl === 'object') {
+      const entries = Object.entries(fl)
+      const def = entries.find(([k]) => k === 'default')
+      const others = entries.filter(([k]) => k !== 'default')
+      setFixedLotRows([
+        { instrument: 'default', lot: String(def ? def[1] : 0.01) },
+        ...others.map(([k, v]) => ({ instrument: k, lot: String(v) })),
+      ])
+    }
+
+    const tp = cfg.tp_config
+    if (tp) {
+      setPartial(tp.partial_close_percent ?? 50)
+      setTpRows(ASSET_CLASSES.map(asset => {
+        const acfg = tp[asset as AssetKey] as AssetTPConfig | undefined
+        const scalp = tp.scalp_overrides?.[asset] as ScalpOverrideConfig | undefined
+        return {
+          asset,
+          thr: String(acfg?.profit_threshold ?? ''),
+          unit: acfg?.threshold_unit ?? '',
+          trail: String(acfg?.trailing_distance ?? ''),
+          sThr: scalp != null ? String(scalp.profit_threshold) : '',
+          sTrail: scalp != null ? String(scalp.trailing_distance) : '',
+        }
+      }))
+    }
+
+    const offsetInst = cfg.offset_instruments ?? []
+    setSymbolRows(Object.entries(cfg.symbol_map ?? {}).map(([db, mt5]) => ({
+      db, mt5: String(mt5), feed: offsetInst.includes(db),
+    })))
+    setStockSuffix(cfg.stock_suffix ?? '-24')
+  }, [])
 
   useEffect(() => {
-    if (config) {
-      setLotMode(config.lot_sizing.mode)
-      setRiskPct(String(config.lot_sizing.risk_percent))
-      setFixedLot(String(config.lot_sizing.fixed_lot))
-      setMaxLot(String(config.lot_sizing.max_lot_per_order))
-      setLicenseKey(config.license_key)
+    if (config) initFromConfig(config)
+  }, [config, initFromConfig])
 
-      const pct = config.partial_close_pct as number | undefined
-      if (pct != null) setPartial(pct)
+  function updateTpRow(i: number, field: keyof TpRow, value: string) {
+    setTpRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
+    touch()
+  }
 
-      const tp = config.tp_config as Record<string, unknown>[] | undefined
-      if (tp && Array.isArray(tp)) {
-        setTpRows(tp.map((r: Record<string, unknown>) => ({
-          asset: String(r.asset_class ?? r.asset ?? ''),
-          thr: String(r.profit_threshold ?? r.thr ?? ''),
-          unit: String(r.unit ?? ''),
-          trail: String(r.trail_distance ?? r.trail ?? ''),
-          sThr: String(r.scalp_threshold ?? r.sThr ?? ''),
-          sTrail: String(r.scalp_trail ?? r.sTrail ?? ''),
-        })))
-      }
+  function updateSymbolRow(i: number, field: 'db' | 'mt5', value: string) {
+    setSymbolRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
+    touch()
+  }
 
-      const sym = config.symbol_overrides as Record<string, string> | undefined
-      if (sym && typeof sym === 'object') {
-        setSymbolRows(Object.entries(sym).map(([db, mt5]) => ({
-          db,
-          mt5: String(mt5),
-          feed: false,
-        })))
-      }
+  function addSymbolRow() {
+    setSymbolRows(prev => [...prev, { db: '', mt5: '', feed: false }])
+    touch()
+  }
+
+  function removeSymbolRow(i: number) {
+    setSymbolRows(prev => prev.filter((_, j) => j !== i))
+    touch()
+  }
+
+  function updateFixedLotRow(i: number, field: 'instrument' | 'lot', value: string) {
+    setFixedLotRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
+    touch()
+  }
+
+  function addFixedLotRow() {
+    setFixedLotRows(prev => [...prev, { instrument: '', lot: '0.01' }])
+    touch()
+  }
+
+  function removeFixedLotRow(i: number) {
+    setFixedLotRows(prev => prev.filter((_, j) => j !== i))
+    touch()
+  }
+
+  function buildFixedLot(): number | Record<string, number> {
+    if (fixedLotRows.length === 1 && fixedLotRows[0].instrument === 'default') {
+      return parseFloat(fixedLotRows[0].lot) || 0.01
     }
-  }, [config])
+    return Object.fromEntries(
+      fixedLotRows
+        .filter(r => r.instrument.trim())
+        .map(r => [r.instrument.trim(), parseFloat(r.lot) || 0.01])
+    )
+  }
 
-  const touch = () => setDirty(true)
+  function buildTpConfig(): TPConfig {
+    const assetEntries = Object.fromEntries(
+      tpRows.map(row => [row.asset, {
+        profit_threshold: parseFloat(row.thr) || 0,
+        threshold_unit: row.unit,
+        trailing_distance: parseFloat(row.trail) || 0,
+      }])
+    )
+    const scalp = Object.fromEntries(
+      tpRows
+        .filter(row => row.sThr !== '' || row.sTrail !== '')
+        .map(row => [row.asset, {
+          profit_threshold: parseFloat(row.sThr) || 0,
+          trailing_distance: parseFloat(row.sTrail) || 0,
+        }])
+    )
+    return {
+      ...config!.tp_config,
+      partial_close_percent: partial,
+      ...assetEntries,
+      scalp_overrides: scalp,
+    } as TPConfig
+  }
+
+  function buildSymbolMap(): Record<string, string> {
+    return Object.fromEntries(
+      symbolRows
+        .filter(r => r.db.trim() && r.mt5.trim())
+        .map(r => [r.db.trim(), r.mt5.trim()])
+    )
+  }
 
   async function handleSave() {
     if (!config) return
@@ -88,9 +187,12 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         lot_sizing: {
           mode: lotMode,
           risk_percent: parseFloat(riskPct) || 1.0,
-          fixed_lot: parseFloat(fixedLot) || 0.01,
+          fixed_lot: buildFixedLot(),
           max_lot_per_order: parseFloat(maxLot) || 5.0,
         },
+        tp_config: buildTpConfig(),
+        symbol_map: buildSymbolMap(),
+        stock_suffix: stockSuffix,
       }
       await updateConfig(updated)
       onConfigSaved(updated)
@@ -105,14 +207,19 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   }
 
   function handleDiscard() {
-    setDirty(false)
     if (config) {
-      setLotMode(config.lot_sizing.mode)
-      setRiskPct(String(config.lot_sizing.risk_percent))
-      setFixedLot(String(config.lot_sizing.fixed_lot))
-      setMaxLot(String(config.lot_sizing.max_lot_per_order))
-      setLicenseKey(config.license_key)
+      initFromConfig(config)
+      setDirty(false)
     }
+  }
+
+  async function handleValidate() {
+    if (!config) return
+    try {
+      const updated: Config = { ...config, license_key: licenseKey }
+      await updateConfig(updated)
+      onConfigSaved(updated)
+    } catch { /* ignore */ }
   }
 
   async function handleEngineToggle() {
@@ -170,7 +277,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               style={{ width: 280 }}
             />
           </div>
-          <button className="btn">Validate</button>
+          <button className="btn" onClick={handleValidate}>Validate</button>
         </div>
       </div>
 
@@ -203,7 +310,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
 
         {lotMode === 'risk_percent' ? (
-          <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end' }}>
             <div className="field">
               <label>Risk per signal (%)</label>
               <input
@@ -214,15 +321,48 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="field">
-              <label>Fixed lot size</label>
-              <input
-                className="inp num mono"
-                value={fixedLot}
-                onChange={e => { setFixedLot(e.target.value); touch() }}
-              />
-            </div>
+          <div>
+            <table className="tbl" style={{ maxWidth: 460 }}>
+              <thead>
+                <tr>
+                  <th>Instrument</th>
+                  <th className="num">Fixed lot</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {fixedLotRows.map((r, i) => (
+                  <tr key={i}>
+                    <td>
+                      {r.instrument === 'default'
+                        ? <span className="t-sub">Default</span>
+                        : <input
+                            className="inp mono"
+                            value={r.instrument}
+                            onChange={e => updateFixedLotRow(i, 'instrument', e.target.value)}
+                            style={{ width: 150 }}
+                          />}
+                    </td>
+                    <td className="num">
+                      <input
+                        className="inp num mono"
+                        value={r.lot}
+                        onChange={e => updateFixedLotRow(i, 'lot', e.target.value)}
+                        style={{ width: 88 }}
+                      />
+                    </td>
+                    <td style={{ width: 40 }}>
+                      {r.instrument !== 'default' && (
+                        <button className="btn sm ghost" onClick={() => removeFixedLotRow(i)}>×</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addFixedLotRow}>
+              + Add instrument
+            </button>
           </div>
         )}
       </div>
@@ -257,14 +397,26 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               </tr>
             </thead>
             <tbody>
-              {tpRows.map(t => (
+              {tpRows.map((t, i) => (
                 <tr key={t.asset}>
                   <td><span className="sym">{t.asset}</span></td>
-                  <td className="num"><input className="inp num mono" defaultValue={t.thr} style={{ width: 76 }} onChange={touch} /></td>
+                  <td className="num">
+                    <input className="inp num mono" value={t.thr} style={{ width: 76 }}
+                      onChange={e => updateTpRow(i, 'thr', e.target.value)} />
+                  </td>
                   <td className="dim">{t.unit}</td>
-                  <td className="num"><input className="inp num mono" defaultValue={t.trail} style={{ width: 76 }} onChange={touch} /></td>
-                  <td className="num"><input className="inp num mono" defaultValue={t.sThr} style={{ width: 70, opacity: .6 }} onChange={touch} /></td>
-                  <td className="num"><input className="inp num mono" defaultValue={t.sTrail} style={{ width: 70, opacity: .6 }} onChange={touch} /></td>
+                  <td className="num">
+                    <input className="inp num mono" value={t.trail} style={{ width: 76 }}
+                      onChange={e => updateTpRow(i, 'trail', e.target.value)} />
+                  </td>
+                  <td className="num">
+                    <input className="inp num mono" value={t.sThr} style={{ width: 70, opacity: .6 }}
+                      onChange={e => updateTpRow(i, 'sThr', e.target.value)} />
+                  </td>
+                  <td className="num">
+                    <input className="inp num mono" value={t.sTrail} style={{ width: 70, opacity: .6 }}
+                      onChange={e => updateTpRow(i, 'sTrail', e.target.value)} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -273,34 +425,56 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       )}
 
       {/* SYMBOL MAPPING */}
-      {symbolRows.length > 0 && (
-        <div className="panel pad">
-          <div className="panel-head">
-            <h3>Symbol mapping</h3>
-            <span className="sub">DB instrument → your broker's MT5 symbol</span>
-          </div>
-          <table className="tbl" style={{ maxWidth: 620 }}>
-            <thead>
-              <tr>
-                <th>DB instrument</th>
-                <th />
-                <th>MT5 symbol</th>
-                <th>Feed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {symbolRows.map(m => (
-                <tr key={m.db}>
-                  <td><input className="inp mono" defaultValue={m.db} style={{ width: 150 }} onChange={touch} /></td>
-                  <td className="faint" style={{ width: 24 }}>→</td>
-                  <td><input className="inp mono" defaultValue={m.mt5} style={{ width: 150 }} onChange={touch} /></td>
-                  <td>{m.feed ? <span className="tag long">offset feed</span> : <span className="tag ghost">direct</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="panel pad">
+        <div className="panel-head">
+          <h3>Symbol mapping</h3>
+          <span className="sub">DB instrument → your broker's MT5 symbol</span>
         </div>
-      )}
+        <table className="tbl" style={{ maxWidth: 680 }}>
+          <thead>
+            <tr>
+              <th>DB instrument</th>
+              <th />
+              <th>MT5 symbol</th>
+              <th>Feed</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {symbolRows.map((m, i) => (
+              <tr key={i}>
+                <td>
+                  <input className="inp mono" value={m.db}
+                    onChange={e => updateSymbolRow(i, 'db', e.target.value)}
+                    style={{ width: 150 }} />
+                </td>
+                <td className="faint" style={{ width: 24, textAlign: 'center' }}>→</td>
+                <td>
+                  <input className="inp mono" value={m.mt5}
+                    onChange={e => updateSymbolRow(i, 'mt5', e.target.value)}
+                    style={{ width: 150 }} />
+                </td>
+                <td>{m.feed ? <span className="tag long">offset feed</span> : <span className="tag ghost">direct</span>}</td>
+                <td style={{ width: 40 }}>
+                  <button className="btn sm ghost" onClick={() => removeSymbolRow(i)}>×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end', marginTop: 14, flexWrap: 'wrap' }}>
+          <button className="btn sm ghost" onClick={addSymbolRow}>+ Add mapping</button>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Stock suffix</label>
+            <input
+              className="inp mono"
+              value={stockSuffix}
+              onChange={e => { setStockSuffix(e.target.value); touch() }}
+              style={{ width: 80 }}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* SAVE */}
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>

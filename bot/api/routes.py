@@ -91,6 +91,7 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
 
     for row in rows:
         pnl = row["realized_pnl"] or 0.0
+        ch = row["channel_id"]
         trades.append({
             "id": row["id"],
             "signal_id": row["signal_id"],
@@ -103,6 +104,7 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
             "status": row["status"],
             "is_scalp": bool(row["is_scalp"]),
             "realized_pnl": pnl,
+            "channel_id": str(ch) if ch is not None else None,
         })
         if row["status"] == "closed" and pnl != 0:
             total_pnl += pnl

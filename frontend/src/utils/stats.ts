@@ -40,8 +40,9 @@ export function computeDetailedStats(trades: TradeData[]): DetailedStats {
 
   let totalHold = 0, holdCount = 0
   for (const t of closed) {
-    if (t.filled_at && t.closed_at) {
-      const ms = new Date(t.closed_at).getTime() - new Date(t.filled_at).getTime()
+    const closeTs = t.closed_at || t.filled_at || t.placed_at
+    if (t.filled_at && closeTs) {
+      const ms = new Date(closeTs).getTime() - new Date(t.filled_at).getTime()
       if (ms > 0) { totalHold += ms; holdCount++ }
     }
   }
@@ -76,8 +77,10 @@ export interface DailyBar {
 export function computeDailyBars(trades: TradeData[]): DailyBar[] {
   const byDay = new Map<string, number>()
   for (const t of trades) {
-    if (t.status !== 'closed' || !t.closed_at) continue
-    const day = t.closed_at.slice(0, 10)
+    if (t.status !== 'closed') continue
+    const ts = t.closed_at || t.filled_at || t.placed_at
+    if (!ts) continue
+    const day = ts.slice(0, 10)
     byDay.set(day, (byDay.get(day) ?? 0) + t.realized_pnl)
   }
   const sorted = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b))
@@ -96,8 +99,12 @@ export interface CurvePoint {
 
 export function computeCumulativePnl(trades: TradeData[]): CurvePoint[] {
   const closed = trades
-    .filter(t => t.status === 'closed' && t.closed_at)
-    .sort((a, b) => a.closed_at.localeCompare(b.closed_at))
+    .filter(t => t.status === 'closed' && (t.closed_at || t.filled_at || t.placed_at))
+    .sort((a, b) => {
+      const ta = a.closed_at || a.filled_at || a.placed_at
+      const tb = b.closed_at || b.filled_at || b.placed_at
+      return ta.localeCompare(tb)
+    })
 
   if (closed.length === 0) return [{ label: 'Start', value: 0 }]
 
@@ -105,7 +112,8 @@ export function computeCumulativePnl(trades: TradeData[]): CurvePoint[] {
   let cum = 0
   for (const t of closed) {
     cum += t.realized_pnl
-    const d = new Date(t.closed_at)
+    const ts = t.closed_at || t.filled_at || t.placed_at
+    const d = new Date(ts)
     const label = d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
     points.push({ label, value: Math.round(cum * 100) / 100 })
   }
@@ -127,3 +135,25 @@ export function formatHoldTime(minutes: number): string {
   const m = Math.round(minutes % 60)
   return `${h}h ${m}m`
 }
+
+export type Period = 'daily' | 'weekly' | 'all'
+
+export function filterTradesByPeriod(trades: TradeData[], period: Period): TradeData[] {
+  if (period === 'all') return trades
+  const cutoff = Date.now() - (period === 'daily' ? 86400000 : 7 * 86400000)
+  return trades.filter(t => {
+    const ts = t.closed_at || t.filled_at || t.placed_at
+    return ts && new Date(ts).getTime() >= cutoff
+  })
+}
+
+export function groupBySignalId<T extends { signal_id: number }>(items: T[]): Map<number, T[]> {
+  const map = new Map<number, T[]>()
+  for (const item of items) {
+    const group = map.get(item.signal_id) ?? []
+    group.push(item)
+    map.set(item.signal_id, group)
+  }
+  return map
+}
+

@@ -366,6 +366,7 @@ class SyncCycle:
                         offset=offset,
                         mt5_client=mt5_client,
                         sqlite=sqlite,
+                        channel_id=row["channel_id"],
                     )
                     result.placed += ok
                     result.errors += not ok

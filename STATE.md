@@ -1,8 +1,8 @@
 # Project State — 2026-05-29
 
-## Current Status: V4 Integration & Bug Fix Plan Ready
+## Current Status: V4 Complete
 
-**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration/bug fix plan in NEXT_STEPS.md (19 steps, 5 phases — NOT YET IMPLEMENTED).**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57, all 19 steps in 5 phases — DONE).**
 
 ---
 
@@ -414,7 +414,66 @@ These were clarified or resolved during implementation. Future Claude should tre
     engine controls + shutdown button with confirmation. Toggleable log drawer at bottom. recharts added
     as dependency. Old components (StatusBar, ControlPanel, LicensePanel, LogPanel) deleted.
 
-47. **Frontend V3 redesign** — Complete visual overhaul from Claude Design handoff. Layout A (Command
+47. **Frontend V3 redesign** — Complete visual overhaul from Claude Design handoff.
+
+48. **MARK_CLOSED timestamp fix** — `MARK_CLOSED` in `queries.py` now sets
+    `cancelled_at = datetime('now')`. SQLite has no separate `closed_at` column; `cancelled_at`
+    doubles as the close timestamp. Frontend's `closed_at` field (mapped from `cancelled_at` in
+    the history route) was always empty before this fix, breaking all chart computations.
+
+49. **channel_id data pipeline** — `s.channel_id` added to `FETCH_ACTIVE_SIGNALS_WITH_LIMITS`.
+    `channel_id INTEGER` column added to `order_mappings` (with migration). `insert_order()`
+    accepts `channel_id: int | None`; `order_placer.py` passes it through from the Supabase row.
+    Dashboard cache and history route serialise as `str(channel_id)` to avoid 64-bit Discord
+    snowflake precision loss in JavaScript JSON parsing. TypeScript types use `string | null`.
+
+50. **channels.ts — channel ID mapping** — New file `frontend/src/utils/channels.ts`. 18-channel
+    ID→name mapping (hardcoded). `getChannelName()` and `getSignalType()` return channel name and
+    `SignalType` (`'Scalp' | 'Swing' | 'Tolls' | 'Standard'`). Used in dashboard signal cards
+    and history type filter.
+
+51. **Timestamp fallback chain** — All three compute functions in `stats.ts` now use
+    `t.closed_at || t.filled_at || t.placed_at` as the effective timestamp for closed trades.
+    Handles existing SQLite rows that have NULL `cancelled_at` (before fix 48 was deployed).
+
+52. **filterTradesByPeriod / groupBySignalId** — Two new exports in `stats.ts`.
+    `filterTradesByPeriod(trades, 'daily'|'weekly'|'all')` cuts by 24h or 7d window.
+    `groupBySignalId<T extends { signal_id: number }>(items)` returns a `Map<number, T[]>`.
+    Used by dashboard (period toggles, signal grouping) and history (signal grouping).
+
+53. **Dashboard: period filtering wired** — `pnlP` toggle filters trades before computing
+    equity curve, daily bars, and pnlValue. `wlP` toggle independently filters for win/loss
+    donut. Previously the toggles only changed the label text.
+
+54. **Dashboard: signal grouping** — Closest Signals groups `pending_orders` by `signal_id`;
+    each card shows limit count, channel name, signal type. Recent Trades groups closed trades
+    by `signal_id`; each row shows aggregate P&L and limit count. Section order changed:
+    Positions before Closest Signals.
+
+55. **History: signal grouping + new filters** — History table now shows one row per signal
+    group (aggregated P&L, total lots, limit count). New filter controls: Instrument `<select>`,
+    Sort by `<select>` (Newest/Oldest/P&L High→Low/P&L Low→High/Symbol A→Z), Type Seg expanded
+    to All/Standard/Scalp/Swing/Tolls. `useSort` removed; `buildGroups()` + `sortGroups()`
+    handle grouping and ordering. Stats grid remains trade-level.
+
+56. **Settings: full rewrite** — All four bugs fixed in one pass:
+    (a) TP config reads `tp_config` as object keyed by asset class (not array); oil preserved on
+        save via `...config.tp_config` spread. `partial_close_percent` read from
+        `tp_config.partial_close_percent`.
+    (b) Symbol mapping reads `config.symbol_map` (not non-existent `symbol_overrides`); always
+        shown (no visibility guard); feed indicator derived from `offset_instruments`.
+    (c) `handleSave` now saves all fields: full `lot_sizing`, `tp_config`, `symbol_map`,
+        `stock_suffix`. Uses `...config` spread to preserve fields not in UI.
+    (d) Validate button calls `handleValidate()` which PUTs config with updated `license_key`.
+    All inputs converted from `defaultValue` (uncontrolled) to `value` + `onChange` (controlled).
+    `initFromConfig()` drives both initial load and Discard reset.
+
+57. **Fixed lot per instrument** — `LotSizingConfig.fixed_lot` changed from `float` to
+    `float | dict[str, float]` in `settings.py`. `LotCalculator._get_fixed_lot(mt5_symbol)`
+    looks up by symbol then `default` key when `fixed_lot` is a dict. Settings UI shows a table
+    with a locked Default row + editable per-instrument rows when mode=`fixed`. Saves as float
+    when only the default row exists, dict otherwise. `select.inp` in `index.css` adds
+    `appearance: none` + SVG chevron arrow (theme-aware) for consistent styling. Layout A (Command
     Strip) chosen. Theme: warm light paper surfaces (#F7F4EE), comfy-black top bar (#262320), orange
     accent (#E8824A). Typography: Schibsted Grotesk + JetBrains Mono via Google Fonts. Full-width top
     bar spans above sidebar. 72px icon sidebar rail with hover tooltips. Custom SVG charts replace
@@ -429,9 +488,9 @@ These were clarified or resolved during implementation. Future Claude should tre
 
 ---
 
-### V4 Integration & Bug Fix Plan (NOT YET IMPLEMENTED)
+### V4 Integration & Bug Fixes (COMPLETE)
 ```
-NEXT_STEPS.md — 19 steps, 5 phases. Addresses frontend integration bugs and missing features.
+NEXT_STEPS.md — 19 steps, 5 phases. All implemented. See decisions 48–57 below.
 ```
 
 **Bugs discovered during V3 verification:**

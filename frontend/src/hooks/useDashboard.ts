@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { fetchDashboard } from '../api'
 import type { DashboardData } from '../types'
 
-export function useDashboard(intervalMs: number = 2000) {
+export function useDashboard(intervalMs: number = 1000) {
   const [data, setData] = useState<DashboardData | null>(null)
 
   useEffect(() => {

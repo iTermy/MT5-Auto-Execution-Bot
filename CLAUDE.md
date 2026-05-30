@@ -15,7 +15,8 @@ Python Windows desktop app that reads trading signals from Supabase PostgreSQL a
 ## How To Work In This Repo
 All decisions and context live in these repo files. Do not rely on chat history or memory.
 
-- **Commit by default** — after completing changes, commit and push to `main` without asking. Use descriptive commit messages. Only ask before committing if the change is destructive or you are unsure about correctness.
+- **Commit by default** — after completing changes, commit and push to `main` without asking. Only ask before committing if the change is destructive or you are unsure about correctness.
+- **Commit style** — one short line, plain English, no version labels ("V5", "V6"), no decision refs ("decisions 65-71"), no parenthetical explanations. State *what* changed in as few words as possible. Good: `"Fix SL offset on offset instruments"`. Bad: `"V5 fix: SL offset at placement (decision 58) — adj_sl now includes offset for SPX/NAS/BTC/ETH"`.
 - **ARCHITECTURE.md** — system design, schemas, all technical decisions, config.json structure
 - **STATE.md** — what exists, what doesn't, all owner-approved decisions, known risks
 - **NEXT_STEPS.md** — V5 cross-codebase review (7 steps, 4 phases). Fully executed.

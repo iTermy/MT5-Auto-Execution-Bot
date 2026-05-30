@@ -155,11 +155,14 @@ class Engine:
         while True:
             try:
                 config = self._config
-                await self._tp.run_cycle(self._mt5, self._sqlite, config)
+                if not self._scheduler.is_spread_hour():
+                    await self._tp.run_cycle(self._mt5, self._sqlite, config)
+                else:
+                    await self._tp.run_cycle(self._mt5, self._sqlite, config, crypto_only=True)
             except Exception:
                 logger.error("tp_loop error", exc_info=True)
 
-            await asyncio.sleep(await self._active_interval())
+            await asyncio.sleep(await self._tp_interval())
 
     async def _serve_api(self) -> None:
         import uvicorn
@@ -184,9 +187,25 @@ class Engine:
             logger.error("Dashboard cache update failed", exc_info=True)
 
     async def _active_interval(self) -> float:
+        if self._scheduler.is_spread_hour():
+            active = await self._sqlite.get_all_active()
+            if active:
+                return 30.0
+            return 60.0
         active = await self._sqlite.get_all_active()
         if active:
             return float(self._config.polling.tp_active_interval_seconds)
+        return float(self._config.polling.supabase_interval_seconds)
+
+    async def _tp_interval(self) -> float:
+        if self._scheduler.is_spread_hour():
+            active = await self._sqlite.get_all_active()
+            if active:
+                return 30.0
+            return 60.0
+        active = await self._sqlite.get_all_active()
+        if active:
+            return float(self._config.polling.tp_trailing_interval_seconds)
         return float(self._config.polling.supabase_interval_seconds)
 
     async def _broadcast_status(self) -> None:

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import MetaTrader5 as mt5
 
+from bot.config.constants import AssetClass
 from bot.config.settings import Settings
 from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
@@ -25,15 +26,21 @@ class TPEngine:
         mt5_client: MT5Client,
         sqlite: SQLiteDB,
         config: Settings,
+        crypto_only: bool = False,
     ) -> None:
         mt5_pos_map = {p.ticket: p for p in mt5_client.positions_get()}
         sqlite_rows = await sqlite.get_filled_positions()
 
-        # Group rows by signal_id, keeping only those with a live MT5 position
         by_signal: dict[int, list] = defaultdict(list)
         for row in sqlite_rows:
-            if row["mt5_ticket"] in mt5_pos_map:
-                by_signal[row["signal_id"]].append(row)
+            if row["mt5_ticket"] not in mt5_pos_map:
+                continue
+            if crypto_only:
+                pos = mt5_pos_map[row["mt5_ticket"]]
+                db_sym = db_symbol_from_mt5(pos.symbol, config)
+                if detect_asset_class(db_sym) != AssetClass.CRYPTO:
+                    continue
+            by_signal[row["signal_id"]].append(row)
 
         for signal_id, rows in by_signal.items():
             try:

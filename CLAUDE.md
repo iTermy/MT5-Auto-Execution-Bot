@@ -1,13 +1,13 @@
 # CLAUDE.md — Auto-Execution Bot V2
 
 ## Current Implementation Status
-**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57, 19 steps, 5 phases — all done).**
+**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57) + V5 cross-codebase hardening complete (decisions 58-64) + V6 MT5 polling reduction complete (decisions 65-71, 7 optimizations — all done).**
 Read STATE.md immediately — it lists all implementation decisions made during build that are not
 in the original ARCHITECTURE.md.
 
 ## What To Do Now
-All planned work is complete. NEXT_STEPS.md is fully executed. See STATE.md decisions 48–57 for
-a record of all V4 implementation choices.
+All planned work is complete. NEXT_STEPS.md is fully executed. See STATE.md decisions 65–71 for
+a record of all V6 (polling reduction) implementation choices.
 
 ## What This Is
 Python Windows desktop app that reads trading signals from Supabase PostgreSQL and places/manages pending orders on MetaTrader 5 (MT5) via ICMarkets. FastAPI backend + React/TypeScript frontend served at `localhost:8501`, system tray icon via pystray.
@@ -15,9 +15,10 @@ Python Windows desktop app that reads trading signals from Supabase PostgreSQL a
 ## How To Work In This Repo
 All decisions and context live in these repo files. Do not rely on chat history or memory.
 
+- **Commit by default** — after completing changes, commit and push to `main` without asking. Use descriptive commit messages. Only ask before committing if the change is destructive or you are unsure about correctness.
 - **ARCHITECTURE.md** — system design, schemas, all technical decisions, config.json structure
 - **STATE.md** — what exists, what doesn't, all owner-approved decisions, known risks
-- **NEXT_STEPS.md** — V4 integration & bug fix plan (19 steps, 5 phases). Execute in order.
+- **NEXT_STEPS.md** — V5 cross-codebase review (7 steps, 4 phases). Fully executed.
 - **CONVENTIONS.md** — code quality rules, naming, async patterns, API-specific conventions
 
 Read STATE.md first. It lists every owner decision and every known risk.
@@ -45,7 +46,7 @@ pytest tests/
 - Supabase tables are **read-only** — no INSERT/UPDATE/DELETE on signals, limits, live_prices, licenses
 - All mutable bot state lives in **local SQLite** (`orders.db`)
 - No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments
-- All MT5 orders use magic number `20260001`
+- All MT5 orders use magic number `20250001`
 - `is_scalp` captured from signal at placement time, stored in SQLite, never re-read from DB
 - Idempotent sync — running a cycle twice must have no additional effect
 - TP engine must never crash the main loop — log errors and continue
@@ -66,7 +67,7 @@ These are not in ARCHITECTURE.md — they were decided during build:
 - **Partial close remainder**: synthetic `limit_id = -new_ticket` (negative integer). fill_detector detects it and insert_order is called with order_type="remainder". status is immediately set to filled+trailing.
 - **TP trigger metric**: compares **price movement** (not account P&L) to `profit_threshold`. Dollar threshold = raw price distance. Pip threshold = price_distance / pip_size. Only "others P&L >= 0" uses `position.profit` (account currency).
 - **db_symbol_from_mt5()** in `symbol_mapper.py`: reverse-maps MT5 symbol to DB symbol for asset-class detection. Needed because "BTCUSD" (len 6) fails the crypto rule without mapping back to "BTCUSDT".
-- **Adaptive sleep**: both sync_loop and tp_loop sleep 1s when `sqlite.get_all_active()` is non-empty, 30s when idle.
+- **Adaptive sleep**: sync_loop sleeps 1s when active, tp_loop sleeps 2s when active (`tp_trailing_interval_seconds`), both 30s when idle. During spread hours/weekends: 30s (active) or 60s (idle).
 - **Engine.app is set externally**: main.py calls `create_app(engine)` and assigns to `engine.app`. `run_forever()` starts uvicorn only if `engine.app is not None`.
 - **LicenseValidator dev bypass**: empty URL → returns VALID immediately, no HTTP call.
 - **SSEBroadcaster.last_msg + replay buffer**: GET /api/status reads cached last status. SSE generators replay up to 200 buffered messages for late-connecting clients (init logs).
@@ -165,7 +166,7 @@ frontend/src/hooks/useDashboard.ts    — polling hook (2s interval)
 frontend/src/hooks/useSort.tsx        — generic sortable-table hook with sort indicators
 frontend/src/utils/money.ts           — money() and fmtBalance() formatters
 frontend/src/utils/stats.ts           — compute detailed stats, daily bars, cumulative P&L from trades
-frontend/src/utils/channels.ts — channel ID → name/type mapping (TO BE CREATED in V4)
+frontend/src/utils/channels.ts — channel ID → name/type mapping
 supabase/functions/            — Edge Function for license validation
 tests/                         — pytest suite
 ```
@@ -187,3 +188,23 @@ All V4 bugs have been resolved. See STATE.md decisions 48–57 for full details.
 - **Settings: Validate button** — wired to save license_key via PUT /api/config.
 - **Fixed lot per instrument** — `LotSizingConfig.fixed_lot: float | dict[str, float]`; UI table with Default + per-instrument rows; `LotCalculator._get_fixed_lot()` handles both shapes.
 - **Select element CSS** — `select.inp` styled with `appearance: none` + custom SVG chevron arrow.
+
+## V5 Completed Fixes
+
+All V5 bugs have been resolved. See STATE.md decisions 58–64 for full details.
+
+- **SL offset at placement** — `order_placer.py`: both `adj_sl` calculations now include `+ (offset or 0.0)`. Before this fix, MT5 SL on offset instruments (SPX, NAS, BTC, ETH) was placed in DB price space, not MT5 price space — off by the entire offset.
+- **Partial close volume floor** — `default_strategy.py`: `math.floor(raw / volume_step) * volume_step` + `volume_min` clamp. Added `close_vol <= 0` guard that trails full position. Prevents `TRADE_RETCODE_INVALID_VOLUME` on instruments with `volume_step=0.1`.
+- **Supabase outage guard** — `supabase.py`: errors now propagate from all three fetch methods. `sync_cycle.run()`: `fetch_active_signals` wrapped in try/except; entire placement/cancellation block gated on result. Fill detection always runs.
+- **Force exit after cold restart** — `_check_forced_exits`: removed `previous != "hit"` guard. On restart `_last_signal_status` is empty; the old guard skipped every signal. `filled_sids` gate prevents false positives.
+- **Force exit retry on partial failure** — `_check_forced_exits`: `_last_signal_status` updated only when `all_closed=True`; failed positions are retried next cycle.
+- **SL sync uses current offset** — `_sync_filled_sls`: uses `live_prices` (passed from `run()`) to compute current offset; falls back to `offset_at_placement` when live price unavailable.
+
+## V6 Polling Reduction (decisions 65-71 in STATE.md)
+- **symbol_info() permanent cache** — `MT5Client` caches `SymbolInfo` per symbol in a dict. Static metadata never changes during a session. Eliminates ~500K-1M calls/day when active.
+- **Bulk query TTL cache** — `positions_get()`, `orders_get()`, `account_info()` cached with 500ms TTL. Collapses 4x `positions_get()` and 2x `orders_get()` duplicates per cycle into 1 each.
+- **Pass positions to fill_detector** — `detect_partial_close_tickets()` accepts optional `positions` param; sync_cycle passes its already-fetched list.
+- **Spread-hour deep sleep** — `_active_interval()` returns 30s/60s during spread hours and weekends instead of 1s.
+- **TP loop crypto-only during spread hours** — `TPEngine.run_cycle(crypto_only=True)` during spread hours; non-crypto trailing stops not adjusted during high-spread periods.
+- **Separate TP loop interval** — `tp_trailing_interval_seconds` (default 2s) in `PollingConfig`. TP loop polls at 2s, sync loop at 1s.
+- **Dashboard tick deduplication** — `DashboardCache.update()` fetches `symbol_info_tick()` once per unique symbol, not per position/order.

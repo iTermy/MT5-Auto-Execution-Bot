@@ -44,11 +44,18 @@ class DashboardCache:
                 "currency": account_info.currency,
             }
 
+        all_symbols = {p.symbol for p in mt5_positions} | {o.symbol for o in mt5_orders}
+        tick_cache = {}
+        for sym in all_symbols:
+            tick = mt5_client.symbol_info_tick(sym)
+            if tick:
+                tick_cache[sym] = tick
+
         positions = []
         for pos in mt5_positions:
             row = sqlite_by_ticket.get(pos.ticket)
             current_price = pos.price_open
-            tick = mt5_client.symbol_info_tick(pos.symbol)
+            tick = tick_cache.get(pos.symbol)
             if tick:
                 current_price = tick.bid if pos.type == 0 else tick.ask
             ch = row["channel_id"] if row else None
@@ -71,7 +78,7 @@ class DashboardCache:
             row = sqlite_by_ticket.get(order.ticket)
             current_price = 0.0
             distance = 0.0
-            tick = mt5_client.symbol_info_tick(order.symbol)
+            tick = tick_cache.get(order.symbol)
             if tick:
                 mid = (tick.bid + tick.ask) / 2
                 current_price = mid

@@ -59,12 +59,14 @@ class FillDetector:
         self,
         mt5_client: MT5Client,
         sqlite: SQLiteDB,
+        positions: list[PositionInfo] | None = None,
     ) -> list[NewTicketEvent]:
         trailing_rows = await sqlite.get_trailing_positions()
         all_active = await sqlite.get_all_active()
         known_tickets = {row["mt5_ticket"] for row in all_active}
 
-        positions = mt5_client.positions_get()
+        if positions is None:
+            positions = mt5_client.positions_get()
         active_tickets = {p.ticket for p in positions}
 
         results: list[NewTicketEvent] = []

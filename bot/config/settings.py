@@ -25,6 +25,7 @@ class LotSizingConfig(BaseModel):
 class PollingConfig(BaseModel):
     supabase_interval_seconds: int = 30
     tp_active_interval_seconds: int = 1
+    tp_trailing_interval_seconds: int = 2
     license_heartbeat_seconds: int = 900
 
 

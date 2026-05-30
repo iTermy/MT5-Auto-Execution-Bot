@@ -42,7 +42,7 @@ class OrderPlacer:
 
         if direction == "long":
             adj_price = round(base_price + spread, info.digits)
-            adj_sl = round(db_stop_loss - spread, info.digits)
+            adj_sl = round(db_stop_loss + (offset or 0.0) - spread, info.digits)
             if adj_price < tick.ask:
                 order_type = mt5.ORDER_TYPE_BUY_LIMIT
                 order_type_str = "buy_limit"
@@ -51,7 +51,7 @@ class OrderPlacer:
                 order_type_str = "buy_stop"
         else:
             adj_price = round(base_price - spread, info.digits)
-            adj_sl = round(db_stop_loss + spread, info.digits)
+            adj_sl = round(db_stop_loss + (offset or 0.0) + spread, info.digits)
             if adj_price > tick.bid:
                 order_type = mt5.ORDER_TYPE_SELL_LIMIT
                 order_type_str = "sell_limit"

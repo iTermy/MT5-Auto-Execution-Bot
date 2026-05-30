@@ -24,27 +24,15 @@ class SupabaseDB:
             logger.info("Supabase pool closed")
 
     async def fetch_active_signals(self) -> list[asyncpg.Record]:
-        try:
-            async with self._pool.acquire() as conn:
-                return await conn.fetch(FETCH_ACTIVE_SIGNALS_WITH_LIMITS)
-        except asyncpg.PostgresError as e:
-            logger.error("fetch_active_signals failed: %s", e)
-            return []
+        async with self._pool.acquire() as conn:
+            return await conn.fetch(FETCH_ACTIVE_SIGNALS_WITH_LIMITS)
 
     async def fetch_live_prices(self, symbols: list[str]) -> dict[str, asyncpg.Record]:
-        try:
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(FETCH_LIVE_PRICES, symbols)
-            return {row["symbol"]: row for row in rows}
-        except asyncpg.PostgresError as e:
-            logger.error("fetch_live_prices failed: %s", e)
-            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(FETCH_LIVE_PRICES, symbols)
+        return {row["symbol"]: row for row in rows}
 
     async def fetch_signal_statuses(self, signal_ids: list[int]) -> dict[int, str]:
-        try:
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(FETCH_SIGNAL_STATUSES, signal_ids)
-            return {row["id"]: row["status"] for row in rows}
-        except asyncpg.PostgresError as e:
-            logger.error("fetch_signal_statuses failed: %s", e)
-            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(FETCH_SIGNAL_STATUSES, signal_ids)
+        return {row["id"]: row["status"] for row in rows}

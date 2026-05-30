@@ -1,4 +1,5 @@
 import logging
+import math
 
 import MetaTrader5 as mt5
 
@@ -117,27 +118,39 @@ class DefaultTPStrategy:
             # Partial close — ICMarkets creates a new ticket for the remainder.
             # fill_detector.detect_partial_close_tickets() will pick up the new ticket
             # next cycle and insert it into SQLite with is_trailing=1.
-            close_vol = round(newest.volume * pct / 100, 2)
-            res = mt5_client.close_position(
-                ticket=newest.ticket,
-                symbol=newest.symbol,
-                volume=close_vol,
-                position_type=newest.type,
-                comment=f"s{signal_id}",
-            )
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                await sqlite.set_trailing(newest.ticket)
-                result.closed_tickets.append(newest.ticket)
-                result.trailed_tickets.append(newest.ticket)
-                logger.info(
-                    "TP partial close %d%% ticket=%d signal=%d vol=%.2f",
-                    pct, newest.ticket, signal_id, close_vol,
-                )
+            sym_info = mt5_client.symbol_info(newest.symbol)
+            raw_vol = newest.volume * pct / 100
+            if sym_info and sym_info.volume_step > 0:
+                close_vol = math.floor(raw_vol / sym_info.volume_step) * sym_info.volume_step
+                close_vol = round(close_vol, 8)  # float precision cleanup
+                close_vol = max(close_vol, sym_info.volume_min)
             else:
-                retcode = res.retcode if res else "None"
-                msg = f"partial close failed ticket={newest.ticket} retcode={retcode}"
-                result.errors.append(msg)
-                logger.error("TP: %s signal=%d", msg, signal_id)
+                close_vol = round(raw_vol, 2)
+            if close_vol <= 0:
+                await sqlite.set_trailing(newest.ticket)
+                result.trailed_tickets.append(newest.ticket)
+                logger.info("TP trailing full position (vol floor=0) ticket=%d signal=%d", newest.ticket, signal_id)
+            else:
+                res = mt5_client.close_position(
+                    ticket=newest.ticket,
+                    symbol=newest.symbol,
+                    volume=close_vol,
+                    position_type=newest.type,
+                    comment=f"s{signal_id}",
+                )
+                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    await sqlite.set_trailing(newest.ticket)
+                    result.closed_tickets.append(newest.ticket)
+                    result.trailed_tickets.append(newest.ticket)
+                    logger.info(
+                        "TP partial close %d%% ticket=%d signal=%d vol=%.2f",
+                        pct, newest.ticket, signal_id, close_vol,
+                    )
+                else:
+                    retcode = res.retcode if res else "None"
+                    msg = f"partial close failed ticket={newest.ticket} retcode={retcode}"
+                    result.errors.append(msg)
+                    logger.error("TP: %s signal=%d", msg, signal_id)
 
         return result
 

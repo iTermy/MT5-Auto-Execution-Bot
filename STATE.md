@@ -1,8 +1,8 @@
 # Project State — 2026-05-29
 
-## Current Status: V4 Complete
+## Current Status: V6 Complete
 
-**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57, all 19 steps in 5 phases — DONE).**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71, 7 optimizations — DONE).**
 
 ---
 
@@ -535,6 +535,78 @@ NEXT_STEPS.md — 19 steps, 5 phases. All implemented. See decisions 48–57 bel
 
 ---
 
+### V5 Cross-Codebase Review (COMPLETE)
+```
+NEXT_STEPS.md — 7 steps, 4 phases. All implemented. See decisions 58–64 below.
+```
+
+58. **SL offset at placement fixed** — `order_placer.py` lines 45/54: both `adj_sl` calculations
+    now include `+ (offset or 0.0)`. Before this fix, the MT5 SL on offset instruments (SPX, NAS,
+    BTC, ETH) was off by the entire offset amount — SL placed in DB price space, not MT5 price space.
+
+59. **Partial close volume floored to volume_step** — `bot/tp/default_strategy.py`: replaced
+    `round(raw_vol, 2)` with `math.floor(raw_vol / volume_step) * volume_step` + `volume_min` clamp.
+    Added `close_vol <= 0` guard that trails the full position instead of attempting a zero-volume
+    close. Prevents `TRADE_RETCODE_INVALID_VOLUME` on instruments with `volume_step=0.1`.
+
+60. **Supabase outage no longer mass-cancels orders** — `bot/db/supabase.py`: removed try/except
+    from `fetch_active_signals`, `fetch_live_prices`, `fetch_signal_statuses` — errors now propagate.
+    `bot/core/sync_cycle.py` `run()`: `fetch_active_signals` wrapped in try/except that sets
+    `supabase_rows = None` on failure; entire placement/cancellation block gated on
+    `if supabase_rows is not None:`. Fill detection always runs. SL sync and forced exits also
+    gated on `supabase_rows is not None` (second guard after fill detection).
+
+61. **Force exit fires after cold restart** — `_check_forced_exits`: removed `if previous != "hit":
+    continue` guard. On restart `_last_signal_status` is empty so `previous` is None; the old guard
+    always skipped force exit for signals that transitioned during the restart window. Now force exit
+    fires on first observation of a cancelled/breakeven signal that has filled positions in SQLite.
+    The `filled_sids` gate already prevents false positives on never-filled signals.
+
+62. **Force exit retries on partial close failure** — `_check_forced_exits`: `_last_signal_status`
+    is now updated only after all positions for a signal are successfully closed (`all_closed=True`).
+    If any `close_position` call fails, the status entry stays at its previous value so the next
+    cycle retries the remaining unclosed positions.
+
+63. **SL sync uses current offset** — `_sync_filled_sls` now accepts `live_prices` dict (passed from
+    `run()`). For offset instruments, tries `self._offset_calc.get_offset()` from current live price
+    first; falls back to `offset_at_placement` if live price unavailable or stale. `live_prices`
+    initialized at the outer `if supabase_rows is not None:` scope so it is always defined at the
+    call site regardless of whether `placement_active` was True.
+
+64. **MAGIC_NUMBER doc corrected** — CLAUDE.md said `20260001`; corrected to `20250001` to match
+    `bot/config/constants.py` and `bot/config/settings.py`.
+
+65. **symbol_info() permanent cache** — `MT5Client` caches `SymbolInfo` per symbol in a dict. Static
+    instrument metadata (digits, point, volume_min, volume_step) never changes during a session.
+    Eliminates ~500K–1M redundant MT5 calls/day when active positions exist.
+
+66. **Bulk query TTL cache** — `positions_get()`, `orders_get()`, `account_info()` cached with a
+    500ms TTL on `MT5Client`. Collapses 4 duplicate `positions_get()` and 2 duplicate `orders_get()`
+    per cycle into 1 each. Independent consumers (sync, TP, dashboard, fill_detector) all share the
+    cached result within the same cycle window.
+
+67. **Pass positions to detect_partial_close_tickets()** — `fill_detector.detect_partial_close_tickets()`
+    now accepts an optional `positions` parameter. `sync_cycle.run()` passes the `mt5_positions` list
+    it already fetched, avoiding a redundant `positions_get()` call.
+
+68. **Spread-hour deep sleep** — `_active_interval()` returns 30s (active orders) or 60s (idle)
+    during spread hours and weekends, instead of 1s. No fills can occur during these periods for
+    non-crypto instruments.
+
+69. **TP loop skipped during spread hours** — `TPEngine.run_cycle()` accepts `crypto_only=True`.
+    During spread hours, TP engine only monitors crypto positions (which trade 24/7). Non-crypto
+    trailing stops are not adjusted during high-spread periods to avoid harmful SL changes.
+
+70. **Separate TP loop interval** — New `tp_trailing_interval_seconds` config (default 2s). TP loop
+    uses `_tp_interval()` instead of `_active_interval()`, polling at 2s instead of 1s. Trailing SL
+    does not need sub-second precision. Fill detection (sync loop) remains at 1s.
+
+71. **Dashboard tick deduplication** — `DashboardCache.update()` fetches `symbol_info_tick()` once
+    per unique symbol, not once per position/order. With 5 positions + 3 orders across 4 symbols,
+    this reduces 8 tick calls to 4.
+
+---
+
 ## All Owner-Approved Decisions
 
 These are final. Do not revisit or propose alternatives.
@@ -549,7 +621,7 @@ These are final. Do not revisit or propose alternatives.
 8. **Stock suffix**: "-24" is permanent (means 24-hour trading, not the year). Still configurable in config.json.
 9. **Config reload**: Hot-reload for ALL settings including TP thresholds. Re-read config.json each sync cycle.
 10. **Spread adjustment**: On every order placement, adjust limit price and SL for current MT5 spread. Long: price+spread, SL-spread. Short: price-spread, SL+spread.
-11. **Polling cadence**: Aggressive 1s for all active states (scalp strategy). Sleep only when zero pending orders AND zero open positions.
+11. **Polling cadence**: Sync loop 1s when active, TP loop 2s when active (trailing doesn't need sub-second precision). 30s idle. 30-60s during spread hours/weekends. `symbol_info()` cached permanently; `positions_get()`/`orders_get()`/`account_info()` cached with 500ms TTL to collapse duplicate calls within a cycle.
 
 ---
 

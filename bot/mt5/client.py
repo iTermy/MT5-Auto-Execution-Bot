@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 
 import MetaTrader5 as mt5
@@ -24,10 +25,16 @@ _TRANSIENT_RETCODES = frozenset({
     mt5.TRADE_RETCODE_TIMEOUT,
 })
 
+_BULK_CACHE_TTL = 0.5  # seconds — collapses duplicate calls within a single cycle
+
 
 class MT5Client:
     def __init__(self, connection: MT5Connection) -> None:
         self._conn = connection
+        self._symbol_info_cache: dict[str, SymbolInfo] = {}
+        self._positions_cache: tuple[float, list[PositionInfo]] | None = None
+        self._orders_cache: tuple[float, list[OrderInfo]] | None = None
+        self._account_cache: tuple[float, AccountInfo | None] | None = None
 
     def ensure_connected(self) -> bool:
         return self._conn.ensure_connected()
@@ -70,55 +77,70 @@ class MT5Client:
         )
 
     def orders_get(self) -> list[OrderInfo]:
+        now = time.monotonic()
+        if self._orders_cache and (now - self._orders_cache[0]) < _BULK_CACHE_TTL:
+            return self._orders_cache[1]
         raw = mt5.orders_get()
         if raw is None:
-            return []
-        return [
-            OrderInfo(
-                ticket=o.ticket,
-                symbol=o.symbol,
-                volume_current=o.volume_current,
-                type=o.type,
-                price_open=o.price_open,
-                sl=o.sl,
-                tp=o.tp,
-                magic=o.magic,
-                comment=o.comment,
-                time_setup=o.time_setup,
-            )
-            for o in raw
-            if o.magic == MAGIC_NUMBER
-        ]
+            result: list[OrderInfo] = []
+        else:
+            result = [
+                OrderInfo(
+                    ticket=o.ticket,
+                    symbol=o.symbol,
+                    volume_current=o.volume_current,
+                    type=o.type,
+                    price_open=o.price_open,
+                    sl=o.sl,
+                    tp=o.tp,
+                    magic=o.magic,
+                    comment=o.comment,
+                    time_setup=o.time_setup,
+                )
+                for o in raw
+                if o.magic == MAGIC_NUMBER
+            ]
+        self._orders_cache = (now, result)
+        return result
 
     def positions_get(self) -> list[PositionInfo]:
+        now = time.monotonic()
+        if self._positions_cache and (now - self._positions_cache[0]) < _BULK_CACHE_TTL:
+            return self._positions_cache[1]
         raw = mt5.positions_get()
         if raw is None:
-            return []
-        return [
-            PositionInfo(
-                ticket=o.ticket,
-                symbol=o.symbol,
-                volume=o.volume,
-                type=o.type,
-                price_open=o.price_open,
-                sl=o.sl,
-                tp=o.tp,
-                profit=o.profit,
-                magic=o.magic,
-                comment=o.comment,
-                time=o.time,
-                identifier=o.identifier,
-            )
-            for o in raw
-            if o.magic == MAGIC_NUMBER
-        ]
+            result: list[PositionInfo] = []
+        else:
+            result = [
+                PositionInfo(
+                    ticket=o.ticket,
+                    symbol=o.symbol,
+                    volume=o.volume,
+                    type=o.type,
+                    price_open=o.price_open,
+                    sl=o.sl,
+                    tp=o.tp,
+                    profit=o.profit,
+                    magic=o.magic,
+                    comment=o.comment,
+                    time=o.time,
+                    identifier=o.identifier,
+                )
+                for o in raw
+                if o.magic == MAGIC_NUMBER
+            ]
+        self._positions_cache = (now, result)
+        return result
 
     def symbol_info(self, symbol: str) -> SymbolInfo | None:
+        cached = self._symbol_info_cache.get(symbol)
+        if cached is not None:
+            return cached
         raw = mt5.symbol_info(symbol)
         if raw is None:
             logger.error("symbol_info(%s) failed: %s", symbol, mt5.last_error())
             return None
-        return SymbolInfo(
+        info = SymbolInfo(
             name=raw.name,
             digits=raw.digits,
             point=raw.point,
@@ -129,6 +151,8 @@ class MT5Client:
             trade_tick_size=raw.trade_tick_size,
             trade_contract_size=raw.trade_contract_size,
         )
+        self._symbol_info_cache[symbol] = info
+        return info
 
     def symbol_info_tick(self, symbol: str) -> TickInfo | None:
         raw = mt5.symbol_info_tick(symbol)
@@ -138,11 +162,15 @@ class MT5Client:
         return TickInfo(symbol=symbol, bid=raw.bid, ask=raw.ask, time=raw.time)
 
     def account_info(self) -> AccountInfo | None:
+        now = time.monotonic()
+        if self._account_cache and (now - self._account_cache[0]) < _BULK_CACHE_TTL:
+            return self._account_cache[1]
         raw = mt5.account_info()
         if raw is None:
             logger.error("account_info failed: %s", mt5.last_error())
+            self._account_cache = (now, None)
             return None
-        return AccountInfo(
+        result = AccountInfo(
             login=raw.login,
             balance=raw.balance,
             equity=raw.equity,
@@ -151,6 +179,8 @@ class MT5Client:
             leverage=raw.leverage,
             currency=raw.currency,
         )
+        self._account_cache = (now, result)
+        return result
 
     def cancel_pending_order(self, ticket: int) -> OrderResult | None:
         result = mt5.order_send({

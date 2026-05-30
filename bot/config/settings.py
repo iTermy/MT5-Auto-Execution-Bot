@@ -37,6 +37,24 @@ class SpreadHourConfig(BaseModel):
     weekend_end_day: str = "Sunday"
 
 
+class ProximityConfig(BaseModel):
+    forex_pips: float = 10.0
+    forex_jpy_pips: float = 10.0
+    metals: float = 15.0
+    crypto: float = 1000.0
+    stocks: float = 5.0
+    indices: dict[str, float] = {
+        "SPX": 20.0,
+        "US500": 20.0,
+        "NAS": 50.0,
+        "USTEC": 50.0,
+        "DAX": 50.0,
+        "DE30": 50.0,
+        "JP225": 100.0,
+    }
+    stock_overrides: dict[str, float] = {}
+
+
 class AssetTPConfig(BaseModel):
     profit_threshold: float
     threshold_unit: str
@@ -79,6 +97,7 @@ class Settings(BaseModel):
     offset_drift_threshold_pips: float = 5.0
     feed_max_staleness_seconds: int = 30
     spread_hour: SpreadHourConfig = SpreadHourConfig()
+    proximity: ProximityConfig = ProximityConfig()
     tp_config: TPConfig
 
 

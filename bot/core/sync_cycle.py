@@ -25,50 +25,40 @@ logger = logging.getLogger(__name__)
 
 _UNAVAILABLE_COOLDOWN = 300.0  # seconds before retrying a "not in terminal" symbol
 
-# Asset-class proximity thresholds. (threshold, unit): unit is "pips" or "price" (USD distance).
-_PROXIMITY: dict[AssetClass, tuple] = {
-    AssetClass.FOREX:     (10,     "pips"),
-    AssetClass.FOREX_JPY: (10,     "pips"),
-    AssetClass.METALS:    (20.0,   "price"),
-    AssetClass.CRYPTO:    (1000.0, "price"),
-    AssetClass.STOCKS:    (5.0,    "price"),
-    # INDICES: handled per-instrument below. OIL: not present → always allowed.
-}
-
-# Per-index proximity thresholds (USD distance from current price).
-# Matched by substring against the DB instrument name — add new rows as needed.
-_INDEX_PROXIMITY_USD: dict[str, float] = {
-    "SPX":   20.0,   # S&P 500
-    "US500": 20.0,   # S&P 500 alternate name
-    "NAS":   50.0,   # Nasdaq 100
-    "USTEC": 50.0,   # Nasdaq 100 alternate name
-    "DAX":   50.0,   # DAX (DB side)
-    "DE30":  50.0,   # DAX (ICMarkets MT5 side, in case DB uses it)
-    "JP225": 100.0,  # Nikkei 225
-    # "UK100": ...,  # FTSE 100 — add threshold when needed
-}
-
-
 def _within_proximity(
-    limit_prices: list[float], mid: float, asset_class: AssetClass, info, db_sym: str = ""
+    limit_prices: list[float], mid: float, asset_class: AssetClass, info, prox, db_sym: str = ""
 ) -> bool:
     min_dist = min(abs(p - mid) for p in limit_prices)
 
+    if asset_class == AssetClass.STOCKS:
+        s = db_sym.upper()
+        for sym, threshold in prox.stock_overrides.items():
+            if sym.upper() in s:
+                return min_dist <= threshold
+        return min_dist <= prox.stocks
+
     if asset_class == AssetClass.INDICES:
         s = db_sym.upper()
-        for keyword, threshold in _INDEX_PROXIMITY_USD.items():
-            if keyword in s:
+        for keyword, threshold in prox.indices.items():
+            if keyword.upper() in s:
                 return min_dist <= threshold
         return True  # unrecognized index → no filter
 
-    if asset_class not in _PROXIMITY:
-        return True  # OIL and any other unhandled classes
-
-    threshold, unit = _PROXIMITY[asset_class]
-    if unit == "pips":
+    if asset_class == AssetClass.FOREX:
         pip_sz = info.point * (10 if info.digits in (3, 5) else 1)
-        return (min_dist / pip_sz) <= threshold if pip_sz > 0 else True
-    return min_dist <= threshold
+        return (min_dist / pip_sz) <= prox.forex_pips if pip_sz > 0 else True
+
+    if asset_class == AssetClass.FOREX_JPY:
+        pip_sz = info.point * (10 if info.digits in (3, 5) else 1)
+        return (min_dist / pip_sz) <= prox.forex_jpy_pips if pip_sz > 0 else True
+
+    if asset_class == AssetClass.METALS:
+        return min_dist <= prox.metals
+
+    if asset_class == AssetClass.CRYPTO:
+        return min_dist <= prox.crypto
+
+    return True  # OIL and any other unhandled classes
 
 
 @dataclass
@@ -314,7 +304,7 @@ class SyncCycle:
                             continue
                         mid = (tick.bid + tick.ask) / 2
                         new_prices = [float(supabase_by_limit[lid]["price_level"]) for lid in lids]
-                        if _within_proximity(new_prices, mid, detect_asset_class(db_sym), info, db_sym):
+                        if _within_proximity(new_prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym):
                             approved_signals.add(sig_id)
                         else:
                             result.skipped += len(lids)

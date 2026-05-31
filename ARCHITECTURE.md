@@ -75,7 +75,7 @@ TPEngine (engine.py)
 ### Partial Close Ticket Handling
 ICMarkets hedging mode: partial close creates a **new ticket** for the remainder. Original ticket is closed. Fill detector must:
 1. Detect new ticket via MT5 deal history
-2. Create new SQLite row inheriting signal_id, is_scalp, is_trailing from parent
+2. Create new SQLite row inheriting signal_id, signal_type, is_trailing from parent
 
 ### Asset Class Detection Order (symbol_mapper.py)
 1. Metals: `XAUUSD`, `XAGUSD`, `GOLD`, `SILVER`
@@ -178,7 +178,7 @@ Scalp strategy — every second matters. 1s polling when any pending orders or p
 Multiple signals can exist for same instrument. signal_id encoded in MT5 order comment: `"s{signal_id}"` (e.g. `"s12345"`). Primary mapping is SQLite `order_mappings.signal_id`. Comment is reconciliation fallback.
 
 ## Supabase Schema (Read-Only)
-**signals**: id, instrument, direction(long/short), stop_loss, status(active/hit/profit/breakeven/stop_loss/cancelled), scalp(bool), expiry_time
+**signals**: id, instrument, direction(long/short), stop_loss, status(active/hit/profit/breakeven/stop_loss/cancelled), type(standard/scalp/swing/toll/pa/1-1), expiry_time, channel_id
 **limits**: id, signal_id(FK), price_level, sequence_number, status(pending/hit/cancelled)
 **live_prices**: symbol(PK), bid, ask, feed(oanda/binance), updated_at
 **licenses**: (queried by Edge Function, not by bot directly)
@@ -202,7 +202,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     last_offset_check       TEXT,
     db_stop_loss            REAL,
     last_known_mt5_sl       REAL,
-    is_scalp                INTEGER NOT NULL DEFAULT 0,
+    signal_type             TEXT NOT NULL DEFAULT 'standard',  -- standard|scalp|swing|toll|pa|1-1
     is_trailing             INTEGER NOT NULL DEFAULT 0
 );
 ```
@@ -265,10 +265,24 @@ CREATE TABLE IF NOT EXISTS order_mappings (
       "crypto":    { "profit_threshold": 150.0,"trailing_distance": 25.0 },
       "oil":       { "profit_threshold": 0.25, "trailing_distance": 0.1 }
     },
+    "toll_overrides":  {},
+    "swing_overrides": {},
+    "pa_overrides":    {},
+    "one_to_one": {
+      "profit_threshold": 10.0,
+      "overrides": {}
+    },
     "instrument_overrides": {}
   }
 }
 ```
+
+Per-type override fallback rules (see `bot/tp/asset_config.py`):
+
+- `standard` — uses the base asset-class config.
+- `scalp`, `toll`, `pa` — use the per-asset override if present; otherwise fall back to the base asset-class config.
+- `swing` — uses the per-asset override if present; otherwise falls back to `3 × base.profit_threshold`.
+- `1-1` — engine forces `threshold_unit='dollars'`, `partial_close_percent=100`, and `trailing_distance=0`. Only `one_to_one.profit_threshold` (and per-asset `overrides`) is user-tunable. Trailing is also gated off explicitly in `TPEngine._process_group`.
 
 ## Order Type Selection Logic
 The order type depends on signal direction and limit price relative to current market:

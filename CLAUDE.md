@@ -1,13 +1,14 @@
 # CLAUDE.md — Auto-Execution Bot V2
 
 ## Current Implementation Status
-**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57) + V5 cross-codebase hardening complete (decisions 58-64) + V6 MT5 polling reduction complete (decisions 65-71, 7 optimizations — all done).**
+**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57) + V5 cross-codebase hardening complete (decisions 58-64) + V6 MT5 polling reduction complete (decisions 65-71) + V7 signal_type expansion complete (decision 72).**
 Read STATE.md immediately — it lists all implementation decisions made during build that are not
 in the original ARCHITECTURE.md.
 
 ## What To Do Now
-All planned work is complete. NEXT_STEPS.md is fully executed. See STATE.md decisions 65–71 for
-a record of all V6 (polling reduction) implementation choices.
+All planned work is complete. NEXT_STEPS.md is fully executed. See STATE.md decision 72 for the
+V7 expansion that replaced the `is_scalp` boolean with a six-value `signal_type` (standard / scalp
+/ swing / toll / pa / 1-1) and added per-type TP overrides + the 1-1 fixed-TP path.
 
 ## What This Is
 Python Windows desktop app that reads trading signals from Supabase PostgreSQL and places/manages pending orders on MetaTrader 5 (MT5) via ICMarkets. FastAPI backend + React/TypeScript frontend served at `localhost:8501`, system tray icon via pystray.
@@ -48,7 +49,7 @@ pytest tests/
 - All mutable bot state lives in **local SQLite** (`orders.db`)
 - No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments
 - All MT5 orders use magic number `20250001`
-- `is_scalp` captured from signal at placement time, stored in SQLite, never re-read from DB
+- `signal_type` captured from signal at placement time (Supabase `signals.type`), stored in SQLite as `signal_type TEXT`, never re-read from DB. Values: `standard`, `scalp`, `swing`, `toll`, `pa`, `1-1`.
 - Idempotent sync — running a cycle twice must have no additional effect
 - TP engine must never crash the main loop — log errors and continue
 - Spread adjustment applied to every order placement (see ARCHITECTURE.md)
@@ -209,3 +210,10 @@ All V5 bugs have been resolved. See STATE.md decisions 58–64 for full details.
 - **TP loop crypto-only during spread hours** — `TPEngine.run_cycle(crypto_only=True)` during spread hours; non-crypto trailing stops not adjusted during high-spread periods.
 - **Separate TP loop interval** — `tp_trailing_interval_seconds` (default 2s) in `PollingConfig`. TP loop polls at 2s, sync loop at 1s.
 - **Dashboard tick deduplication** — `DashboardCache.update()` fetches `symbol_info_tick()` once per unique symbol, not per position/order.
+
+## V7 signal_type Expansion (decision 72 in STATE.md)
+- **Schema change** — Supabase dropped `signals.scalp BOOLEAN`, added `signals.type TEXT` with six values: `standard`, `scalp`, `swing`, `toll`, `pa`, `1-1`. SQLite `order_mappings.is_scalp` → `signal_type TEXT DEFAULT 'standard'`; one-shot migration in `SQLiteDB.init_schema()` backfills `is_scalp=1 → 'scalp'` and drops the old column.
+- **TP routing per type** — `asset_config.get_config(asset_class, signal_type, config, instrument)` dispatches: `standard` uses base; `scalp/toll/pa` use their own override map (fall back to base if unconfigured); `swing` falls back to **3× the base threshold** when unconfigured; `1-1` forces `threshold_unit='dollars'`, `partial_close_percent=100`, `trailing_distance=0`.
+- **1-1 trailing lockout** — `TPEngine._process_group` skips the trailing branch when `signal_type == '1-1'`, even if a stale `is_trailing=1` row exists. Belt-and-suspenders alongside the `partial_close_percent=100` config force.
+- **Config additions** — `TPConfig` gained `toll_overrides`, `swing_overrides`, `pa_overrides` (same shape as `scalp_overrides`) and `one_to_one: OneToOneConfig` (`profit_threshold: float = 10.0` + `overrides: dict[str, float]`). All new override maps default to `{}`.
+- **Frontend** — `TradeData.signal_type`, `PositionData.signal_type`, `PendingOrderData.signal_type` (replaces `is_scalp`); History page Type filter expanded to all six types and reads `signal_type` from DB; Settings TP table now has `Standard | Scalp | Toll | Swing | PA` tabs over the per-asset grid plus a separate 1-1 fixed-TP card. `channels.ts` keeps `getChannelName()` only — `getSignalType()`/`CHANNEL_TYPES` removed (replaced by authoritative DB field). New `frontend/src/utils/signalType.ts` holds the type list, display labels, and badge classes.

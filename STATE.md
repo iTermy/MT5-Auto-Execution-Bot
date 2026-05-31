@@ -1,8 +1,8 @@
 # Project State — 2026-05-29
 
-## Current Status: V6 Complete
+## Current Status: V7 Complete
 
-**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71, 7 optimizations — DONE).**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71). V7 signal_type expansion complete (72) — replaces `is_scalp` boolean with six-value `signal_type` (standard/scalp/swing/toll/pa/1-1), adds per-type TP overrides, and adds the 1-1 fixed-TP path with hard-disabled trailing.**
 
 ---
 
@@ -87,7 +87,7 @@ bot/trading/fill_detector.py     — FillDetector: detect_fills(), detect_partia
 
 ### TP Engine (Phase 7)
 ```
-bot/tp/asset_config.py   — AssetClassConfig dataclass, get_config(asset_class, is_scalp, config, instrument)
+bot/tp/asset_config.py   — AssetClassConfig dataclass, get_config(asset_class, signal_type, config, instrument)
 bot/tp/strategy.py       — TPStrategy Protocol, TPResult dataclass
 bot/tp/default_strategy.py — DefaultTPStrategy: should_trigger, execute, update_trailing
 bot/tp/trailing.py       — TrailingStopManager.update(): SL ratchet
@@ -428,9 +428,10 @@ These were clarified or resolved during implementation. Future Claude should tre
     snowflake precision loss in JavaScript JSON parsing. TypeScript types use `string | null`.
 
 50. **channels.ts — channel ID mapping** — New file `frontend/src/utils/channels.ts`. 18-channel
-    ID→name mapping (hardcoded). `getChannelName()` and `getSignalType()` return channel name and
-    `SignalType` (`'Scalp' | 'Swing' | 'Tolls' | 'Standard'`). Used in dashboard signal cards
-    and history type filter.
+    ID→name mapping (hardcoded). `getChannelName()` returns the channel display name.
+    **Superseded in V7 (decision 72)**: `getSignalType()` and the `CHANNEL_TYPES` map were removed;
+    the History page Type filter and Dashboard signal cards now read the authoritative
+    `signal_type` field that flows through Supabase → SQLite → API → frontend.
 
 51. **Timestamp fallback chain** — All three compute functions in `stats.ts` now use
     `t.closed_at || t.filled_at || t.placed_at` as the effective timestamp for closed trades.
@@ -604,6 +605,44 @@ NEXT_STEPS.md — 7 steps, 4 phases. All implemented. See decisions 58–64 belo
 71. **Dashboard tick deduplication** — `DashboardCache.update()` fetches `symbol_info_tick()` once
     per unique symbol, not once per position/order. With 5 positions + 3 orders across 4 symbols,
     this reduces 8 tick calls to 4.
+
+72. **signal_type replaces is_scalp (V7)** — Supabase `signals` table dropped `scalp BOOLEAN` and
+    added `type TEXT` with six values: `standard`, `scalp`, `swing`, `toll`, `pa`, `1-1`. The bot
+    now propagates `signal_type` end-to-end:
+    - **Supabase query** (`bot/db/queries.py`): `s.type AS signal_type` (aliased; `type` is a Python
+      builtin, alias keeps Python access ergonomic and matches the SQLite column name).
+    - **SQLite schema**: `order_mappings.is_scalp INTEGER` → `signal_type TEXT NOT NULL DEFAULT 'standard'`.
+      One-shot migration in `SQLiteDB.init_schema()`: PRAGMA-detects the old column, ALTERs to add
+      `signal_type`, backfills `is_scalp=1 → 'scalp'`, then DROPs `is_scalp`. DROP wrapped in
+      try/except — if SQLite is too old, the column is left in place (code stops reading it either way).
+    - **Pipeline propagation**: `OrderPlacer.place_order()`, `SQLiteDB.insert_order()`,
+      `FillDetector.NewTicketEvent`, and `DashboardCache` all carry `signal_type: str` instead of
+      `is_scalp: int`. The remainder-insert path in `sync_cycle.py` forwards the same string.
+    - **TP routing** (`bot/tp/asset_config.py`): `get_config(asset_class, signal_type, config, instrument)`.
+      Override dispatch table covers `scalp/toll/pa` (fall back to base if unset) and `swing` (falls
+      back to `3 × base.profit_threshold` when no override is configured — `swing` default lives in
+      code, not config, per owner spec "for now, make it 3x"). `1-1` forces `threshold_unit='dollars'`,
+      `partial_close_percent=100`, `trailing_distance=0`.
+    - **1-1 trailing lockout**: `TPEngine._process_group` explicitly skips the `trailing_rows` branch
+      when `signal_type == '1-1'`, even if a stale `is_trailing=1` row exists. Belt-and-suspenders
+      alongside the `partial_close_percent=100` config force so manual DB edits or future config
+      changes cannot accidentally enable trailing for 1-1 trades.
+    - **Config additions** (`bot/config/settings.py`): `TPConfig` gained `toll_overrides`,
+      `swing_overrides`, `pa_overrides` (each `dict[str, ScalpOverrideConfig]`) and `one_to_one:
+      OneToOneConfig` (`profit_threshold: float = 10.0` + `overrides: dict[str, float]`). All new
+      override maps default to `{}`. `config.json` updated with empty stubs.
+    - **API serialization** (`bot/api/routes.py /api/history`): emits `signal_type: str` instead of
+      `is_scalp: bool`. `DashboardCache` also adds `signal_type` to positions and pending orders.
+    - **Frontend** (`frontend/src/types.ts`): `TradeData.signal_type`, `PositionData.signal_type`,
+      `PendingOrderData.signal_type`, plus the new `SignalType` union. New
+      `frontend/src/utils/signalType.ts` holds the type list, display labels (`Standard`, `Scalp`,
+      `Swing`, `Toll`, `PA`, `1-1`), and badge classes. History page Type filter expanded to all six
+      types and reads `signal_type` from DB; Settings TP table now has a `Standard | Scalp | Toll |
+      Swing | PA` tab strip over the per-asset grid plus a separate "1-1 fixed TP" card with global
+      default + per-asset overrides table. New CSS badge classes in `frontend/src/index.css`:
+      `.tag.swing`, `.tag.toll`, `.tag.pa`, `.tag.one-to-one`.
+    - **Tests**: all `is_scalp=0` fixture references in `tests/test_*.py` updated to
+      `signal_type="standard"`. `_make_supabase_row` returns `signal_type` and `channel_id`.
 
 ---
 

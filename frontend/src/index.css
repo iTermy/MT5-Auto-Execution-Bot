@@ -213,6 +213,10 @@ button { font-family: inherit; cursor: pointer; }
 .tag.trail { background: var(--pos-tint); color: var(--pos); }
 .tag.ghost { background: var(--surface-2); color: var(--text-3); }
 .tag.scalp { background: rgba(224,162,60,.14); color: var(--warn); }
+.tag.swing { background: rgba(86,134,224,.14); color: #4d76c4; }
+.tag.toll { background: rgba(160,110,210,.14); color: #8e63bd; }
+.tag.pa { background: rgba(70,170,150,.14); color: #2f9079; }
+.tag.one-to-one { background: rgba(220,90,90,.14); color: #c54848; }
 .dot-live { width: 6px; height: 6px; border-radius: 50%; background: var(--pos); display: inline-block; }
 
 /* ── Tables ── */

@@ -13,7 +13,7 @@ async def _insert_pending(sqlite_db, ticket: int, limit_id: int = None, signal_i
         lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
         db_stop_loss=1.08500,
-        is_scalp=0,
+        signal_type="standard",
     )
 
 

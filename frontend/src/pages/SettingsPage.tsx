@@ -4,16 +4,28 @@ import { Seg } from '../components/Seg'
 import { startEngine, stopEngine, shutdownEngine, updateConfig } from '../api'
 import type { Config, TPConfig, AssetTPConfig, ScalpOverrideConfig } from '../types'
 
-const ASSET_CLASSES = ['forex', 'forex_jpy', 'metals', 'indices', 'stocks', 'crypto'] as const
+const ASSET_CLASSES = ['forex', 'forex_jpy', 'metals', 'indices', 'stocks', 'crypto', 'oil'] as const
 type AssetKey = typeof ASSET_CLASSES[number]
+
+type OverrideType = 'scalp' | 'toll' | 'swing' | 'pa'
+const OVERRIDE_TYPES: OverrideType[] = ['scalp', 'toll', 'swing', 'pa']
+
+interface OverridePair {
+  thr: string
+  trail: string
+}
 
 interface TpRow {
   asset: string
   thr: string
   unit: string
   trail: string
-  sThr: string
-  sTrail: string
+  overrides: Record<OverrideType, OverridePair>
+}
+
+interface OneToOneOverrideRow {
+  asset: string
+  value: string
 }
 
 interface SymbolRow {
@@ -41,6 +53,9 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [licenseKey, setLicenseKey] = useState('')
   const [partial, setPartial] = useState(50)
   const [tpRows, setTpRows] = useState<TpRow[]>([])
+  const [tpTab, setTpTab] = useState<'standard' | OverrideType>('standard')
+  const [oneToOneDefault, setOneToOneDefault] = useState('10')
+  const [oneToOneRows, setOneToOneRows] = useState<OneToOneOverrideRow[]>([])
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
   const [stockSuffix, setStockSuffix] = useState('-24')
   const [dirty, setDirty] = useState(false)
@@ -73,18 +88,35 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     const tp = cfg.tp_config
     if (tp) {
       setPartial(tp.partial_close_percent ?? 50)
+      const overrideSources: Record<OverrideType, Record<string, ScalpOverrideConfig> | undefined> = {
+        scalp: tp.scalp_overrides,
+        toll:  tp.toll_overrides,
+        swing: tp.swing_overrides,
+        pa:    tp.pa_overrides,
+      }
       setTpRows(ASSET_CLASSES.map(asset => {
         const acfg = tp[asset as AssetKey] as AssetTPConfig | undefined
-        const scalp = tp.scalp_overrides?.[asset] as ScalpOverrideConfig | undefined
+        const overrides = {} as Record<OverrideType, OverridePair>
+        for (const t of OVERRIDE_TYPES) {
+          const ov = overrideSources[t]?.[asset]
+          overrides[t] = {
+            thr: ov ? String(ov.profit_threshold) : '',
+            trail: ov ? String(ov.trailing_distance) : '',
+          }
+        }
         return {
           asset,
           thr: String(acfg?.profit_threshold ?? ''),
           unit: acfg?.threshold_unit ?? '',
           trail: String(acfg?.trailing_distance ?? ''),
-          sThr: scalp != null ? String(scalp.profit_threshold) : '',
-          sTrail: scalp != null ? String(scalp.trailing_distance) : '',
+          overrides,
         }
       }))
+      const one = tp.one_to_one
+      setOneToOneDefault(String(one?.profit_threshold ?? 10))
+      setOneToOneRows(Object.entries(one?.overrides ?? {}).map(([asset, value]) => ({
+        asset, value: String(value),
+      })))
     }
 
     const offsetInst = cfg.offset_instruments ?? []
@@ -98,8 +130,32 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     if (config) initFromConfig(config)
   }, [config, initFromConfig])
 
-  function updateTpRow(i: number, field: keyof TpRow, value: string) {
+  function updateTpStandard(i: number, field: 'thr' | 'unit' | 'trail', value: string) {
     setTpRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
+    touch()
+  }
+
+  function updateTpOverride(i: number, type: OverrideType, field: 'thr' | 'trail', value: string) {
+    setTpRows(prev => prev.map((r, j) => {
+      if (j !== i) return r
+      const pair = { ...r.overrides[type], [field]: value }
+      return { ...r, overrides: { ...r.overrides, [type]: pair } }
+    }))
+    touch()
+  }
+
+  function updateOneToOneRow(i: number, field: 'asset' | 'value', value: string) {
+    setOneToOneRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
+    touch()
+  }
+
+  function addOneToOneRow() {
+    setOneToOneRows(prev => [...prev, { asset: '', value: '10' }])
+    touch()
+  }
+
+  function removeOneToOneRow(i: number) {
+    setOneToOneRows(prev => prev.filter((_, j) => j !== i))
     touch()
   }
 
@@ -152,19 +208,31 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         trailing_distance: parseFloat(row.trail) || 0,
       }])
     )
-    const scalp = Object.fromEntries(
-      tpRows
-        .filter(row => row.sThr !== '' || row.sTrail !== '')
-        .map(row => [row.asset, {
-          profit_threshold: parseFloat(row.sThr) || 0,
-          trailing_distance: parseFloat(row.sTrail) || 0,
-        }])
-    )
+    const overrideMaps = {} as Record<`${OverrideType}_overrides`, Record<string, ScalpOverrideConfig>>
+    for (const t of OVERRIDE_TYPES) {
+      overrideMaps[`${t}_overrides`] = Object.fromEntries(
+        tpRows
+          .filter(row => row.overrides[t].thr !== '' || row.overrides[t].trail !== '')
+          .map(row => [row.asset, {
+            profit_threshold: parseFloat(row.overrides[t].thr) || 0,
+            trailing_distance: parseFloat(row.overrides[t].trail) || 0,
+          }])
+      )
+    }
+    const oneToOne = {
+      profit_threshold: parseFloat(oneToOneDefault) || 10,
+      overrides: Object.fromEntries(
+        oneToOneRows
+          .filter(r => r.asset.trim())
+          .map(r => [r.asset.trim(), parseFloat(r.value) || 0])
+      ),
+    }
     return {
       ...config!.tp_config,
       partial_close_percent: partial,
       ...assetEntries,
-      scalp_overrides: scalp,
+      ...overrideMaps,
+      one_to_one: oneToOne,
     } as TPConfig
   }
 
@@ -372,7 +440,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <div className="panel pad">
           <div className="panel-head">
             <h3>Take-profit &amp; trailing</h3>
-            <span className="sub">per asset class · scalp overrides faded</span>
+            <span className="sub">per asset class · per signal type</span>
           </div>
           <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 500 }}>Partial close on trigger</label>
@@ -385,44 +453,135 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               style={{ flex: 1, maxWidth: 320, accentColor: 'var(--accent)' }}
             />
           </div>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Asset class</th>
-                <th className="num">Threshold</th>
-                <th>Unit</th>
-                <th className="num">Trail dist.</th>
-                <th className="num">Scalp thr.</th>
-                <th className="num">Scalp trail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tpRows.map((t, i) => (
-                <tr key={t.asset}>
-                  <td><span className="sym">{t.asset}</span></td>
-                  <td className="num">
-                    <input className="inp num mono" value={t.thr} style={{ width: 76 }}
-                      onChange={e => updateTpRow(i, 'thr', e.target.value)} />
-                  </td>
-                  <td className="dim">{t.unit}</td>
-                  <td className="num">
-                    <input className="inp num mono" value={t.trail} style={{ width: 76 }}
-                      onChange={e => updateTpRow(i, 'trail', e.target.value)} />
-                  </td>
-                  <td className="num">
-                    <input className="inp num mono" value={t.sThr} style={{ width: 70, opacity: .6 }}
-                      onChange={e => updateTpRow(i, 'sThr', e.target.value)} />
-                  </td>
-                  <td className="num">
-                    <input className="inp num mono" value={t.sTrail} style={{ width: 70, opacity: .6 }}
-                      onChange={e => updateTpRow(i, 'sTrail', e.target.value)} />
-                  </td>
+          <div style={{ marginBottom: 16 }}>
+            <Seg
+              accent
+              value={tpTab}
+              options={[
+                { value: 'standard', label: 'Standard' },
+                { value: 'scalp', label: 'Scalp' },
+                { value: 'toll', label: 'Toll' },
+                { value: 'swing', label: 'Swing' },
+                { value: 'pa', label: 'PA' },
+              ]}
+              onChange={v => setTpTab(v as 'standard' | OverrideType)}
+            />
+          </div>
+          {tpTab === 'standard' ? (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Asset class</th>
+                  <th className="num">Threshold</th>
+                  <th>Unit</th>
+                  <th className="num">Trail dist.</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {tpRows.map((t, i) => (
+                  <tr key={t.asset}>
+                    <td><span className="sym">{t.asset}</span></td>
+                    <td className="num">
+                      <input className="inp num mono" value={t.thr} style={{ width: 76 }}
+                        onChange={e => updateTpStandard(i, 'thr', e.target.value)} />
+                    </td>
+                    <td className="dim">{t.unit}</td>
+                    <td className="num">
+                      <input className="inp num mono" value={t.trail} style={{ width: 76 }}
+                        onChange={e => updateTpStandard(i, 'trail', e.target.value)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <>
+              <p className="faint" style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5 }}>
+                {tpTab === 'swing'
+                  ? 'Leave blank to fall back to 3× the standard threshold.'
+                  : 'Leave blank to fall back to the standard asset-class settings.'}
+              </p>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Asset class</th>
+                    <th className="num">Threshold</th>
+                    <th>Unit</th>
+                    <th className="num">Trail dist.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tpRows.map((t, i) => (
+                    <tr key={t.asset}>
+                      <td><span className="sym">{t.asset}</span></td>
+                      <td className="num">
+                        <input className="inp num mono" value={t.overrides[tpTab].thr} style={{ width: 76 }}
+                          onChange={e => updateTpOverride(i, tpTab, 'thr', e.target.value)} />
+                      </td>
+                      <td className="dim">{t.unit}</td>
+                      <td className="num">
+                        <input className="inp num mono" value={t.overrides[tpTab].trail} style={{ width: 76 }}
+                          onChange={e => updateTpOverride(i, tpTab, 'trail', e.target.value)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       )}
+
+      {/* 1-1 FIXED TP */}
+      <div className="panel pad">
+        <div className="panel-head">
+          <h3>1-1 fixed TP</h3>
+          <span className="sub">1-1 trades always close at this $ amount · trailing disabled</span>
+        </div>
+        <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 18 }}>
+          <div className="field">
+            <label>Global TP ($)</label>
+            <input
+              className="inp num mono"
+              value={oneToOneDefault}
+              onChange={e => { setOneToOneDefault(e.target.value); touch() }}
+              style={{ width: 100 }}
+            />
+          </div>
+        </div>
+        <table className="tbl" style={{ maxWidth: 460 }}>
+          <thead>
+            <tr>
+              <th>Asset class</th>
+              <th className="num">Override TP ($)</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {oneToOneRows.map((r, i) => (
+              <tr key={i}>
+                <td>
+                  <input className="inp mono" value={r.asset}
+                    onChange={e => updateOneToOneRow(i, 'asset', e.target.value)}
+                    placeholder="forex, metals, …"
+                    style={{ width: 150 }} />
+                </td>
+                <td className="num">
+                  <input className="inp num mono" value={r.value}
+                    onChange={e => updateOneToOneRow(i, 'value', e.target.value)}
+                    style={{ width: 88 }} />
+                </td>
+                <td style={{ width: 40 }}>
+                  <button className="btn sm ghost" onClick={() => removeOneToOneRow(i)}>×</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addOneToOneRow}>
+          + Add asset override
+        </button>
+      </div>
 
       {/* SYMBOL MAPPING */}
       <div className="panel pad">

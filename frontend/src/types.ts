@@ -33,6 +33,11 @@ export interface ScalpOverrideConfig {
   trailing_distance: number
 }
 
+export interface OneToOneConfig {
+  profit_threshold: number
+  overrides: Record<string, number>
+}
+
 export interface TPConfig {
   partial_close_percent: number
   forex: AssetTPConfig
@@ -43,8 +48,14 @@ export interface TPConfig {
   crypto: AssetTPConfig
   oil: AssetTPConfig
   scalp_overrides: Record<string, ScalpOverrideConfig>
+  toll_overrides: Record<string, ScalpOverrideConfig>
+  swing_overrides: Record<string, ScalpOverrideConfig>
+  pa_overrides: Record<string, ScalpOverrideConfig>
+  one_to_one: OneToOneConfig
   instrument_overrides: Record<string, Record<string, unknown>>
 }
+
+export type SignalType = 'standard' | 'scalp' | 'swing' | 'toll' | 'pa' | '1-1'
 
 export interface PollingConfig {
   supabase_interval_seconds: number
@@ -98,6 +109,7 @@ export interface PositionData {
   is_trailing: boolean
   signal_id: number
   channel_id: string | null
+  signal_type: SignalType
 }
 
 export interface PendingOrderData {
@@ -111,6 +123,7 @@ export interface PendingOrderData {
   distance: number
   signal_id: number
   channel_id: string | null
+  signal_type: SignalType
 }
 
 export interface DashboardSummary {
@@ -138,7 +151,7 @@ export interface TradeData {
   filled_at: string
   closed_at: string
   status: string
-  is_scalp: boolean
+  signal_type: SignalType
   realized_pnl: number
   channel_id: string | null
 }

@@ -45,6 +45,31 @@ class SQLiteDB:
                 await self._db.execute(f"ALTER TABLE order_mappings ADD COLUMN {col}")
                 await self._db.commit()
                 logger.info("Migration: added %s column", name)
+        # is_scalp (bool) -> signal_type (text). Backfill is_scalp=1 -> 'scalp'.
+        async with self._db.execute("PRAGMA table_info(order_mappings)") as cur:
+            cols = await cur.fetchall()
+        names = {c["name"] for c in cols}
+        if "signal_type" not in names:
+            await self._db.execute(
+                "ALTER TABLE order_mappings ADD COLUMN signal_type TEXT NOT NULL DEFAULT 'standard'"
+            )
+            if "is_scalp" in names:
+                await self._db.execute(
+                    "UPDATE order_mappings SET signal_type = 'scalp' WHERE is_scalp = 1"
+                )
+            await self._db.commit()
+            logger.info("Migration: added signal_type column (backfilled from is_scalp)")
+        if "is_scalp" in names:
+            try:
+                await self._db.execute("ALTER TABLE order_mappings DROP COLUMN is_scalp")
+                await self._db.commit()
+                logger.info("Migration: dropped is_scalp column")
+            except Exception:
+                logger.warning(
+                    "Migration: could not DROP is_scalp (older SQLite). "
+                    "Column left in place; code no longer reads it.",
+                    exc_info=True,
+                )
         logger.info("SQLite schema ready: %s", self._path)
 
     async def close(self) -> None:
@@ -60,7 +85,7 @@ class SQLiteDB:
         lot_size: float,
         placed_at: str,
         db_stop_loss: float,
-        is_scalp: int,
+        signal_type: str,
         feed_price: float | None = None,
         mt5_price: float | None = None,
         offset: float | None = None,
@@ -74,7 +99,7 @@ class SQLiteDB:
         await self._db.execute(
             INSERT_ORDER,
             (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
-             db_stop_loss, is_scalp, feed_price, mt5_price, offset, symbol, channel_id),
+             db_stop_loss, signal_type, feed_price, mt5_price, offset, symbol, channel_id),
         )
         await self._db.commit()
 

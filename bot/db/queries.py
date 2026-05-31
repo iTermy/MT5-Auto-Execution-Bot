@@ -7,7 +7,7 @@ SELECT
     s.direction,
     s.stop_loss,
     s.status          AS signal_status,
-    s.scalp,
+    s.type            AS signal_type,
     s.channel_id,
     l.id              AS limit_id,
     l.price_level,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     last_offset_check       TEXT,
     db_stop_loss            REAL,
     last_known_mt5_sl       REAL,
-    is_scalp                INTEGER NOT NULL DEFAULT 0,
+    signal_type             TEXT NOT NULL DEFAULT 'standard',
     is_trailing             INTEGER NOT NULL DEFAULT 0,
     symbol                  TEXT,
     realized_pnl            REAL,
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
 INSERT_ORDER = """
 INSERT OR IGNORE INTO order_mappings
     (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
-     db_stop_loss, is_scalp, feed_price_at_placement, mt5_price_at_placement,
+     db_stop_loss, signal_type, feed_price_at_placement, mt5_price_at_placement,
      offset_at_placement, symbol, channel_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """

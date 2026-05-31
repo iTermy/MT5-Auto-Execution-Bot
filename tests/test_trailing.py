@@ -41,7 +41,7 @@ async def test_long_initial_sl_set_when_zero(sqlite_db, mock_mt5) -> None:
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1001)
@@ -67,7 +67,7 @@ async def test_long_sl_ratchets_up(sqlite_db, mock_mt5) -> None:
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.09000, is_scalp=0,
+        db_stop_loss=1.09000, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1001)
@@ -88,7 +88,7 @@ async def test_long_sl_never_retreats(sqlite_db, mock_mt5) -> None:
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.09000, is_scalp=0,
+        db_stop_loss=1.09000, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
 
@@ -114,7 +114,7 @@ async def test_short_sl_ratchets_down(sqlite_db, mock_mt5) -> None:
         limit_id=2, signal_id=2, mt5_ticket=1002,
         order_type="sell_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.15500, is_scalp=0,
+        db_stop_loss=1.15500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1002, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1002)
@@ -138,7 +138,7 @@ async def test_short_sl_never_retreats(sqlite_db, mock_mt5) -> None:
         limit_id=2, signal_id=2, mt5_ticket=1002,
         order_type="sell_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.15500, is_scalp=0,
+        db_stop_loss=1.15500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1002, "2026-01-01T00:01:00+00:00")
 
@@ -165,7 +165,7 @@ async def test_trailing_pips_mode_converts_to_price(sqlite_db, mock_mt5) -> None
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1001)

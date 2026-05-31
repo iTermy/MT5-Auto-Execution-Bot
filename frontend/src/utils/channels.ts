@@ -1,5 +1,3 @@
-export type SignalType = 'Scalp' | 'Swing' | 'Tolls' | 'Standard'
-
 const CHANNEL_NAMES: Record<string, string> = {
   '1402971916339380244': 'Daily Setup',
   '1402971964343320636': 'Scalps',
@@ -21,20 +19,7 @@ const CHANNEL_NAMES: Record<string, string> = {
   '1500246110491639818': 'Legends',
 }
 
-const CHANNEL_TYPES: Record<string, SignalType> = {
-  '1402971964343320636': 'Scalp',
-  '1402972635847200838': 'Swing',
-  '1472685381315989730': 'Tolls',
-  '1477339674166169911': 'Tolls',
-  '1484316173515489392': 'Tolls',
-}
-
 export function getChannelName(channelId: string | null | undefined): string {
   if (!channelId) return 'Unknown'
   return CHANNEL_NAMES[channelId] ?? 'Unknown'
-}
-
-export function getSignalType(channelId: string | null | undefined): SignalType {
-  if (!channelId) return 'Standard'
-  return CHANNEL_TYPES[channelId] ?? 'Standard'
 }

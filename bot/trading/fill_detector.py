@@ -23,7 +23,7 @@ class NewTicketEvent:
     original_ticket: int  # SQLite row being replaced
     new_ticket: int       # new position ticket from partial close
     signal_id: int
-    is_scalp: int
+    signal_type: str
 
 
 class FillDetector:
@@ -84,7 +84,7 @@ class FillDetector:
                         original_ticket=original_ticket,
                         new_ticket=pos.ticket,
                         signal_id=signal_id,
-                        is_scalp=row["is_scalp"],
+                        signal_type=row["signal_type"],
                     ))
                     logger.info(
                         "Partial close detected: signal=%d old_ticket=%d new_ticket=%d",

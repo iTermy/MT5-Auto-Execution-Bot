@@ -64,10 +64,12 @@ class TPEngine:
         first_pos = mt5_pos_map[rows[0]["mt5_ticket"]]
         db_sym = db_symbol_from_mt5(first_pos.symbol, config)
         asset_class = detect_asset_class(db_sym)
-        is_scalp = bool(rows[0]["is_scalp"])
-        asset_cfg = get_config(asset_class, is_scalp, config, instrument=db_sym)
+        signal_type = rows[0]["signal_type"] or "standard"
+        asset_cfg = get_config(asset_class, signal_type, config, instrument=db_sym)
 
-        if trailing_rows:
+        # 1-1: fixed TP, full close, trailing disabled — never enter the trailing path
+        # even if a stray is_trailing=1 row exists.
+        if trailing_rows and signal_type != "1-1":
             trailing_positions = [mt5_pos_map[r["mt5_ticket"]] for r in trailing_rows]
             result = await self._strategy.update_trailing(
                 signal_id, trailing_positions, asset_cfg, mt5_client, sqlite

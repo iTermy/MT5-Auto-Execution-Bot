@@ -3,9 +3,8 @@ import { fetchHistory } from '../api'
 import { Seg } from '../components/Seg'
 import { money } from '../utils/money'
 import { computeDetailedStats, formatHoldTime, groupBySignalId } from '../utils/stats'
-import { getSignalType } from '../utils/channels'
-import type { SignalType } from '../utils/channels'
-import type { HistoryData, TradeData } from '../types'
+import { badgeClassFor, formatSignalType } from '../utils/signalType'
+import type { HistoryData, SignalType, TradeData } from '../types'
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
@@ -37,7 +36,6 @@ interface SignalGroup {
   tradeCount: number
   closedAt: string
   status: string
-  isScalp: boolean
   channelId: string | null
   signalType: SignalType
 }
@@ -65,9 +63,8 @@ function buildGroups(trades: TradeData[]): SignalGroup[] {
       tradeCount: group.length,
       closedAt,
       status,
-      isScalp: group.some(t => t.is_scalp),
       channelId,
-      signalType: getSignalType(channelId),
+      signalType: (group[0].signal_type ?? 'standard') as SignalType,
     }
   })
 }
@@ -114,8 +111,7 @@ export function HistoryPage() {
     if (instrumentFilter !== 'all') rows = rows.filter(g => g.symbol === instrumentFilter)
     if (statusFilter !== 'all') rows = rows.filter(g => g.status === statusFilter)
     if (typeFilter !== 'all') {
-      if (typeFilter === 'scalp') rows = rows.filter(g => g.isScalp)
-      else rows = rows.filter(g => g.signalType.toLowerCase() === typeFilter)
+      rows = rows.filter(g => g.signalType === typeFilter)
     }
     return sortGroups(rows, sortBy)
   }, [allGroups, instrumentFilter, statusFilter, typeFilter, sortBy])
@@ -193,7 +189,9 @@ export function HistoryPage() {
                 { value: 'standard', label: 'Standard' },
                 { value: 'scalp', label: 'Scalp' },
                 { value: 'swing', label: 'Swing' },
-                { value: 'tolls', label: 'Tolls' },
+                { value: 'toll', label: 'Toll' },
+                { value: 'pa', label: 'PA' },
+                { value: '1-1', label: '1-1' },
               ]}
               onChange={setTypeFilter}
             />
@@ -269,11 +267,9 @@ export function HistoryPage() {
                   <td className="num mono dim">{g.tradeCount}</td>
                   <td className="num mono">{g.totalLots.toFixed(2)}</td>
                   <td>
-                    {g.isScalp
-                      ? <span className="tag scalp">Scalp</span>
-                      : g.signalType !== 'Standard'
-                        ? <span className="tag ghost">{g.signalType}</span>
-                        : <span className="t-sub">Standard</span>}
+                    {g.signalType === 'standard'
+                      ? <span className="t-sub">Standard</span>
+                      : <span className={'tag ' + badgeClassFor(g.signalType)}>{formatSignalType(g.signalType)}</span>}
                   </td>
                   <td>
                     {g.status === 'closed'

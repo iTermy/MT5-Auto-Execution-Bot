@@ -355,7 +355,7 @@ class SyncCycle:
                             direction=row["direction"],
                             db_stop_loss=float(row["stop_loss"]),
                             db_price=float(row["price_level"]),
-                            is_scalp=int(row["scalp"]),
+                            signal_type=row["signal_type"] or "standard",
                             mt5_symbol=mt5_sym,
                             lot=lot,
                             offset=offset,
@@ -427,7 +427,7 @@ class SyncCycle:
                 lot_size=0.0,
                 placed_at=now_iso,
                 db_stop_loss=0.0,
-                is_scalp=evt.is_scalp,
+                signal_type=evt.signal_type,
                 symbol=remainder_pos.symbol if remainder_pos else None,
             )
             await sqlite.mark_filled(evt.new_ticket, now_iso)

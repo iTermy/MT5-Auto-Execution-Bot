@@ -102,7 +102,7 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
             "filled_at": row["filled_at"] or "",
             "closed_at": row["cancelled_at"] or "",
             "status": row["status"],
-            "is_scalp": bool(row["is_scalp"]),
+            "signal_type": row["signal_type"],
             "realized_pnl": pnl,
             "channel_id": str(ch) if ch is not None else None,
         })

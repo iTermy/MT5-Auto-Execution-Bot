@@ -102,7 +102,7 @@ async def test_execute_pct_zero_sets_trailing(sqlite_db, mock_mt5) -> None:
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
 
@@ -124,7 +124,7 @@ async def test_execute_pct_100_closes_all(sqlite_db, mock_mt5) -> None:
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     mock_mt5.close_position.return_value = make_order_result(ticket=1001)
@@ -146,7 +146,7 @@ async def test_execute_pct_50_partial_close(sqlite_db, mock_mt5) -> None:
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.2,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     mock_mt5.close_position.return_value = make_order_result(ticket=1001)
@@ -169,7 +169,7 @@ async def test_execute_closes_earlier_positions_first(sqlite_db, mock_mt5) -> No
             limit_id=lid, signal_id=1, mt5_ticket=ticket,
             order_type="buy_limit", lot_size=0.1,
             placed_at="2026-01-01T00:00:00+00:00",
-            db_stop_loss=1.08500, is_scalp=0,
+            db_stop_loss=1.08500, signal_type="standard",
         )
         await sqlite_db.mark_filled(ticket, "2026-01-01T00:01:00+00:00")
     mock_mt5.close_position.return_value = make_order_result()

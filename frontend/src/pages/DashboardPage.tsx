@@ -14,7 +14,8 @@ import {
   groupBySignalId,
 } from '../utils/stats'
 import type { Period } from '../utils/stats'
-import { getChannelName, getSignalType } from '../utils/channels'
+import { getChannelName } from '../utils/channels'
+import { formatSignalType } from '../utils/signalType'
 import type { DashboardData, HistoryData, TradeData } from '../types'
 
 interface Props {
@@ -99,7 +100,7 @@ export function DashboardPage({ dashboard, history }: Props) {
           pct: proximityPct(closest),
           dist: formatDist(closest.distance),
           channelName: getChannelName(channelId),
-          signalType: getSignalType(channelId),
+          signalType: formatSignalType(orders[0].signal_type),
         }
       })
       .sort((a, b) => Math.abs(a.closest.distance) - Math.abs(b.closest.distance))

@@ -13,7 +13,8 @@ def _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD") -> dict:
         "direction": "long",
         "stop_loss": 1.08500,
         "price_level": 1.09100,
-        "scalp": False,
+        "signal_type": "standard",
+        "channel_id": None,
     }
 
 
@@ -42,7 +43,7 @@ async def test_idempotency_known_limit_not_replaced(sqlite_db, mock_mt5, sample_
         limit_id=1, signal_id=1, mt5_ticket=1001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
 
     supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1)])
@@ -61,7 +62,7 @@ async def test_idempotency_second_run_is_noop(sqlite_db, mock_mt5, sample_config
         limit_id=2, signal_id=1, mt5_ticket=1002,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=2)])
     scheduler = _mock_scheduler()
@@ -83,7 +84,7 @@ async def test_spread_hour_cancels_pending(sqlite_db, mock_mt5, sample_config) -
         limit_id=1, signal_id=1, mt5_ticket=2001,
         order_type="buy_limit", lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, is_scalp=0,
+        db_stop_loss=1.08500, signal_type="standard",
     )
     mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=2001)
 
@@ -123,7 +124,7 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
         limit_id=10, signal_id=1, mt5_ticket=3001,
         order_type="buy_limit", lot_size=0.01,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=4000.0, is_scalp=0,
+        db_stop_loss=4000.0, signal_type="standard",
         feed_price=4500.0, mt5_price=4510.0, offset=10.0,
     )
     mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=3001)

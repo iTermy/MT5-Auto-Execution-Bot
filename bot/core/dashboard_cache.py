@@ -71,6 +71,7 @@ class DashboardCache:
                 "is_trailing": bool(row["is_trailing"]) if row else False,
                 "signal_id": row["signal_id"] if row else 0,
                 "channel_id": str(ch) if ch is not None else None,
+                "signal_type": (row["signal_type"] if row else None) or "standard",
             })
 
         pending = []
@@ -95,6 +96,7 @@ class DashboardCache:
                 "distance": round(distance, 5),
                 "signal_id": row["signal_id"] if row else 0,
                 "channel_id": str(ch) if ch is not None else None,
+                "signal_type": (row["signal_type"] if row else None) or "standard",
             })
 
         total_profit = sum(p["profit"] for p in positions)

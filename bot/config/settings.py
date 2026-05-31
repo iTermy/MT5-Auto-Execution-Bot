@@ -66,6 +66,11 @@ class ScalpOverrideConfig(BaseModel):
     trailing_distance: float
 
 
+class OneToOneConfig(BaseModel):
+    profit_threshold: float = 10.0          # global default in account dollars
+    overrides: dict[str, float] = {}        # per asset_class override (dollars)
+
+
 class TPConfig(BaseModel):
     partial_close_percent: int = 50
     forex: AssetTPConfig
@@ -76,6 +81,10 @@ class TPConfig(BaseModel):
     crypto: AssetTPConfig
     oil: AssetTPConfig
     scalp_overrides: dict[str, ScalpOverrideConfig] = {}
+    toll_overrides: dict[str, ScalpOverrideConfig] = {}
+    swing_overrides: dict[str, ScalpOverrideConfig] = {}
+    pa_overrides: dict[str, ScalpOverrideConfig] = {}
+    one_to_one: OneToOneConfig = OneToOneConfig()
     instrument_overrides: dict[str, dict] = {}
 
 

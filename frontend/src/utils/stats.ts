@@ -47,7 +47,7 @@ export function computeDetailedStats(trades: TradeData[]): DetailedStats {
     }
   }
 
-  const scalps = closed.filter(t => t.is_scalp).length
+  const scalps = closed.filter(t => t.signal_type === 'scalp').length
 
   return {
     netPnl,

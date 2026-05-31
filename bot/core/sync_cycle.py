@@ -289,27 +289,36 @@ class SyncCycle:
                         new_by_signal[supabase_by_limit[lid]["signal_id"]].append(lid)
 
                     approved_signals: set[int] = set()
+                    rejection_reason: dict[int, str] = {}
                     for sig_id, lids in new_by_signal.items():
                         row0 = supabase_by_limit[lids[0]]
                         db_sym = row0["instrument"]
                         mt5_sym = map_symbol(db_sym, config)
                         if mt5_sym in unavailable_mt5:
-                            continue  # errors already counted
+                            rejection_reason[sig_id] = "symbol not in terminal"
+                            continue  # errors already counted by pre-check
                         if needs_offset(db_sym, config) and db_sym in stale_instruments:
-                            continue  # errors already counted
+                            rejection_reason[sig_id] = "live price stale"
+                            continue  # errors already counted by pre-check
                         tick = sym_ticks.get(mt5_sym)
                         info = sym_infos.get(mt5_sym)
                         if tick is None or info is None:
+                            rejection_reason[sig_id] = "symbol not in terminal"
                             result.errors += len(lids)
+                            logger.warning(
+                                "Signal %d (%s): tick/info unavailable — skipping %d limit(s)",
+                                sig_id, db_sym, len(lids),
+                            )
                             continue
                         mid = (tick.bid + tick.ask) / 2
                         new_prices = [float(supabase_by_limit[lid]["price_level"]) for lid in lids]
                         if _within_proximity(new_prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym):
                             approved_signals.add(sig_id)
                         else:
+                            rejection_reason[sig_id] = "outside proximity"
                             result.skipped += len(lids)
-                            logger.debug(
-                                "Signal %d (%s): no limit within proximity threshold, skipping %d order(s)",
+                            logger.info(
+                                "Signal %d (%s): all limits outside proximity — skipping %d order(s)",
                                 sig_id, db_sym, len(lids),
                             )
 
@@ -329,6 +338,11 @@ class SyncCycle:
                         row = supabase_by_limit[lid]
                         sig_id = row["signal_id"]
                         if sig_id not in approved_signals:
+                            reason = rejection_reason.get(sig_id, "not approved")
+                            logger.info(
+                                "Skip limit_id=%d signal_id=%d instrument=%s reason=%s",
+                                lid, sig_id, row["instrument"], reason,
+                            )
                             continue
 
                         db_sym = row["instrument"]

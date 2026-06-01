@@ -96,9 +96,11 @@ class Engine:
                 try:
                     await asyncio.wait_for(self.api_ready.wait(), timeout=15.0)
                 except asyncio.TimeoutError:
-                    logger.error("API server failed to start within 15s — continuing without dashboard")
                     if api_task.done() and api_task.exception():
-                        logger.error("API startup error: %s", api_task.exception())
+                        logger.critical("API server failed to start: %s", api_task.exception())
+                    else:
+                        logger.critical("API server failed to start within 15s")
+                    return
 
             await self._sqlite.init_schema()
             await self._supabase.create_pool()

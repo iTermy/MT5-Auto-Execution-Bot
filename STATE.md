@@ -1,8 +1,8 @@
-# Project State — 2026-05-29
+# Project State — 2026-05-31
 
-## Current Status: V7 Complete
+## Current Status: Pre-Production Hardening In Progress (Phases 1–2 of 7 complete)
 
-**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71). V7 signal_type expansion complete (72) — replaces `is_scalp` boolean with six-value `signal_type` (standard/scalp/swing/toll/pa/1-1), adds per-type TP overrides, and adds the 1-1 fixed-TP path with hard-disabled trailing.**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71). V7 signal_type expansion complete (72). Pre-production hardening started (73-82, Phases 1-2 of plan in `C:\Python Stuff\TM Bot\IMPLEMENTATION_PLAN.md`).**
 
 ---
 
@@ -58,11 +58,19 @@ bot/mt5/client.py       — MT5Client: order_send(), orders_get(), positions_get
 ```
 bot/db/queries.py    — all SQL constants (Supabase + SQLite), clearly separated
                        V2: GET_ORDER_HISTORY, symbol+realized_pnl in INSERT_ORDER/MARK_CLOSED
-bot/db/supabase.py   — SupabaseDB: create_pool(), close(), fetch_active_signals(), fetch_live_prices()
+                       Hardening: INSERT_CLAIMED_ORDER, PROMOTE_CLAIMED_TO_PENDING,
+                         DELETE_CLAIMED_ORDER, GET_CLAIMED_ORDERS, GET_CLAIMED_BY_SIGNAL_LIMIT,
+                         FETCH_SIGNAL_STATUS; UPDATE_TICKET now has AND status='filled'
+bot/db/supabase.py   — SupabaseDB: create_pool(), close(), fetch_active_signals(), fetch_live_prices(),
+                       fetch_signal_status() [new — single-row status check for pre-send abort],
+                       fetch_signal_statuses(); pool max_size raised to 10
 bot/db/sqlite.py     — SQLiteDB: init_schema() (with column migrations), insert_order(+symbol),
                        mark_filled(), mark_cancelled(), mark_closed(+realized_pnl), set_trailing(),
                        get_pending_orders(), get_filled_positions(), get_trailing_positions(),
-                       get_all_active(), get_order_history()
+                       get_all_active(), get_order_history(),
+                       update_ticket() [now returns bool, guards AND status='filled'],
+                       insert_claimed_order(), promote_claimed_to_pending(),
+                       delete_claimed_order(), get_claimed_orders(), get_claimed_by_signal_limit()
 ```
 
 ### Utilities (Phase 5)
@@ -77,7 +85,9 @@ bot/utils/time_utils.py — to_est(), MarketScheduler (is_spread_hour, should_ca
 bot/trading/symbol_mapper.py     — detect_asset_class(), map_symbol(+stock_no_suffix), needs_offset()
 bot/trading/lot_calculator.py    — LotCalculator.calculate(stop_loss, limit_prices, mt5_symbol)
 bot/trading/offset_calculator.py — OffsetCalculator: get_offset(), apply_offset(), check_drift()
-bot/trading/order_placer.py      — OrderPlacer.place_order() [async, passes symbol to SQLite]
+bot/trading/order_placer.py      — OrderPlacer.place_order() [async, passes symbol to SQLite;
+                                   comment=s{signal_id}_l{limit_id}, claim-before/promote-after,
+                                   pre-send status recheck; accepts supabase parameter]
 bot/trading/order_canceller.py   — OrderCanceller.cancel_order() [async]
 bot/trading/fill_detector.py     — FillDetector: detect_fills(), detect_partial_close_tickets()
                                    FillEvent, NewTicketEvent dataclasses
@@ -116,9 +126,15 @@ bot/license/validator.py — LicenseValidator: validate(), heartbeat_loop(); dev
 ```
 bot/core/scheduler.py       — re-exports MarketScheduler from bot.utils.time_utils
 bot/core/sync_cycle.py      — SyncCycle.run(): excluded symbols filter, stock suffix fallback,
-                               Supabase diff, placement, fill detection, drift cancel
-bot/core/reconciler.py      — Reconciler.reconcile(): 5 startup reconciliation cases
-bot/core/engine.py          — Engine: API-first startup, dashboard cache update, shutdown callback
+                               Supabase diff, placement, fill detection, drift cancel,
+                               _check_external_closes() [new — M2 external close detection],
+                               _check_forced_exits(), _sync_filled_sls()
+bot/core/reconciler.py      — Reconciler.reconcile(): 5 startup reconciliation cases;
+                               reconcile_orphans() [new — re-links claimed rows, cleans stale
+                               claims, cancels untracked orders; magic-number filtered]
+bot/core/engine.py          — Engine: API-first startup, dashboard cache update, shutdown callback,
+                               _reconcile_loop() [new — orphan sweep every 60s + full reconcile
+                               every 2h]
 bot/core/dashboard_cache.py — DashboardCache: caches account/positions/orders (V2)
 ```
 
@@ -646,6 +662,73 @@ NEXT_STEPS.md — 7 steps, 4 phases. All implemented. See decisions 58–64 belo
 
 ---
 
+### Pre-Production Hardening — Phases 1–2 (decisions 73–82)
+
+73. **Supabase pool max_size raised to 10 (M3)** — `bot/db/supabase.py`. Previous limit of 3 was
+    too low for concurrent placement + SL sync + forced exit + fill detection calls within a single
+    cycle. No config knob added; 10 is hardcoded alongside min_size=1.
+
+74. **feed_health Supabase table (M5 writer)** — New table in TM: `feed_health (feed TEXT PRIMARY KEY,
+    status TEXT, stale_seconds INTEGER, last_seen TIMESTAMPTZ, updated_at TIMESTAMPTZ)`. Written by
+    TM's `FeedHealthMonitor` via `_write_feed_health()` on each health check (idle / healthy /
+    degraded / down). The `FeedHealthMonitor` constructor now accepts an optional `db` parameter.
+    EX reader side deferred to Phase 4.4 of the hardening plan.
+
+75. **ic_bid / ic_ask columns on live_prices (H1 schema)** — TM's `live_prices` table gained two
+    nullable `DOUBLE PRECISION` columns. TM writer and EX reader changes deferred to Phase 4.1.
+    The schema migration is idempotent (ADD COLUMN IF NOT EXISTS).
+
+76. **Limit skip logging in sync_cycle (L6)** — `sync_cycle.py` approval loop now populates
+    `rejection_reason: dict[int, str]` (reasons: "symbol not in terminal" / "live price stale" /
+    "outside proximity"). Placement loop logs INFO with `limit_id`, `signal_id`, `instrument`,
+    `reason` for every skipped limit. Proximity filter upgraded from DEBUG → INFO. The tick/info-None
+    case (previously silent) now logs a WARNING.
+
+77. **C2: order-placement orphan window closed** — Three-part fix:
+    (a) MT5 order comment changed from `s{signal_id}` to `s{signal_id}_l{limit_id}`[:32] so
+        any orphan can be matched back to a claim row.
+    (b) `place_order()` pre-writes a "claimed" row (`status='claimed'`, `mt5_ticket=-limit_id` as
+        unique placeholder) before calling `order_send()`. On success, promotes claim to `pending`
+        with the real ticket. On MT5 failure, deletes the claim. Crash between `order_send` and the
+        promote → stale claim row detected by reconciler.
+    (c) `reconcile_orphans()` extracted from `reconcile()`: parses comments, matches orphan MT5
+        orders to claimed rows and promotes them; cleans stale claims that have no MT5 order; cancels
+        truly untracked orders (magic-number filter added). Called every 60s by `_reconcile_loop`.
+
+78. **C2: periodic reconciliation loop (M1 + orphan sweep)** — New `_reconcile_loop` task in
+    `engine.py`. Runs `reconcile_orphans()` every 60 seconds (catches crash-window orphans without
+    requiring a restart). Runs full `reconcile()` every 2 hours (M1 — detects position drift,
+    missed fills, etc. that accumulate over time). Orphan sweep and full reconcile share the same
+    task to avoid task proliferation.
+
+79. **C3: cancel ordering — limits before signal (TM)** — All three TM cancel paths now update
+    `limits.status = 'cancelled'` **before** `signals.status = 'cancelled'` within the same
+    transaction. Affected functions: `cancel_signal_by_message`, `manually_set_signal_status`
+    (final-status branch), `expire_old_signals`. Invariant documented inline in each function.
+    Rationale: EX's Supabase query filters `WHERE l.status='pending'`, so EX stops seeing these
+    limits as soon as they are cancelled — before the signal row transitions, preventing a placement
+    window during the TM cancel.
+
+80. **C3: pre-send status recheck (EX)** — `place_order()` now calls `supabase.fetch_signal_status(
+    signal_id)` immediately before `order_send()`. If status is not in `{active, hit}`, the claim
+    row is deleted and placement is aborted with a WARNING log. `SupabaseDB.fetch_signal_status()`
+    added (`FETCH_SIGNAL_STATUS` query). `supabase` parameter added to `place_order()` signature
+    and threaded from `sync_cycle.run()`.
+
+81. **M2: external close detection** — New `_check_external_closes()` method in `SyncCycle`. Runs
+    every cycle (outside the Supabase gate). For each SQLite `filled` row whose ticket is absent
+    from the current `mt5_positions` list, calls `mark_closed()` and logs at INFO. Catches manual
+    position closures in MT5 (by the user or broker) and keeps SQLite consistent. Runs before
+    `_sync_filled_sls` and `_check_forced_exits` so those methods do not see stale filled rows.
+
+82. **M14: idempotent update_ticket** — `UPDATE_TICKET` query now includes `AND status = 'filled'`
+    (not `'pending'` — both call sites call `mark_filled` before `update_ticket`, so the row is
+    already filled when the ticket update runs). `update_ticket()` returns `bool` indicating whether
+    a row was actually updated. A second call with the same arguments is a no-op because the first
+    call changes `mt5_ticket` to the new value, so `WHERE mt5_ticket = old_ticket` no longer matches.
+
+---
+
 ## All Owner-Approved Decisions
 
 These are final. Do not revisit or propose alternatives.
@@ -653,7 +736,7 @@ These are final. Do not revisit or propose alternatives.
 1. **UI stack**: FastAPI backend + React/TypeScript frontend (Vite), served at `localhost:8501`
 2. **App shell**: System tray icon (pystray + Pillow) + auto-open browser on startup
 3. **License validation**: Supabase Edge Function (Deno/TypeScript), not direct DB query or JWT
-4. **Multiple signals per instrument**: Yes. signal_id encoded in MT5 order comment `"s{signal_id}"`
+4. **Multiple signals per instrument**: Yes. MT5 order comment encodes both IDs: `"s{signal_id}_l{limit_id}"` (truncated to 32 chars). This allows orphan re-linking on restart (see decision 77).
 5. **Signal expiry**: Handled by Supabase backend (bot reacts to status change in sync cycle, does NOT independently check expiry_time)
 6. **TP threshold values**: From original spec — forex 7 pip/3 pip trail, metals $4/$2, indices $20/$5, stocks $1/$0.50, crypto $300/$50, oil $0.50/$0.20. Scalp values roughly halved.
 7. **Partial close behavior**: ICMarkets hedging mode creates a NEW ticket for the remainder. Original ticket is fully closed. Fill detector tracks via comment matching (see decision #3 above).
@@ -673,7 +756,8 @@ These are final. Do not revisit or propose alternatives.
 - **Config hot-reload race**: Read config once at cycle start, pass snapshot to all sub-calls within that cycle.
 - **Feed offset + freshness**: Check freshness immediately before using the price, not at cycle start.
 - **Asset class detection order**: Stocks (`.NAS`, `.NYSE`) checked before indices — enforced in `symbol_mapper.py`.
-- **Partial close new ticket**: If `detect_partial_close_tickets()` misses a new ticket (e.g., comment was truncated), the trailing position becomes an unmanaged orphan. Monitor for orphan warnings in logs.
+- **Partial close new ticket**: `detect_partial_close_tickets()` matches remainder positions by comment `s{signal_id}_l{limit_id}` against positions not yet in SQLite. If a comment is truncated or malformed, the remainder becomes an unmanaged orphan. The periodic `reconcile_orphans()` (every 60s) will catch and cancel it; monitor for orphan warnings in logs.
+- **Claimed rows on Supabase outage**: If Supabase is unreachable during `fetch_signal_status()` in `place_order()`, the pre-send check raises and the placement is aborted (claim row is deleted). The limit will be retried next cycle when Supabase recovers.
 - **SQLiteDB init_schema** must be called before any other SQLiteDB method or it will raise (connection is None).
 
 ---

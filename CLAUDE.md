@@ -45,7 +45,7 @@ pytest tests/
 ```
 
 ## Key Constraints (Non-Negotiable)
-- Supabase tables are **read-only** — no INSERT/UPDATE/DELETE on signals, limits, live_prices, licenses
+- Supabase tables are **read-only** — no INSERT/UPDATE/DELETE on signals, limits, live_prices, feed_health, licenses
 - All mutable bot state lives in **local SQLite** (`orders.db`)
 - No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments
 - All MT5 orders use magic number `20250001`
@@ -210,6 +210,22 @@ All V5 bugs have been resolved. See STATE.md decisions 58–64 for full details.
 - **TP loop crypto-only during spread hours** — `TPEngine.run_cycle(crypto_only=True)` during spread hours; non-crypto trailing stops not adjusted during high-spread periods.
 - **Separate TP loop interval** — `tp_trailing_interval_seconds` (default 2s) in `PollingConfig`. TP loop polls at 2s, sync loop at 1s.
 - **Dashboard tick deduplication** — `DashboardCache.update()` fetches `symbol_info_tick()` once per unique symbol, not per position/order.
+
+## Pre-Production Hardening (Phases 2–4 from TM IMPLEMENTATION_PLAN.md)
+
+These changes landed after V7 as part of a joint TM+EX hardening pass before live forward-testing. They are not in STATE.md.
+
+### Phase 2 — Placement integrity
+- **C2 orphan window:** MT5 order comment changed to `s{signal_id}_l{limit_id}`[:32]. Before `order_send()`, a `status='claimed'` row is written to SQLite; on success it is promoted to `pending`; on failure it is deleted. `reconciler.py` re-links claimed rows on startup, cleans stale claims, and cancels truly untracked orders. Orphan sweep runs every 60s, full reconcile every 2h.
+- **C3 cancel race:** `place_order()` calls `supabase.fetch_signal_status()` immediately before `order_send()` and aborts (deletes claim) if status is not `active` or `hit`. On the TM side, all cancel paths update `limits.status='cancelled'` **before** `signals.status='cancelled'` so EX's pending-limit query stops seeing the limits first.
+- **M1/M2:** Full reconcile every 2h via `_reconcile_loop`; `_check_external_closes()` marks positions closed if they disappear from MT5 every cycle (even when Supabase is down).
+- **M14:** `UPDATE_TICKET` query adds `AND status='filled'` guard; `update_ticket()` returns `bool`.
+
+### Phase 4 — Price / state sync
+- **H1 offset (no drift):** `FETCH_LIVE_PRICES` now selects `ic_bid, ic_ask`. `OffsetCalculator.get_offset()` prefers `ic_mid − feed_mid` from the same row (both written at the same flush time by TM). Falls back to a live MT5 tick with a one-time per-symbol WARNING if `ic_bid`/`ic_ask` are NULL (rolling-deploy gap). `OffsetCalculator` now has `__init__` with `_ic_fallback_logged: set[str]`.
+- **M6 news_mode:** `supabase.fetch_news_mode()` called once per cycle after the spread-hour gate. When `True`: all pending orders cancelled (same path as spread hour), `placement_active = False`, logged as `reason=news_mode`.
+- **M5 feed_health:** `supabase.fetch_feed_health()` returns `{feed: status}`. Feeds with `status IN ('degraded', 'down')` collected into `stale_feeds`. `_feed_for_symbol(db_sym, config)` determines whether a symbol is served by `icmarkets` / `oanda` / `binance`. Signals on stale feeds are skipped in the approval loop with `reason=feed_stale`.
+- **M11 excluded logging:** `_logged_excluded: set[int]` in `SyncCycle.__init__`. Each excluded-symbol limit is logged exactly once per bot lifetime with `signal_id`, `limit_id`, `symbol`.
 
 ## V7 signal_type Expansion (decision 72 in STATE.md)
 - **Schema change** — Supabase dropped `signals.scalp BOOLEAN`, added `signals.type TEXT` with six values: `standard`, `scalp`, `swing`, `toll`, `pa`, `1-1`. SQLite `order_mappings.is_scalp` → `signal_type TEXT DEFAULT 'standard'`; one-shot migration in `SQLiteDB.init_schema()` backfills `is_scalp=1 → 'scalp'` and drops the old column.

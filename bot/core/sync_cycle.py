@@ -651,9 +651,11 @@ class SyncCycle:
         all_filled_rows = await sqlite.get_filled_positions()
 
         for signal_id in filled_sids:
-            current = status_map.get(signal_id)
-            if current is None:
+            entry = status_map.get(signal_id)
+            if entry is None:
                 continue
+            current = entry["status"]
+            closed_reason = entry.get("closed_reason")
 
             previous = self._last_signal_status.get(signal_id)
 
@@ -665,8 +667,8 @@ class SyncCycle:
                 continue
 
             logger.warning(
-                "Forced exit: signal %d status %r -> %r — closing all positions",
-                signal_id, previous, current,
+                "Forced exit: signal %d status %r -> %r closed_reason=%r — closing all positions",
+                signal_id, previous, current, closed_reason,
             )
 
             signal_rows = [r for r in all_filled_rows if r["signal_id"] == signal_id]

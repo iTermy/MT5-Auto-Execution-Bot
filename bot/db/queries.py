@@ -9,6 +9,7 @@ SELECT
     s.status          AS signal_status,
     s.type            AS signal_type,
     s.channel_id,
+    s.closed_reason,
     l.id              AS limit_id,
     l.price_level,
     l.sequence_number
@@ -158,5 +159,5 @@ ORDER BY placed_at DESC
 
 # Supabase — fetch signal statuses by IDs
 FETCH_SIGNAL_STATUSES = """
-SELECT id, status FROM signals WHERE id = ANY($1)
+SELECT id, status, closed_reason FROM signals WHERE id = ANY($1)
 """

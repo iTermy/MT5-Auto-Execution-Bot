@@ -43,10 +43,13 @@ class SupabaseDB:
         async with self._pool.acquire() as conn:
             return await conn.fetchval(FETCH_SIGNAL_STATUS, signal_id)
 
-    async def fetch_signal_statuses(self, signal_ids: list[int]) -> dict[int, str]:
+    async def fetch_signal_statuses(self, signal_ids: list[int]) -> dict[int, dict]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(FETCH_SIGNAL_STATUSES, signal_ids)
-        return {row["id"]: row["status"] for row in rows}
+        return {
+            row["id"]: {"status": row["status"], "closed_reason": row["closed_reason"]}
+            for row in rows
+        }
 
     async def fetch_news_mode(self) -> bool:
         async with self._pool.acquire() as conn:

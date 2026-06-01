@@ -228,6 +228,23 @@ These changes landed after V7 as part of a joint TM+EX hardening pass before liv
 - **M5 feed_health:** `supabase.fetch_feed_health()` returns `{feed: status}`. Feeds with `status IN ('degraded', 'down')` collected into `stale_feeds`. `_feed_for_symbol(db_sym, config)` determines whether a symbol is served by `icmarkets` / `oanda` / `binance`. Signals on stale feeds are skipped in the approval loop with `reason=feed_stale`.
 - **M11 excluded logging:** `_logged_excluded: set[int]` in `SyncCycle.__init__`. Each excluded-symbol limit is logged exactly once per bot lifetime with `signal_id`, `limit_id`, `symbol`.
 
+## Pre-Production Hardening (Phases 5–7 from TM IMPLEMENTATION_PLAN.md)
+
+### Phase 5 — SL & TP hygiene
+- **C5 trailing stop on forced exit:** `_FORCE_EXIT_STATUSES` now includes `profit` (was `cancelled`, `breakeven`). Before closing positions, `set_trailing(ticket, 0)` is called for all rows of the signal so the TP loop cannot ratchet the SL while force-exit is in progress.
+- **C8 SL failure alert:** `_sl_fail_count / _sl_fail_target` per-ticket dicts in `SyncCycle`. After 5 consecutive failures on the same target SL, logs at ERROR once. Resets on success or target change.
+- **H9 partial close floor:** In `DefaultTPStrategy`, if `raw_vol < volume_step`, closes `max(volume_step, volume_min)` rather than falling through to `volume_min` (prevents closes well below the broker step).
+- **M13 force-exit attempt counter:** `_force_exit_fail_count` per-ticket, `_last_force_exit_status` per-signal in `SyncCycle`. After 5 consecutive close failures on a ticket, logs ERROR and treats it as "handled" (stops retrying). Counts reset when the signal's force-exit status changes.
+- **H7 atomic fill+ticket:** `SQLiteDB.mark_filled_and_set_position_ticket()` wraps both updates in `async with self._db:` (single transaction). Fill detection call site uses this helper unconditionally.
+- **H8 placement readback:** After `order_send` succeeds, `MT5Client.order_get_by_ticket()` fetches the placed order; mismatches in `sl` or `price_open` vs. requested values log WARNING immediately.
+
+### Phase 6 — Lifecycle correctness (EX side)
+- **M10 `closed_reason`:** `FETCH_SIGNAL_STATUSES` now selects `closed_reason`. `fetch_signal_statuses()` returns `dict[int, dict]` with `status` and `closed_reason`. `_check_forced_exits` logs `closed_reason=` in the forced-exit warning so operators can distinguish `manual` / `automatic` / `expiry` closures.
+
+### Phase 7 — License teardown + per-instrument risk %
+- **L5 license teardown:** `Engine` tracks `_license_expired`, `shutdown_reason`, `_last_license_valid`. When `_sync_loop` detects `license_valid` flipping `True → False`, it calls `_license_teardown()`: cancels all SQLite-pending MT5 orders, market-closes all filled positions, sets `shutdown_reason = "license_expired"`, and returns (loop exits). **Re-activation requires a bot restart.** `_last_license_valid` is synced after the initial `validate()` in `run_forever()` so a failing startup validation does not trigger teardown.
+- **Per-instrument `risk_percent`:** `LotSizingConfig.risk_percent` is now `float | dict[str, float]` (same shape as `fixed_lot`). `LotCalculator._get_risk_percent(mt5_symbol)` resolves: exact symbol key → `"default"` key → `1.0`. Plain `float` still works unchanged.
+
 ## V7 signal_type Expansion (decision 72 in STATE.md)
 - **Schema change** — Supabase dropped `signals.scalp BOOLEAN`, added `signals.type TEXT` with six values: `standard`, `scalp`, `swing`, `toll`, `pa`, `1-1`. SQLite `order_mappings.is_scalp` → `signal_type TEXT DEFAULT 'standard'`; one-shot migration in `SQLiteDB.init_schema()` backfills `is_scalp=1 → 'scalp'` and drops the old column.
 - **TP routing per type** — `asset_config.get_config(asset_class, signal_type, config, instrument)` dispatches: `standard` uses base; `scalp/toll/pa` use their own override map (fall back to base if unconfigured); `swing` falls back to **3× the base threshold** when unconfigured; `1-1` forces `threshold_unit='dollars'`, `partial_close_percent=100`, `trailing_distance=0`.

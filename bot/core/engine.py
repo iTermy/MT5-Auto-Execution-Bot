@@ -202,6 +202,7 @@ class Engine:
                 host="127.0.0.1",
                 port=8501,
                 log_level="error",
+                log_config=None,
                 loop="none",
             )
             server = uvicorn.Server(cfg)

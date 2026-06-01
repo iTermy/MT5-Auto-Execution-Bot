@@ -93,7 +93,12 @@ class Engine:
             api_task = None
             if self.app is not None:
                 api_task = asyncio.create_task(self._serve_api(), name="api_server")
-                await self.api_ready.wait()
+                try:
+                    await asyncio.wait_for(self.api_ready.wait(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    logger.error("API server failed to start within 15s — continuing without dashboard")
+                    if api_task.done() and api_task.exception():
+                        logger.error("API startup error: %s", api_task.exception())
 
             await self._sqlite.init_schema()
             await self._supabase.create_pool()
@@ -190,16 +195,19 @@ class Engine:
             await asyncio.sleep(await self._tp_interval())
 
     async def _serve_api(self) -> None:
-        import uvicorn
-        cfg = uvicorn.Config(
-            self.app,
-            host="127.0.0.1",
-            port=8501,
-            log_level="error",
-            loop="none",  # reuse the existing asyncio loop
-        )
-        server = uvicorn.Server(cfg)
-        await server.serve()
+        try:
+            import uvicorn
+            cfg = uvicorn.Config(
+                self.app,
+                host="127.0.0.1",
+                port=8501,
+                log_level="error",
+                loop="none",
+            )
+            server = uvicorn.Server(cfg)
+            await server.serve()
+        except Exception:
+            logger.error("API server crashed", exc_info=True)
 
     async def _reconcile_loop(self) -> None:
         """C2: orphan sweep every 60s. M1: full reconcile every 2h."""

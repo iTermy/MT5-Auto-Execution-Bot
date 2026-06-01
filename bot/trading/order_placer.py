@@ -112,6 +112,23 @@ class OrderPlacer:
             return False
 
         await sqlite.promote_claimed_to_pending(limit_id, result.ticket)
+
+        # H8: Verify broker accepted the exact SL/price (silent broker adjustments surface here)
+        placed = mt5_client.order_get_by_ticket(result.ticket)
+        if placed is not None:
+            if abs(placed.sl - adj_sl) > info.point:
+                logger.warning(
+                    "Placement SL mismatch: ticket=%d requested=%.5f broker=%.5f",
+                    result.ticket, adj_sl, placed.sl,
+                )
+            if abs(placed.price_open - adj_price) > info.point:
+                logger.warning(
+                    "Placement price mismatch: ticket=%d requested=%.5f broker=%.5f",
+                    result.ticket, adj_price, placed.price_open,
+                )
+        else:
+            logger.warning("Placement readback: order ticket=%d not found", result.ticket)
+
         logger.info(
             "Placed %s ticket=%d signal=%d limit=%d price=%.5f lot=%.2f",
             order_type_str, result.ticket, signal_id, limit_id, adj_price, lot,

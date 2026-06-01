@@ -121,9 +121,12 @@ class DefaultTPStrategy:
             sym_info = mt5_client.symbol_info(newest.symbol)
             raw_vol = newest.volume * pct / 100
             if sym_info and sym_info.volume_step > 0:
-                close_vol = math.floor(raw_vol / sym_info.volume_step) * sym_info.volume_step
-                close_vol = round(close_vol, 8)  # float precision cleanup
-                close_vol = max(close_vol, sym_info.volume_min)
+                if raw_vol < sym_info.volume_step:
+                    close_vol = max(sym_info.volume_step, sym_info.volume_min)
+                else:
+                    close_vol = math.floor(raw_vol / sym_info.volume_step) * sym_info.volume_step
+                    close_vol = round(close_vol, 8)
+                    close_vol = max(close_vol, sym_info.volume_min)
             else:
                 close_vol = round(raw_vol, 2)
             if close_vol <= 0:

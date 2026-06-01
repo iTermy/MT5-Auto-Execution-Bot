@@ -71,7 +71,9 @@ class SyncResult:
     skipped: int = 0  # proximity-filtered limits
 
 
-_FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
+_FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven", "profit"})
+_SL_FAIL_MAX = 5
+_FORCE_EXIT_MAX_ATTEMPTS = 5
 
 
 def _persist_stock_no_suffix(db_symbol: str, config: Settings) -> None:
@@ -111,6 +113,12 @@ class SyncCycle:
         self._last_signal_status: dict[int, str] = {}
         # limit_ids whose exclusion has already been logged (logged once per lifetime)
         self._logged_excluded: set[int] = set()
+        # C8: SL sync consecutive failure tracking
+        self._sl_fail_count: dict[int, int] = {}    # ticket -> consecutive fail count
+        self._sl_fail_target: dict[int, float] = {} # ticket -> last failed target sl
+        # M13: force-exit consecutive failure tracking
+        self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
+        self._last_force_exit_status: dict[int, str] = {}  # signal_id -> force-exit status at first detection
 
     async def run(
         self,
@@ -486,9 +494,9 @@ class SyncCycle:
         current_pending = await sqlite.get_pending_orders()
         fills = self._fill_detector.detect_fills(mt5_orders, mt5_positions, current_pending)
         for fill in fills:
-            await sqlite.mark_filled(fill.mt5_ticket, fill.filled_at)
-            if fill.position_ticket != fill.mt5_ticket:
-                await sqlite.update_ticket(fill.mt5_ticket, fill.position_ticket)
+            await sqlite.mark_filled_and_set_position_ticket(
+                fill.mt5_ticket, fill.position_ticket, fill.filled_at
+            )
             result.filled += 1
             logger.info("Fill: order=%d pos=%d", fill.mt5_ticket, fill.position_ticket)
 
@@ -605,6 +613,8 @@ class SyncCycle:
             res = mt5_client.modify_position_sl(ticket, pos.symbol, mt5_sl)
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 await sqlite.update_db_stop_loss(ticket, current_db_sl, mt5_sl)
+                self._sl_fail_count.pop(ticket, None)
+                self._sl_fail_target.pop(ticket, None)
                 logger.info(
                     "SL sync ticket=%d signal=%d: db_sl %.5f -> %.5f, mt5_sl=%.5f",
                     ticket, signal_id, stored_db_sl, current_db_sl, mt5_sl,
@@ -612,6 +622,16 @@ class SyncCycle:
             else:
                 retcode = res.retcode if res else "None"
                 logger.warning("SL sync failed ticket=%d retcode=%s", ticket, retcode)
+                if self._sl_fail_target.get(ticket) != mt5_sl:
+                    self._sl_fail_count[ticket] = 0
+                    self._sl_fail_target[ticket] = mt5_sl
+                count = self._sl_fail_count.get(ticket, 0) + 1
+                self._sl_fail_count[ticket] = count
+                if count == _SL_FAIL_MAX:
+                    logger.error(
+                        "Persistent SL sync failure: ticket=%d target_sl=%.5f retcode=%s",
+                        ticket, mt5_sl, retcode,
+                    )
 
     async def _check_forced_exits(
         self,
@@ -628,6 +648,7 @@ class SyncCycle:
         status_map = await supabase.fetch_signal_statuses(list(filled_sids))
 
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
+        all_filled_rows = await sqlite.get_filled_positions()
 
         for signal_id in filled_sids:
             current = status_map.get(signal_id)
@@ -638,6 +659,7 @@ class SyncCycle:
 
             if current not in _FORCE_EXIT_STATUSES:
                 self._last_signal_status[signal_id] = current
+                self._last_force_exit_status.pop(signal_id, None)
                 continue
             if previous == current:
                 continue
@@ -647,15 +669,29 @@ class SyncCycle:
                 signal_id, previous, current,
             )
 
-            all_closed = True
-            filled_rows = await sqlite.get_filled_positions()
-            for row in filled_rows:
-                if row["signal_id"] != signal_id:
-                    continue
+            signal_rows = [r for r in all_filled_rows if r["signal_id"] == signal_id]
+
+            # Clear per-ticket fail counts on a new or resumed force-exit trigger
+            if self._last_force_exit_status.get(signal_id) != current:
+                self._last_force_exit_status[signal_id] = current
+                for row in signal_rows:
+                    self._force_exit_fail_count.pop(row["mt5_ticket"], None)
+
+            # 5.1: Stop trailing before force-exit so the TP loop does not ratchet SL
+            for row in signal_rows:
+                await sqlite.set_trailing(row["mt5_ticket"], 0)
+
+            all_handled = True
+            for row in signal_rows:
                 ticket = row["mt5_ticket"]
                 pos = pos_by_ticket.get(ticket)
                 if pos is None:
                     continue
+
+                fail_count = self._force_exit_fail_count.get(ticket, 0)
+                if fail_count >= _FORCE_EXIT_MAX_ATTEMPTS:
+                    continue  # given up; treated as handled
+
                 res = mt5_client.close_position(
                     ticket=pos.ticket,
                     symbol=pos.symbol,
@@ -665,13 +701,21 @@ class SyncCycle:
                 )
                 if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                     await sqlite.mark_closed(ticket, pos.profit)
+                    self._force_exit_fail_count.pop(ticket, None)
                     logger.info("Forced exit closed ticket=%d signal=%d", ticket, signal_id)
                 else:
                     retcode = res.retcode if res else "None"
                     logger.error("Forced exit close failed ticket=%d retcode=%s", ticket, retcode)
-                    all_closed = False
+                    new_count = self._force_exit_fail_count.get(ticket, 0) + 1
+                    self._force_exit_fail_count[ticket] = new_count
+                    if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
+                        logger.error(
+                            "Forced exit abandoned: ticket=%d signal=%d after %d attempts — manual intervention required",
+                            ticket, signal_id, new_count,
+                        )
+                    all_handled = False
 
-            if all_closed:
+            if all_handled:
                 self._last_signal_status[signal_id] = current
             # else: leave previous status so next cycle retries
 

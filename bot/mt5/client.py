@@ -76,6 +76,25 @@ class MT5Client:
             comment=result.comment,
         )
 
+    def order_get_by_ticket(self, ticket: int) -> OrderInfo | None:
+        """Fetch a single pending order by ticket number (bypasses bulk cache)."""
+        raw = mt5.orders_get(ticket=ticket)
+        if not raw:
+            return None
+        o = raw[0]
+        return OrderInfo(
+            ticket=o.ticket,
+            symbol=o.symbol,
+            volume_current=o.volume_current,
+            type=o.type,
+            price_open=o.price_open,
+            sl=o.sl,
+            tp=o.tp,
+            magic=o.magic,
+            comment=o.comment,
+            time_setup=o.time_setup,
+        )
+
     def orders_get(self) -> list[OrderInfo]:
         now = time.monotonic()
         if self._orders_cache and (now - self._orders_cache[0]) < _BULK_CACHE_TTL:

@@ -266,7 +266,7 @@ These changes landed after V7 as part of a joint TM+EX hardening pass before liv
 - **C8 SL failure alert:** `_sl_fail_count / _sl_fail_target` per-ticket dicts in `SyncCycle`. After 5 consecutive failures on the same target SL, logs at ERROR once. Resets on success or target change.
 - **H9 partial close floor:** In `DefaultTPStrategy`, if `raw_vol < volume_step`, closes `max(volume_step, volume_min)` rather than falling through to `volume_min` (prevents closes well below the broker step).
 - **M13 force-exit attempt counter:** `_force_exit_fail_count` per-ticket, `_last_force_exit_status` per-signal in `SyncCycle`. After 5 consecutive close failures on a ticket, logs ERROR and treats it as "handled" (stops retrying). Counts reset when the signal's force-exit status changes.
-- **H7 atomic fill+ticket:** `SQLiteDB.mark_filled_and_set_position_ticket()` wraps both updates in `async with self._db:` (single transaction). Fill detection call site uses this helper unconditionally.
+- **H7 atomic fill+ticket:** `SQLiteDB.mark_filled_and_set_position_ticket()` executes both updates then commits once (single implicit transaction). Fill detection call site uses this helper unconditionally.
 - **H8 placement readback:** After `order_send` succeeds, `MT5Client.order_get_by_ticket()` fetches the placed order; mismatches in `sl` or `price_open` vs. requested values log WARNING immediately.
 
 ### Phase 6 — Lifecycle correctness (EX side)

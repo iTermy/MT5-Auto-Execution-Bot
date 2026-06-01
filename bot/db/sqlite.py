@@ -129,17 +129,10 @@ class SQLiteDB:
         self, order_ticket: int, position_ticket: int, filled_at: str
     ) -> None:
         """Atomically mark filled and update the ticket in one transaction (H7)."""
-        try:
-            async with self._db:
-                await self._db.execute(MARK_FILLED, (filled_at, order_ticket))
-                if position_ticket != order_ticket:
-                    await self._db.execute(UPDATE_TICKET, (position_ticket, order_ticket))
-        except RuntimeError:
-            await self._reconnect()
-            async with self._db:
-                await self._db.execute(MARK_FILLED, (filled_at, order_ticket))
-                if position_ticket != order_ticket:
-                    await self._db.execute(UPDATE_TICKET, (position_ticket, order_ticket))
+        await self._db.execute(MARK_FILLED, (filled_at, order_ticket))
+        if position_ticket != order_ticket:
+            await self._db.execute(UPDATE_TICKET, (position_ticket, order_ticket))
+        await self._db.commit()
 
     async def mark_cancelled(
         self, mt5_ticket: int, cancelled_at: str, spread: bool = False

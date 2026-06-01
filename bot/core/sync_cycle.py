@@ -121,6 +121,7 @@ class SyncCycle:
         # M13: force-exit consecutive failure tracking
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         self._last_force_exit_status: dict[int, str] = {}  # signal_id -> force-exit status at first detection
+        self._feed_health_failed: bool = False
 
     async def run(
         self,
@@ -241,18 +242,19 @@ class SyncCycle:
                 if offset_needed:
                     live_prices = await supabase.fetch_live_prices(list(offset_needed))
 
-                # Fetch feed health once for this batch
                 stale_feeds: set[str] = set()
-                try:
-                    feed_health = await supabase.fetch_feed_health()
-                    stale_feeds = {
-                        feed for feed, status in feed_health.items()
-                        if status in ("degraded", "down")
-                    }
-                    if stale_feeds:
-                        logger.warning("Stale feeds detected: %s", stale_feeds)
-                except Exception:
-                    logger.error("Failed to fetch feed_health", exc_info=True)
+                if not self._feed_health_failed:
+                    try:
+                        feed_health = await supabase.fetch_feed_health()
+                        stale_feeds = {
+                            feed for feed, status in feed_health.items()
+                            if status in ("degraded", "down")
+                        }
+                        if stale_feeds:
+                            logger.warning("Stale feeds detected: %s", stale_feeds)
+                    except Exception:
+                        logger.warning("feed_health unavailable — skipping feed staleness checks")
+                        self._feed_health_failed = True
 
                 # Group all Supabase rows by signal for lot calculation
                 by_signal: dict[int, list] = defaultdict(list)

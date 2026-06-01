@@ -21,7 +21,7 @@ class SupabaseDB:
 
     async def create_pool(self) -> None:
         self._pool = await asyncpg.create_pool(
-            self._dsn, min_size=1, max_size=10, command_timeout=10
+            self._dsn, min_size=1, max_size=10, command_timeout=10, ssl="require"
         )
         logger.info("Supabase pool created")
 

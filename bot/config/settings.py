@@ -1,14 +1,10 @@
 import json
 import logging
-import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
 from bot.config.constants import _PRODUCTION_DSN, _PRODUCTION_LICENSE_URL
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +123,8 @@ def load_config(path: Path = _CONFIG_PATH) -> Settings | None:
 
 
 def load_dsn() -> str:
-    return os.getenv("SUPABASE_DSN") or _PRODUCTION_DSN
+    return _PRODUCTION_DSN
 
 
 def load_license_url() -> str:
-    return os.getenv("LICENSE_API_URL") or _PRODUCTION_LICENSE_URL
+    return _PRODUCTION_LICENSE_URL

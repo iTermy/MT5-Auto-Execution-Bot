@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from bot.api.sse import SSEBroadcaster
 from bot.core.engine import Engine
 from bot.utils.logging import get_log_queue
 
-_DIST = Path("frontend/dist")
+_BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", "."))
+_DIST = _BUNDLE_DIR / "frontend" / "dist"
 
 
 def create_app(engine: Engine) -> FastAPI:

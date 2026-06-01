@@ -98,7 +98,35 @@ UPDATE order_mappings SET last_known_mt5_sl = ? WHERE mt5_ticket = ?
 """
 
 UPDATE_TICKET = """
-UPDATE order_mappings SET mt5_ticket = ? WHERE mt5_ticket = ?
+UPDATE order_mappings SET mt5_ticket = ? WHERE mt5_ticket = ? AND status = 'filled'
+"""
+
+INSERT_CLAIMED_ORDER = """
+INSERT OR IGNORE INTO order_mappings
+    (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
+     db_stop_loss, signal_type, feed_price_at_placement, mt5_price_at_placement,
+     offset_at_placement, symbol, channel_id, status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'claimed')
+"""
+
+PROMOTE_CLAIMED_TO_PENDING = """
+UPDATE order_mappings SET mt5_ticket = ?, status = 'pending' WHERE limit_id = ? AND status = 'claimed'
+"""
+
+DELETE_CLAIMED_ORDER = """
+DELETE FROM order_mappings WHERE limit_id = ? AND status = 'claimed'
+"""
+
+GET_CLAIMED_ORDERS = """
+SELECT * FROM order_mappings WHERE status = 'claimed'
+"""
+
+GET_CLAIMED_BY_SIGNAL_LIMIT = """
+SELECT * FROM order_mappings WHERE signal_id = ? AND limit_id = ? AND status = 'claimed'
+"""
+
+FETCH_SIGNAL_STATUS = """
+SELECT status FROM signals WHERE id = $1
 """
 
 GET_PENDING_BY_SIGNAL = """

@@ -375,6 +375,7 @@ class SyncCycle:
                             offset=offset,
                             mt5_client=mt5_client,
                             sqlite=sqlite,
+                            supabase=supabase,
                             channel_id=row["channel_id"],
                         )
                         result.placed += ok
@@ -448,6 +449,9 @@ class SyncCycle:
             await sqlite.set_trailing(evt.new_ticket)
             result.new_trailing += 1
             logger.info("Partial close remainder: new_ticket=%d signal=%d (original=%d closed)", evt.new_ticket, evt.signal_id, evt.original_ticket)
+
+        # M2: mark positions closed if they disappeared from MT5 externally
+        await self._check_external_closes(sqlite, mt5_positions)
 
         if supabase_rows is not None:
             # Build signal-level lookup from supabase rows for SL sync and forced exit
@@ -611,3 +615,21 @@ class SyncCycle:
             sid: st for sid, st in self._last_signal_status.items()
             if sid in filled_sids
         }
+
+    async def _check_external_closes(
+        self, sqlite: SQLiteDB, mt5_positions: list
+    ) -> None:
+        """M2: detect positions no longer in MT5 and mark them closed."""
+        filled = await sqlite.get_filled_positions()
+        if not filled:
+            return
+
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+
+        for row in filled:
+            ticket = row["mt5_ticket"]
+            if ticket not in pos_by_ticket:
+                await sqlite.mark_closed(ticket)
+                logger.info(
+                    "External close: ticket=%d signal=%d", ticket, row["signal_id"]
+                )

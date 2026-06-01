@@ -2,10 +2,26 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import MetaTrader5 as mt5
+
+from bot.config.constants import MAGIC_NUMBER
 from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_comment(comment: str) -> tuple[int, int] | None:
+    """Parse 's{signal_id}_l{limit_id}' → (signal_id, limit_id) or None."""
+    try:
+        if not comment or not comment.startswith("s") or "_l" not in comment:
+            return None
+        parts = comment.split("_l", 1)
+        if len(parts) != 2:
+            return None
+        return int(parts[0][1:]), int(parts[1])
+    except (ValueError, IndexError):
+        return None
 
 
 @dataclass
@@ -33,7 +49,6 @@ class Reconciler:
 
         pending_rows = await sqlite.get_pending_orders()
         filled_rows = await sqlite.get_filled_positions()
-        sqlite_tickets = {r["mt5_ticket"] for r in pending_rows} | {r["mt5_ticket"] for r in filled_rows}
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -68,21 +83,7 @@ class Reconciler:
                 result.trailing_resumed += 1
                 logger.info("Reconcile trailing resumed: ticket=%d", ticket)
 
-        # Orphan sweep: cancel MT5 orders with our magic number not tracked in SQLite
-        for order in mt5_orders:
-            if order.ticket not in sqlite_tickets:
-                res = mt5_client.cancel_pending_order(order.ticket)
-                if res and res.retcode == 10009:  # TRADE_RETCODE_DONE
-                    logger.info(
-                        "Reconcile orphan cancelled: ticket=%d symbol=%s",
-                        order.ticket, order.symbol,
-                    )
-                else:
-                    logger.warning(
-                        "Reconcile orphan cancel failed: ticket=%d symbol=%s comment=%s",
-                        order.ticket, order.symbol, order.comment,
-                    )
-                result.orphans += 1
+        result.orphans = await self.reconcile_orphans(mt5_client, sqlite, mt5_orders=mt5_orders)
 
         logger.info(
             "Reconciliation: filled=%d cancelled=%d closed=%d trailing=%d orphans=%d",
@@ -90,3 +91,74 @@ class Reconciler:
             result.trailing_resumed, result.orphans,
         )
         return result
+
+    async def reconcile_orphans(
+        self,
+        mt5_client: MT5Client,
+        sqlite: SQLiteDB,
+        mt5_orders: list | None = None,
+    ) -> int:
+        """
+        Orphan sweep (C2): re-link claimed rows whose order_send completed but
+        the SQLite commit was lost, and cancel truly untracked orders.
+        Also cleans stale claimed rows that have no corresponding MT5 order.
+        """
+        if mt5_orders is None:
+            mt5_orders = mt5_client.orders_get()
+
+        pending_rows = await sqlite.get_pending_orders()
+        claimed_rows = await sqlite.get_claimed_orders()
+
+        sqlite_pending_tickets = {r["mt5_ticket"] for r in pending_rows}
+
+        count = 0
+
+        # Clean up stale claim rows that have no matching MT5 order (order_send
+        # never ran or failed, then the bot crashed before delete_claimed_order).
+        for row in claimed_rows:
+            matched = any(
+                _parse_comment(o.comment) == (row["signal_id"], row["limit_id"])
+                for o in mt5_orders
+            )
+            if not matched:
+                await sqlite.delete_claimed_order(row["limit_id"])
+                logger.info(
+                    "Stale claim removed: limit=%d signal=%d",
+                    row["limit_id"], row["signal_id"],
+                )
+                count += 1
+
+        # Re-link or cancel MT5 orders with our magic number not in SQLite pending.
+        for order in mt5_orders:
+            if order.magic != MAGIC_NUMBER:
+                continue
+            if order.ticket in sqlite_pending_tickets:
+                continue
+
+            parsed = _parse_comment(order.comment)
+            if parsed:
+                sig_id, lim_id = parsed
+                claimed = await sqlite.get_claimed_by_signal_limit(sig_id, lim_id)
+                if claimed:
+                    # C2 crash-recovery: promote the claim to pending with the real ticket
+                    await sqlite.promote_claimed_to_pending(lim_id, order.ticket)
+                    logger.info(
+                        "Orphan re-linked: ticket=%d signal=%d limit=%d",
+                        order.ticket, sig_id, lim_id,
+                    )
+                    count += 1
+                    continue
+
+            res = mt5_client.cancel_pending_order(order.ticket)
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.info(
+                    "Orphan cancelled: ticket=%d symbol=%s", order.ticket, order.symbol
+                )
+            else:
+                logger.warning(
+                    "Orphan cancel failed: ticket=%d symbol=%s comment=%s",
+                    order.ticket, order.symbol, order.comment,
+                )
+            count += 1
+
+        return count

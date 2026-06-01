@@ -2,7 +2,7 @@ import logging
 
 import asyncpg
 
-from bot.db.queries import FETCH_ACTIVE_SIGNALS_WITH_LIMITS, FETCH_LIVE_PRICES, FETCH_SIGNAL_STATUSES
+from bot.db.queries import FETCH_ACTIVE_SIGNALS_WITH_LIMITS, FETCH_LIVE_PRICES, FETCH_SIGNAL_STATUS, FETCH_SIGNAL_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,10 @@ class SupabaseDB:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(FETCH_LIVE_PRICES, symbols)
         return {row["symbol"]: row for row in rows}
+
+    async def fetch_signal_status(self, signal_id: int) -> str | None:
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(FETCH_SIGNAL_STATUS, signal_id)
 
     async def fetch_signal_statuses(self, signal_ids: list[int]) -> dict[int, str]:
         async with self._pool.acquire() as conn:

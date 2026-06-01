@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Any
 
 from bot.config.settings import Settings, load_config
@@ -99,6 +100,7 @@ class Engine:
             tasks = [
                 asyncio.create_task(self._sync_loop(), name="sync_loop"),
                 asyncio.create_task(self._tp_loop(), name="tp_loop"),
+                asyncio.create_task(self._reconcile_loop(), name="reconcile_loop"),
             ]
             if self._license is not None:
                 tasks.append(asyncio.create_task(
@@ -175,6 +177,29 @@ class Engine:
         )
         server = uvicorn.Server(cfg)
         await server.serve()
+
+    async def _reconcile_loop(self) -> None:
+        """C2: orphan sweep every 60s. M1: full reconcile every 2h."""
+        ORPHAN_INTERVAL = 60.0
+        FULL_RECONCILE_INTERVAL = 2 * 3600.0
+        last_full = time.monotonic()
+
+        while True:
+            await asyncio.sleep(ORPHAN_INTERVAL)
+            try:
+                swept = await self._reconciler.reconcile_orphans(self._mt5, self._sqlite)
+                if swept:
+                    logger.info("Orphan sweep: %d processed", swept)
+            except Exception:
+                logger.error("Orphan sweep failed", exc_info=True)
+
+            now = time.monotonic()
+            if now - last_full >= FULL_RECONCILE_INTERVAL:
+                try:
+                    await self._reconciler.reconcile(self._mt5, self._sqlite)
+                except Exception:
+                    logger.error("Periodic reconcile failed", exc_info=True)
+                last_full = now
 
     async def _update_dashboard(self) -> None:
         try:

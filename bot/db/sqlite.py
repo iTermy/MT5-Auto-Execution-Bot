@@ -4,17 +4,22 @@ import aiosqlite
 
 from bot.db.queries import (
     CREATE_ORDER_MAPPINGS,
+    DELETE_CLAIMED_ORDER,
     GET_ALL_ACTIVE,
+    GET_CLAIMED_BY_SIGNAL_LIMIT,
+    GET_CLAIMED_ORDERS,
     GET_FILLED_POSITIONS,
     GET_FILLED_SIGNAL_IDS,
     GET_ORDER_HISTORY,
     GET_PENDING_BY_SIGNAL,
     GET_PENDING_ORDERS,
     GET_TRAILING_POSITIONS,
+    INSERT_CLAIMED_ORDER,
     INSERT_ORDER,
     MARK_CANCELLED,
     MARK_CLOSED,
     MARK_FILLED,
+    PROMOTE_CLAIMED_TO_PENDING,
     SET_TRAILING,
     UPDATE_DB_STOP_LOSS,
     UPDATE_SL,
@@ -142,9 +147,58 @@ class SQLiteDB:
         await self._db.execute(UPDATE_SL, (sl, mt5_ticket))
         await self._db.commit()
 
-    async def update_ticket(self, old_ticket: int, new_ticket: int) -> None:
-        await self._db.execute(UPDATE_TICKET, (new_ticket, old_ticket))
+    async def update_ticket(self, old_ticket: int, new_ticket: int) -> bool:
+        """Update the ticket on a filled row. Returns True if a row was actually updated."""
+        cursor = await self._db.execute(UPDATE_TICKET, (new_ticket, old_ticket))
         await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def insert_claimed_order(
+        self,
+        limit_id: int,
+        signal_id: int,
+        order_type: str,
+        lot_size: float,
+        placed_at: str,
+        db_stop_loss: float,
+        signal_type: str,
+        feed_price: float | None = None,
+        mt5_price: float | None = None,
+        offset: float | None = None,
+        symbol: str | None = None,
+        channel_id: int | None = None,
+    ) -> None:
+        """Pre-write a claim row before order_send(). Uses -limit_id as placeholder ticket."""
+        await self._db.execute(
+            "DELETE FROM order_mappings WHERE limit_id = ? AND status NOT IN ('pending', 'filled')",
+            (limit_id,),
+        )
+        await self._db.execute(
+            INSERT_CLAIMED_ORDER,
+            (limit_id, signal_id, -limit_id, order_type, lot_size, placed_at,
+             db_stop_loss, signal_type, feed_price, mt5_price, offset, symbol, channel_id),
+        )
+        await self._db.commit()
+
+    async def promote_claimed_to_pending(self, limit_id: int, mt5_ticket: int) -> None:
+        """Promote a claimed row to pending after successful order_send()."""
+        await self._db.execute(PROMOTE_CLAIMED_TO_PENDING, (mt5_ticket, limit_id))
+        await self._db.commit()
+
+    async def delete_claimed_order(self, limit_id: int) -> None:
+        """Remove a claim row after a failed order_send()."""
+        await self._db.execute(DELETE_CLAIMED_ORDER, (limit_id,))
+        await self._db.commit()
+
+    async def get_claimed_orders(self) -> list[aiosqlite.Row]:
+        async with self._db.execute(GET_CLAIMED_ORDERS) as cursor:
+            return await cursor.fetchall()
+
+    async def get_claimed_by_signal_limit(
+        self, signal_id: int, limit_id: int
+    ) -> aiosqlite.Row | None:
+        async with self._db.execute(GET_CLAIMED_BY_SIGNAL_LIMIT, (signal_id, limit_id)) as cursor:
+            return await cursor.fetchone()
 
     async def get_pending_by_signal(self, signal_id: int) -> list[aiosqlite.Row]:
         async with self._db.execute(GET_PENDING_BY_SIGNAL, (signal_id,)) as cursor:

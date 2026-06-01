@@ -103,7 +103,18 @@ class Engine:
                     return
 
             await self._sqlite.init_schema()
-            await self._supabase.create_pool()
+
+            for attempt in range(1, 6):
+                try:
+                    await self._supabase.create_pool()
+                    break
+                except Exception:
+                    if attempt == 5:
+                        logger.critical("Supabase connection failed after 5 attempts — giving up")
+                        return
+                    logger.warning("Supabase connection failed (attempt %d/5), retrying in %ds", attempt, attempt * 5)
+                    await asyncio.sleep(attempt * 5)
+
             await self._reconciler.reconcile(self._mt5, self._sqlite)
 
             if self._license is not None:

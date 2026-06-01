@@ -20,9 +20,17 @@ ORDER BY s.id, l.sequence_number
 """
 
 FETCH_LIVE_PRICES = """
-SELECT symbol, bid, ask, feed, updated_at
+SELECT symbol, bid, ask, feed, updated_at, ic_bid, ic_ask
 FROM live_prices
 WHERE symbol = ANY($1)
+"""
+
+FETCH_NEWS_MODE = """
+SELECT news_mode FROM bot_mode_status WHERE id = 1
+"""
+
+FETCH_FEED_HEALTH = """
+SELECT feed, status FROM feed_health
 """
 
 # SQLite — aiosqlite, ? placeholders

@@ -2,7 +2,14 @@ import logging
 
 import asyncpg
 
-from bot.db.queries import FETCH_ACTIVE_SIGNALS_WITH_LIMITS, FETCH_LIVE_PRICES, FETCH_SIGNAL_STATUS, FETCH_SIGNAL_STATUSES
+from bot.db.queries import (
+    FETCH_ACTIVE_SIGNALS_WITH_LIMITS,
+    FETCH_FEED_HEALTH,
+    FETCH_LIVE_PRICES,
+    FETCH_NEWS_MODE,
+    FETCH_SIGNAL_STATUS,
+    FETCH_SIGNAL_STATUSES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,3 +47,13 @@ class SupabaseDB:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(FETCH_SIGNAL_STATUSES, signal_ids)
         return {row["id"]: row["status"] for row in rows}
+
+    async def fetch_news_mode(self) -> bool:
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(FETCH_NEWS_MODE) or False
+
+    async def fetch_feed_health(self) -> dict[str, str]:
+        """Return {feed_name: status} from the feed_health table."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(FETCH_FEED_HEALTH)
+        return {row["feed"]: row["status"] for row in rows}

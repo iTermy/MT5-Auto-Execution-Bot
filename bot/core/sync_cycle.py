@@ -89,6 +89,16 @@ def _persist_stock_no_suffix(db_symbol: str, config: Settings) -> None:
         logger.error("Failed to persist stock_no_suffix", exc_info=True)
 
 
+def _feed_for_symbol(db_sym: str, config: Settings) -> str:
+    """Return the TM feed name that serves this symbol."""
+    if not needs_offset(db_sym, config):
+        return "icmarkets"
+    ac = detect_asset_class(db_sym)
+    if ac == AssetClass.CRYPTO:
+        return "binance"
+    return "oanda"
+
+
 class SyncCycle:
     def __init__(self) -> None:
         self._placer = OrderPlacer()
@@ -99,6 +109,8 @@ class SyncCycle:
         self._unavailable_until: dict[str, float] = {}
         # signal_id -> last known status (for forced exit transition detection)
         self._last_signal_status: dict[int, str] = {}
+        # limit_ids whose exclusion has already been logged (logged once per lifetime)
+        self._logged_excluded: set[int] = set()
 
     async def run(
         self,
@@ -120,7 +132,19 @@ class SyncCycle:
         if supabase_rows is not None:
             if config.excluded_symbols:
                 excluded = {s.upper() for s in config.excluded_symbols}
-                supabase_rows = [r for r in supabase_rows if r["instrument"].upper() not in excluded]
+                filtered = []
+                for r in supabase_rows:
+                    if r["instrument"].upper() in excluded:
+                        lid = r["limit_id"]
+                        if lid not in self._logged_excluded:
+                            logger.info(
+                                "Excluded symbol: signal_id=%d limit_id=%d symbol=%s",
+                                r["signal_id"], lid, r["instrument"],
+                            )
+                            self._logged_excluded.add(lid)
+                    else:
+                        filtered.append(r)
+                supabase_rows = filtered
 
             sqlite_active = await sqlite.get_all_active()
             sqlite_pending = [r for r in sqlite_active if r["status"] == "pending"]
@@ -138,6 +162,24 @@ class SyncCycle:
                     result.cancelled += ok
                     result.errors += not ok
                 placement_active = False
+                logger.info("Placement blocked: reason=spread_hour")
+
+            # News mode gate: same behavior as spread hour
+            if placement_active:
+                news_mode_active = False
+                try:
+                    news_mode_active = await supabase.fetch_news_mode()
+                except Exception:
+                    logger.error("Failed to fetch news_mode", exc_info=True)
+                if news_mode_active:
+                    for row in sqlite_pending:
+                        ok = await self._canceller.cancel_order(
+                            row["mt5_ticket"], mt5_client, sqlite, spread=True
+                        )
+                        result.cancelled += ok
+                        result.errors += not ok
+                    placement_active = False
+                    logger.info("Placement blocked: reason=news_mode")
 
             live_prices: dict = {}
             if placement_active:
@@ -188,6 +230,19 @@ class SyncCycle:
 
                 if offset_needed:
                     live_prices = await supabase.fetch_live_prices(list(offset_needed))
+
+                # Fetch feed health once for this batch
+                stale_feeds: set[str] = set()
+                try:
+                    feed_health = await supabase.fetch_feed_health()
+                    stale_feeds = {
+                        feed for feed, status in feed_health.items()
+                        if status in ("degraded", "down")
+                    }
+                    if stale_feeds:
+                        logger.warning("Stale feeds detected: %s", stale_feeds)
+                except Exception:
+                    logger.error("Failed to fetch feed_health", exc_info=True)
 
                 # Group all Supabase rows by signal for lot calculation
                 by_signal: dict[int, list] = defaultdict(list)
@@ -300,6 +355,15 @@ class SyncCycle:
                         if needs_offset(db_sym, config) and db_sym in stale_instruments:
                             rejection_reason[sig_id] = "live price stale"
                             continue  # errors already counted by pre-check
+                        feed = _feed_for_symbol(db_sym, config)
+                        if feed in stale_feeds:
+                            rejection_reason[sig_id] = "feed_stale"
+                            result.skipped += len(lids)
+                            logger.info(
+                                "Signal %d (%s): feed=%s is stale — skipping %d limit(s)",
+                                sig_id, db_sym, feed, len(lids),
+                            )
+                            continue
                         tick = sym_ticks.get(mt5_sym)
                         info = sym_infos.get(mt5_sym)
                         if tick is None or info is None:

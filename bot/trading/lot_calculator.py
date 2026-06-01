@@ -38,6 +38,12 @@ class LotCalculator:
             return fl.get(mt5_symbol) or fl.get("default") or 0.01
         return float(fl)
 
+    def _get_risk_percent(self, mt5_symbol: str) -> float:
+        rp = self._config.lot_sizing.risk_percent
+        if isinstance(rp, dict):
+            return rp.get(mt5_symbol) or rp.get("default") or 1.0
+        return float(rp)
+
     def calculate(self, stop_loss: float, limit_prices: list[float], mt5_symbol: str) -> float:
         info = self._client.symbol_info(mt5_symbol)
         if info is None:
@@ -66,7 +72,7 @@ class LotCalculator:
             logger.warning("Zero SL distance for %s, using volume_min", mt5_symbol)
             return _clamp(info.volume_min, info)
 
-        raw = (account.balance * self._config.lot_sizing.risk_percent / 100) / (
+        raw = (account.balance * self._get_risk_percent(mt5_symbol) / 100) / (
             len(limit_prices) * avg_sl_pips * pip_val
         )
         capped = min(raw, self._config.lot_sizing.max_lot_per_order)

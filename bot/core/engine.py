@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
+
+_RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
 
 from bot.config.settings import Settings, load_config
 from bot.core.dashboard_cache import DashboardCache
@@ -46,6 +49,10 @@ class Engine:
         self.dashboard_cache = DashboardCache()
         # SSE consumers read from this queue
         self.status_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        # License teardown state
+        self._license_expired: bool = False
+        self.shutdown_reason: str | None = None
+        self._last_license_valid: bool = True
 
     def start(self) -> None:
         self._trading_active = True
@@ -96,6 +103,9 @@ class Engine:
                 acct = self._mt5.account_info()
                 mt5_account = acct.login if acct else 0
                 await self._license.validate(self._config.license_key, mt5_account)
+                # Sync _last_license_valid to the real post-validate state so a failed
+                # startup validate does not falsely trigger teardown on the first sync cycle.
+                self._last_license_valid = self._license.license_valid
 
             tasks = [
                 asyncio.create_task(self._sync_loop(), name="sync_loop"),
@@ -121,6 +131,19 @@ class Engine:
 
     async def _sync_loop(self) -> None:
         while True:
+            if self._license_expired:
+                logger.info("Sync loop halted: license expired")
+                return
+
+            # Detect license flip from valid → invalid and run teardown
+            if self._license is not None:
+                current_valid = self._license.license_valid
+                if self._last_license_valid and not current_valid:
+                    self._last_license_valid = False
+                    await self._license_teardown()
+                    return
+                self._last_license_valid = current_valid
+
             try:
                 new_config = load_config()
                 if new_config:
@@ -200,6 +223,53 @@ class Engine:
                 except Exception:
                     logger.error("Periodic reconcile failed", exc_info=True)
                 last_full = now
+
+    async def _license_teardown(self) -> None:
+        """Cancel all pending orders and close all positions after license expiry."""
+        self._license_expired = True
+        self.shutdown_reason = "license_expired"
+        logger.error("License expired — cancelling all pending orders and closing all positions")
+
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            pending = await self._sqlite.get_pending_orders()
+            for row in pending:
+                ticket = row["mt5_ticket"]
+                res = self._mt5.cancel_pending_order(ticket)
+                if res and res.retcode == _RETCODE_DONE:
+                    await self._sqlite.mark_cancelled(ticket, now_iso, spread=False)
+                    logger.info("License teardown: cancelled pending ticket=%d", ticket)
+                else:
+                    retcode = res.retcode if res else "None"
+                    logger.error(
+                        "License teardown: cancel failed ticket=%d retcode=%s", ticket, retcode
+                    )
+
+            mt5_positions = {p.ticket: p for p in self._mt5.positions_get()}
+            filled = await self._sqlite.get_filled_positions()
+            for row in filled:
+                ticket = row["mt5_ticket"]
+                pos = mt5_positions.get(ticket)
+                if pos is None:
+                    continue
+                res = self._mt5.close_position(
+                    ticket=pos.ticket,
+                    symbol=pos.symbol,
+                    volume=pos.volume,
+                    position_type=pos.type,
+                    comment="license_expired",
+                )
+                if res and res.retcode == _RETCODE_DONE:
+                    await self._sqlite.mark_closed(ticket, pos.profit)
+                    logger.info("License teardown: closed position ticket=%d", ticket)
+                else:
+                    retcode = res.retcode if res else "None"
+                    logger.error(
+                        "License teardown: close failed ticket=%d retcode=%s", ticket, retcode
+                    )
+        except Exception:
+            logger.error("License teardown encountered an error", exc_info=True)
 
     async def _update_dashboard(self) -> None:
         try:

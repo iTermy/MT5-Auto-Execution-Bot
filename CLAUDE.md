@@ -53,6 +53,7 @@ pytest tests/
 - Idempotent sync — running a cycle twice must have no additional effect
 - TP engine must never crash the main loop — log errors and continue
 - Spread adjustment applied to every order placement (see ARCHITECTURE.md)
+- `lot_sizing.risk_percent` accepts either a flat `float` (e.g. `1.0`) or a per-instrument dict (e.g. `{"XAUUSD": 0.3, "default": 1.0}`). Resolution order: exact MT5 symbol → `"default"` key → `1.0`. Same shape as `fixed_lot`.
 
 ## Concurrency (Critical)
 - Main thread: pystray (system tray icon, Windows message pump)

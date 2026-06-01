@@ -26,8 +26,10 @@ All decisions and context live in these repo files. Do not rely on chat history 
 Read STATE.md first. It lists every owner decision and every known risk.
 
 ## Build & Run
+
+### Development
 ```bash
-# Backend
+# Backend (uses .env for DSN, empty license URL bypasses validation)
 pip install -r requirements.txt
 python main.py
 
@@ -37,12 +39,42 @@ cd frontend && npm install && npm run dev
 # Frontend (production build)
 cd frontend && npm run build
 
-# PyInstaller
-pyinstaller bot.spec
-
 # Tests
 pytest tests/
 ```
+
+### Production Build (.exe)
+The production exe has DSN and license URL baked into the binary. No .env file needed at runtime.
+
+1. **Set credentials** in `bot/config/constants.py`:
+   ```python
+   _PRODUCTION_DSN: str = "postgresql://execution_bot_ro.cqogevbfbrfzgbuxbhmn:oS%2495chu86HanS@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
+   _PRODUCTION_LICENSE_URL: str = "https://cqogevbfbrfzgbuxbhmn.supabase.co/functions/v1/validate-license"
+   ```
+   **DSN must use the Supabase session pooler** (`aws-1-us-east-2.pooler.supabase.com:5432`), not the direct connection (`db.xxx.supabase.co`). Direct connections resolve to IPv6 which fails on IPv4-only hosts. URL-encode `$` as `%24` in the password.
+
+2. **Build frontend** (if changed):
+   ```bash
+   cd frontend && npm run build
+   ```
+
+3. **Build exe**:
+   ```bash
+   pyinstaller bot.spec
+   ```
+   Output: `dist/MT5Bot.exe`
+
+4. **Revert credentials** — do not commit them:
+   ```python
+   _PRODUCTION_DSN: str = ""
+   _PRODUCTION_LICENSE_URL: str = ""
+   ```
+
+5. **Deploy** — copy to the production folder:
+   - `MT5Bot.exe`
+   - `config.json` (if not already present)
+
+   The exe serves the frontend from the bundled `frontend/dist/` — no separate files needed. `orders.db` and `bot.log` are created at runtime next to the exe.
 
 ## Key Constraints (Non-Negotiable)
 - Supabase tables are **read-only** — no INSERT/UPDATE/DELETE on signals, limits, live_prices, feed_health, licenses
@@ -112,8 +144,7 @@ These are not in ARCHITECTURE.md — they were decided during build:
 - `ROUND(x, 2)` in Postgres requires `CAST(... AS NUMERIC)`
 
 ## DSN Loading
-1. `.env` file with `SUPABASE_DSN` (contributor path)
-2. `_PRODUCTION_DSN` constant in `bot/config/constants.py` (production build, placeholder in repo)
+`_PRODUCTION_DSN` constant in `bot/config/constants.py` — placeholder `""` in the repo, set before building the production exe. No `.env` file or environment variables needed.
 
 ## Target File Layout
 ```

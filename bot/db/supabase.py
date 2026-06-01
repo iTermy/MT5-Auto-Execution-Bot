@@ -18,7 +18,6 @@ class SupabaseDB:
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         self._pool: asyncpg.Pool | None = None
-        self._feed_health_disabled: bool = False
 
     async def create_pool(self) -> None:
         self._pool = await asyncpg.create_pool(
@@ -58,13 +57,6 @@ class SupabaseDB:
 
     async def fetch_feed_health(self) -> dict[str, str]:
         """Return {feed_name: status} from the feed_health table."""
-        if self._feed_health_disabled:
-            return {}
-        try:
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(FETCH_FEED_HEALTH)
-            return {row["feed"]: row["status"] for row in rows}
-        except asyncpg.exceptions.InsufficientPrivilegeError:
-            logger.warning("No permission for feed_health table — disabling feed health checks")
-            self._feed_health_disabled = True
-            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(FETCH_FEED_HEALTH)
+        return {row["feed"]: row["status"] for row in rows}

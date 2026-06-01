@@ -245,6 +245,7 @@ class MT5Client:
             "deviation": 20,
             "magic": MAGIC_NUMBER,
             "comment": comment or "tp",
+            "type_filling": mt5.ORDER_FILLING_IOC,
         }
         result = None
         for attempt in range(1, 4):

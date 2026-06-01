@@ -113,6 +113,8 @@ class SyncCycle:
         self._last_signal_status: dict[int, str] = {}
         # limit_ids whose exclusion has already been logged (logged once per lifetime)
         self._logged_excluded: set[int] = set()
+        # signal_ids whose proximity rejection has been logged (logged once per lifetime)
+        self._logged_proximity: set[int] = set()
         # C8: SL sync consecutive failure tracking
         self._sl_fail_count: dict[int, int] = {}    # ticket -> consecutive fail count
         self._sl_fail_target: dict[int, float] = {} # ticket -> last failed target sl
@@ -386,13 +388,16 @@ class SyncCycle:
                         new_prices = [float(supabase_by_limit[lid]["price_level"]) for lid in lids]
                         if _within_proximity(new_prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym):
                             approved_signals.add(sig_id)
+                            self._logged_proximity.discard(sig_id)
                         else:
                             rejection_reason[sig_id] = "outside proximity"
                             result.skipped += len(lids)
-                            logger.info(
-                                "Signal %d (%s): all limits outside proximity — skipping %d order(s)",
-                                sig_id, db_sym, len(lids),
-                            )
+                            if sig_id not in self._logged_proximity:
+                                logger.info(
+                                    "Signal %d (%s): all limits outside proximity — skipping %d order(s)",
+                                    sig_id, db_sym, len(lids),
+                                )
+                                self._logged_proximity.add(sig_id)
 
                     # Compute lot once per approved signal (not once per limit)
                     signal_lots: dict[int, float] = {}
@@ -410,11 +415,6 @@ class SyncCycle:
                         row = supabase_by_limit[lid]
                         sig_id = row["signal_id"]
                         if sig_id not in approved_signals:
-                            reason = rejection_reason.get(sig_id, "not approved")
-                            logger.info(
-                                "Skip limit_id=%d signal_id=%d instrument=%s reason=%s",
-                                lid, sig_id, row["instrument"], reason,
-                            )
                             continue
 
                         db_sym = row["instrument"]

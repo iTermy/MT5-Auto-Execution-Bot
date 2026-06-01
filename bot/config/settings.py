@@ -90,6 +90,7 @@ class TPConfig(BaseModel):
 
 class Settings(BaseModel):
     license_key: str = ""
+    mt5_terminal_path: str = ""
     lot_sizing: LotSizingConfig = LotSizingConfig()
     polling: PollingConfig = PollingConfig()
     magic_number: int = 20250001

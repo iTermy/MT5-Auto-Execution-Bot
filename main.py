@@ -62,7 +62,7 @@ def main() -> None:
     dsn = load_dsn()
     license_url = load_license_url()
 
-    conn = MT5Connection()
+    conn = MT5Connection(config.mt5_terminal_path)
     mt5_client = MT5Client(conn)
     supabase = SupabaseDB(dsn)
     sqlite = SQLiteDB()

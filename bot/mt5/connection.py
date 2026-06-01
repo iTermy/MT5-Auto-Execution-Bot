@@ -6,8 +6,14 @@ logger = logging.getLogger(__name__)
 
 
 class MT5Connection:
+    def __init__(self, terminal_path: str = "") -> None:
+        self._terminal_path = terminal_path
+
     def initialize(self) -> bool:
-        if not mt5.initialize():
+        kwargs = {}
+        if self._terminal_path:
+            kwargs["path"] = self._terminal_path
+        if not mt5.initialize(**kwargs):
             logger.error("MT5 initialize failed: %s", mt5.last_error())
             return False
         info = mt5.account_info()

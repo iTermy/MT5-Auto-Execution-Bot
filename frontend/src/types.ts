@@ -15,11 +15,17 @@ export interface LogEntry {
   timestamp: string
 }
 
+export interface LotExceptionConfig {
+  mode: 'risk_percent' | 'fixed'
+  value: number
+}
+
 export interface LotSizingConfig {
   mode: string
-  risk_percent: number
+  risk_percent: number | Record<string, number>
   fixed_lot: number | Record<string, number>
   max_lot_per_order: number
+  exceptions?: Record<string, LotExceptionConfig>
 }
 
 export interface AssetTPConfig {

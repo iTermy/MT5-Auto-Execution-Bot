@@ -50,9 +50,28 @@ class LotCalculator:
             logger.error("symbol_info unavailable for %s, using fixed_lot fallback", mt5_symbol)
             return self._get_fixed_lot(mt5_symbol)
 
+        # Per-symbol exception takes precedence over the global mode.
+        exception = self._config.lot_sizing.exceptions.get(mt5_symbol)
+        if exception is not None:
+            if exception.mode == "fixed":
+                return _clamp(exception.value, info)
+            return self._calc_risk_lot(exception.value, info, stop_loss, limit_prices, mt5_symbol)
+
         if self._config.lot_sizing.mode != "risk_percent":
             return _clamp(self._get_fixed_lot(mt5_symbol), info)
 
+        return self._calc_risk_lot(
+            self._get_risk_percent(mt5_symbol), info, stop_loss, limit_prices, mt5_symbol
+        )
+
+    def _calc_risk_lot(
+        self,
+        risk_percent: float,
+        info: SymbolInfo,
+        stop_loss: float,
+        limit_prices: list[float],
+        mt5_symbol: str,
+    ) -> float:
         account = self._client.account_info()
         if account is None:
             logger.error("account_info unavailable, using volume_min for %s", mt5_symbol)
@@ -72,7 +91,7 @@ class LotCalculator:
             logger.warning("Zero SL distance for %s, using volume_min", mt5_symbol)
             return _clamp(info.volume_min, info)
 
-        raw = (account.balance * self._get_risk_percent(mt5_symbol) / 100) / (
+        raw = (account.balance * risk_percent / 100) / (
             len(limit_prices) * avg_sl_pips * pip_val
         )
         capped = min(raw, self._config.lot_sizing.max_lot_per_order)

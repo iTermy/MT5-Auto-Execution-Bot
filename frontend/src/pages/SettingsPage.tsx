@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
 import { startEngine, stopEngine, shutdownEngine, updateConfig } from '../api'
-import type { Config, TPConfig, AssetTPConfig, ScalpOverrideConfig } from '../types'
+import type { Config, TPConfig, AssetTPConfig, ScalpOverrideConfig, LotExceptionConfig } from '../types'
+import { detectAssetClass } from '../utils/assetClass'
 
 const ASSET_CLASSES = ['forex', 'forex_jpy', 'metals', 'indices', 'stocks', 'crypto', 'oil'] as const
 type AssetKey = typeof ASSET_CLASSES[number]
 
 type OverrideType = 'scalp' | 'toll' | 'swing' | 'pa'
 const OVERRIDE_TYPES: OverrideType[] = ['scalp', 'toll', 'swing', 'pa']
+
+// Trailing % is the inverse of partial_close_percent (storage unchanged).
+const partialToTrailing = (p: number) => Math.max(0, Math.min(100, 100 - p))
+const trailingToPartial = (t: number) => Math.max(0, Math.min(100, 100 - t))
 
 interface OverridePair {
   thr: string
@@ -36,9 +41,17 @@ interface SymbolRow {
   feed: boolean
 }
 
-interface FixedLotRow {
-  instrument: string
-  lot: string
+interface LotExceptionRow {
+  symbol: string
+  mode: 'risk_percent' | 'fixed'
+  value: string
+}
+
+interface InstrumentOverrideRow {
+  symbol: string
+  thr: string
+  trail: string
+  partial: string  // stored as partial_close_percent in config; UI displays trailing
 }
 
 interface Props {
@@ -50,11 +63,16 @@ interface Props {
 export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [lotMode, setLotMode] = useState('risk_percent')
   const [riskPct, setRiskPct] = useState('1.0')
+  const [fixedLotDefault, setFixedLotDefault] = useState('0.01')
   const [maxLot, setMaxLot] = useState('5.0')
-  const [fixedLotRows, setFixedLotRows] = useState<FixedLotRow[]>([{ instrument: 'default', lot: '0.01' }])
+  const [lotExceptions, setLotExceptions] = useState<LotExceptionRow[]>([])
   const [licenseKey, setLicenseKey] = useState('')
   const [tpRows, setTpRows] = useState<TpRow[]>([])
   const [tpTab, setTpTab] = useState<'standard' | OverrideType>('standard')
+  const [instrumentOverrides, setInstrumentOverrides] = useState<Record<AssetKey, InstrumentOverrideRow[]>>(
+    () => Object.fromEntries(ASSET_CLASSES.map(a => [a, [] as InstrumentOverrideRow[]])) as Record<AssetKey, InstrumentOverrideRow[]>
+  )
+  const [expandedAsset, setExpandedAsset] = useState<AssetKey | null>(null)
   const [oneToOneDefault, setOneToOneDefault] = useState('10')
   const [oneToOneRows, setOneToOneRows] = useState<OneToOneOverrideRow[]>([])
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
@@ -69,22 +87,50 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
   const initFromConfig = useCallback((cfg: Config) => {
     setLotMode(cfg.lot_sizing.mode)
-    setRiskPct(String(cfg.lot_sizing.risk_percent))
     setMaxLot(String(cfg.lot_sizing.max_lot_per_order))
     setLicenseKey(cfg.license_key)
 
+    // Global Risk % default — accept flat number, or "default" key of a dict.
+    const rp = cfg.lot_sizing.risk_percent
+    if (typeof rp === 'number') {
+      setRiskPct(String(rp))
+    } else if (rp && typeof rp === 'object') {
+      setRiskPct(String((rp as Record<string, number>).default ?? 1.0))
+    }
+
+    // Global Fixed lot default — accept flat number, or "default" key of a dict.
     const fl = cfg.lot_sizing.fixed_lot
     if (typeof fl === 'number') {
-      setFixedLotRows([{ instrument: 'default', lot: String(fl) }])
+      setFixedLotDefault(String(fl))
     } else if (fl && typeof fl === 'object') {
-      const entries = Object.entries(fl)
-      const def = entries.find(([k]) => k === 'default')
-      const others = entries.filter(([k]) => k !== 'default')
-      setFixedLotRows([
-        { instrument: 'default', lot: String(def ? def[1] : 0.01) },
-        ...others.map(([k, v]) => ({ instrument: k, lot: String(v) })),
-      ])
+      setFixedLotDefault(String((fl as Record<string, number>).default ?? 0.01))
     }
+
+    // Load exceptions. Prefer the new `exceptions` field; if absent, migrate
+    // any legacy non-`default` keys from risk_percent / fixed_lot dicts.
+    const exceptions: LotExceptionRow[] = []
+    const seen = new Set<string>()
+    if (cfg.lot_sizing.exceptions) {
+      for (const [sym, ex] of Object.entries(cfg.lot_sizing.exceptions)) {
+        exceptions.push({ symbol: sym, mode: ex.mode, value: String(ex.value) })
+        seen.add(sym)
+      }
+    }
+    if (rp && typeof rp === 'object') {
+      for (const [sym, value] of Object.entries(rp as Record<string, number>)) {
+        if (sym === 'default' || seen.has(sym)) continue
+        exceptions.push({ symbol: sym, mode: 'risk_percent', value: String(value) })
+        seen.add(sym)
+      }
+    }
+    if (fl && typeof fl === 'object') {
+      for (const [sym, value] of Object.entries(fl as Record<string, number>)) {
+        if (sym === 'default' || seen.has(sym)) continue
+        exceptions.push({ symbol: sym, mode: 'fixed', value: String(value) })
+        seen.add(sym)
+      }
+    }
+    setLotExceptions(exceptions)
 
     const tp = cfg.tp_config
     if (tp) {
@@ -120,6 +166,20 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       setOneToOneRows(Object.entries(one?.overrides ?? {}).map(([asset, value]) => ({
         asset, value: String(value),
       })))
+
+      // Group per-symbol instrument overrides by detected asset class.
+      const grouped = Object.fromEntries(ASSET_CLASSES.map(a => [a, [] as InstrumentOverrideRow[]])) as Record<AssetKey, InstrumentOverrideRow[]>
+      for (const [sym, inst] of Object.entries(tp.instrument_overrides ?? {})) {
+        const ac = detectAssetClass(sym) as AssetKey
+        const i = inst as Record<string, unknown>
+        grouped[ac].push({
+          symbol: sym,
+          thr: i.profit_threshold != null ? String(i.profit_threshold) : '',
+          trail: i.trailing_distance != null ? String(i.trailing_distance) : '',
+          partial: i.partial_close_percent != null ? String(i.partial_close_percent) : '',
+        })
+      }
+      setInstrumentOverrides(grouped)
     }
 
     const offsetInst = cfg.offset_instruments ?? []
@@ -177,30 +237,72 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     touch()
   }
 
-  function updateFixedLotRow(i: number, field: 'instrument' | 'lot', value: string) {
-    setFixedLotRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
+  function updateLotException(i: number, field: 'symbol' | 'mode' | 'value', value: string) {
+    setLotExceptions(prev => prev.map((r, j) => {
+      if (j !== i) return r
+      if (field === 'mode') return { ...r, mode: value as 'risk_percent' | 'fixed' }
+      return { ...r, [field]: value }
+    }))
     touch()
   }
 
-  function addFixedLotRow() {
-    setFixedLotRows(prev => [...prev, { instrument: '', lot: '0.01' }])
+  function addLotException() {
+    setLotExceptions(prev => [...prev, { symbol: '', mode: 'risk_percent', value: '1.0' }])
     touch()
   }
 
-  function removeFixedLotRow(i: number) {
-    setFixedLotRows(prev => prev.filter((_, j) => j !== i))
+  function removeLotException(i: number) {
+    setLotExceptions(prev => prev.filter((_, j) => j !== i))
     touch()
   }
 
-  function buildFixedLot(): number | Record<string, number> {
-    if (fixedLotRows.length === 1 && fixedLotRows[0].instrument === 'default') {
-      return parseFloat(fixedLotRows[0].lot) || 0.01
-    }
+  function buildLotExceptions(): Record<string, LotExceptionConfig> {
     return Object.fromEntries(
-      fixedLotRows
-        .filter(r => r.instrument.trim())
-        .map(r => [r.instrument.trim(), parseFloat(r.lot) || 0.01])
+      lotExceptions
+        .filter(r => r.symbol.trim())
+        .map(r => [r.symbol.trim(), { mode: r.mode, value: parseFloat(r.value) || 0 }])
     )
+  }
+
+  function updateInstrumentOverride(asset: AssetKey, i: number, field: 'symbol' | 'thr' | 'trail' | 'partial', value: string) {
+    setInstrumentOverrides(prev => ({
+      ...prev,
+      [asset]: prev[asset].map((r, j) => j === i ? { ...r, [field]: value } : r),
+    }))
+    touch()
+  }
+
+  function addInstrumentOverride(asset: AssetKey) {
+    setInstrumentOverrides(prev => ({
+      ...prev,
+      [asset]: [...prev[asset], { symbol: '', thr: '', trail: '', partial: '' }],
+    }))
+    touch()
+  }
+
+  function removeInstrumentOverride(asset: AssetKey, i: number) {
+    setInstrumentOverrides(prev => ({
+      ...prev,
+      [asset]: prev[asset].filter((_, j) => j !== i),
+    }))
+    touch()
+  }
+
+  function buildInstrumentOverrides(): Record<string, Record<string, unknown>> {
+    const out: Record<string, Record<string, unknown>> = {}
+    for (const asset of ASSET_CLASSES) {
+      for (const row of instrumentOverrides[asset]) {
+        const sym = row.symbol.trim()
+        if (!sym) continue
+        const entry: Record<string, unknown> = {}
+        if (row.thr !== '') entry.profit_threshold = parseFloat(row.thr) || 0
+        if (row.trail !== '') entry.trailing_distance = parseFloat(row.trail) || 0
+        if (row.partial !== '') entry.partial_close_percent = parseInt(row.partial, 10) || 0
+        if (Object.keys(entry).length === 0) continue
+        out[sym] = entry
+      }
+    }
+    return out
   }
 
   function buildTpConfig(): TPConfig {
@@ -242,6 +344,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       ...assetEntries,
       ...overrideMaps,
       one_to_one: oneToOne,
+      instrument_overrides: buildInstrumentOverrides(),
     } as TPConfig
   }
 
@@ -264,8 +367,9 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         lot_sizing: {
           mode: lotMode,
           risk_percent: parseFloat(riskPct) || 1.0,
-          fixed_lot: buildFixedLot(),
+          fixed_lot: parseFloat(fixedLotDefault) || 0.01,
           max_lot_per_order: parseFloat(maxLot) || 5.0,
+          exceptions: buildLotExceptions(),
         },
         tp_config: buildTpConfig(),
         symbol_map: buildSymbolMap(),
@@ -363,7 +467,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <div className="panel-head"><h3>Lot sizing</h3></div>
         <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="field">
-            <label>Mode</label>
+            <label>Default mode</label>
             <Seg
               accent
               value={lotMode}
@@ -374,74 +478,95 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               onChange={v => { setLotMode(v); touch() }}
             />
           </div>
-          <div className="field">
-            <label>Max lot / order</label>
-            <input
-              className="inp num mono"
-              value={maxLot}
-              onChange={e => { setMaxLot(e.target.value); touch() }}
-            />
-          </div>
-        </div>
-
-        <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
-
-        {lotMode === 'risk_percent' ? (
-          <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end' }}>
+          {lotMode === 'risk_percent' ? (
             <div className="field">
               <label>Risk per signal (%)</label>
               <input
                 className="inp num mono"
                 value={riskPct}
                 onChange={e => { setRiskPct(e.target.value); touch() }}
+                style={{ width: 100 }}
               />
             </div>
+          ) : (
+            <div className="field">
+              <label>Fixed lot</label>
+              <input
+                className="inp num mono"
+                value={fixedLotDefault}
+                onChange={e => { setFixedLotDefault(e.target.value); touch() }}
+                style={{ width: 100 }}
+              />
+            </div>
+          )}
+          <div className="field">
+            <label>Max lot / order</label>
+            <input
+              className="inp num mono"
+              value={maxLot}
+              onChange={e => { setMaxLot(e.target.value); touch() }}
+              style={{ width: 100 }}
+            />
           </div>
-        ) : (
-          <div>
-            <table className="tbl" style={{ maxWidth: 460 }}>
-              <thead>
-                <tr>
-                  <th>Instrument</th>
-                  <th className="num">Fixed lot</th>
-                  <th />
+        </div>
+
+        <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
+
+        <div className="panel-head" style={{ marginBottom: 6 }}>
+          <h3 style={{ fontSize: 14 }}>Exceptions</h3>
+          <span className="sub">override mode and value for specific MT5 symbols</span>
+        </div>
+        {lotExceptions.length > 0 && (
+          <table className="tbl" style={{ maxWidth: 600 }}>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Mode</th>
+                <th className="num">Value</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {lotExceptions.map((r, i) => (
+                <tr key={i}>
+                  <td>
+                    <input
+                      className="inp mono"
+                      value={r.symbol}
+                      onChange={e => updateLotException(i, 'symbol', e.target.value)}
+                      placeholder="BTCUSD, XAUUSD, …"
+                      style={{ width: 160 }}
+                    />
+                  </td>
+                  <td>
+                    <Seg
+                      value={r.mode}
+                      options={[
+                        { value: 'risk_percent', label: 'Risk %' },
+                        { value: 'fixed', label: 'Fixed' },
+                      ]}
+                      onChange={v => updateLotException(i, 'mode', v)}
+                    />
+                  </td>
+                  <td className="num">
+                    <input
+                      className="inp num mono"
+                      value={r.value}
+                      onChange={e => updateLotException(i, 'value', e.target.value)}
+                      style={{ width: 88 }}
+                    />
+                  </td>
+                  <td style={{ width: 40 }}>
+                    <button className="btn sm ghost" onClick={() => removeLotException(i)}>×</button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {fixedLotRows.map((r, i) => (
-                  <tr key={i}>
-                    <td>
-                      {r.instrument === 'default'
-                        ? <span className="t-sub">Default</span>
-                        : <input
-                            className="inp mono"
-                            value={r.instrument}
-                            onChange={e => updateFixedLotRow(i, 'instrument', e.target.value)}
-                            style={{ width: 150 }}
-                          />}
-                    </td>
-                    <td className="num">
-                      <input
-                        className="inp num mono"
-                        value={r.lot}
-                        onChange={e => updateFixedLotRow(i, 'lot', e.target.value)}
-                        style={{ width: 88 }}
-                      />
-                    </td>
-                    <td style={{ width: 40 }}>
-                      {r.instrument !== 'default' && (
-                        <button className="btn sm ghost" onClick={() => removeFixedLotRow(i)}>×</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addFixedLotRow}>
-              + Add instrument
-            </button>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
+        <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addLotException}>
+          + Add exception
+        </button>
       </div>
 
       {/* TAKE PROFIT & TRAILING */}
@@ -466,6 +591,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             />
           </div>
           {tpTab === 'standard' ? (
+            <>
+            <p className="faint" style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5 }}>
+              Trailing 25% = trail 25% of position, close 75% at TP trigger.
+            </p>
             <table className="tbl">
               <thead>
                 <tr>
@@ -473,42 +602,132 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                   <th className="num">Threshold</th>
                   <th>Unit</th>
                   <th className="num">Trail dist.</th>
-                  <th>Partial close</th>
+                  <th>Trailing %</th>
+                  <th style={{ width: 32 }} />
                 </tr>
               </thead>
               <tbody>
-                {tpRows.map((t, i) => (
-                  <tr key={t.asset}>
-                    <td><span className="sym">{t.asset}</span></td>
-                    <td className="num">
-                      <input className="inp num mono" value={t.thr} style={{ width: 76 }}
-                        onChange={e => updateTpStandard(i, 'thr', e.target.value)} />
-                    </td>
-                    <td className="dim">{t.unit}</td>
-                    <td className="num">
-                      <input className="inp num mono" value={t.trail} style={{ width: 76 }}
-                        onChange={e => updateTpStandard(i, 'trail', e.target.value)} />
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <input
-                          type="range" min={0} max={100} step={5}
-                          value={parseInt(t.partial, 10) || 50}
-                          onChange={e => updateTpStandard(i, 'partial', e.target.value)}
-                          style={{ width: 140, accentColor: 'var(--accent)' }}
-                        />
-                        <span className="mono" style={{ width: 40, fontWeight: 600 }}>{parseInt(t.partial, 10) || 50}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {tpRows.map((t, i) => {
+                  const partial = parseInt(t.partial, 10) || 50
+                  const trailing = partialToTrailing(partial)
+                  const overrides = instrumentOverrides[t.asset as AssetKey]
+                  const isExpanded = expandedAsset === t.asset
+                  return (
+                    <Fragment key={t.asset}>
+                    <tr>
+                      <td><span className="sym">{t.asset}</span></td>
+                      <td className="num">
+                        <input className="inp num mono" value={t.thr} style={{ width: 76 }}
+                          onChange={e => updateTpStandard(i, 'thr', e.target.value)} />
+                      </td>
+                      <td className="dim">{t.unit}</td>
+                      <td className="num">
+                        <input className="inp num mono" value={t.trail} style={{ width: 76 }}
+                          onChange={e => updateTpStandard(i, 'trail', e.target.value)} />
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <input
+                            type="range" min={0} max={100} step={5}
+                            value={trailing}
+                            onChange={e => updateTpStandard(i, 'partial', String(trailingToPartial(parseInt(e.target.value, 10))))}
+                            style={{ width: 140, accentColor: 'var(--accent)' }}
+                          />
+                          <span className="mono" style={{ width: 40, fontWeight: 600 }}>{trailing}%</span>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className="btn sm ghost"
+                          onClick={() => setExpandedAsset(isExpanded ? null : t.asset as AssetKey)}
+                          title={isExpanded ? 'Hide per-symbol overrides' : 'Add per-symbol overrides'}
+                        >
+                          {isExpanded ? '−' : '+'}{overrides.length > 0 && !isExpanded && (
+                            <span className="faint" style={{ marginLeft: 4 }}>{overrides.length}</span>
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={6} style={{ background: 'var(--panel-soft, transparent)', padding: '10px 14px' }}>
+                          <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>
+                            Per-symbol overrides for <b>{t.asset}</b> · blank = inherit asset-class value · applies to all signal types
+                          </div>
+                          {overrides.length > 0 && (
+                            <table className="tbl" style={{ marginBottom: 8 }}>
+                              <thead>
+                                <tr>
+                                  <th>Symbol</th>
+                                  <th className="num">Threshold</th>
+                                  <th className="num">Trail dist.</th>
+                                  <th>Trailing %</th>
+                                  <th />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {overrides.map((r, j) => {
+                                  const ovPartialSet = r.partial !== ''
+                                  const ovPartial = parseInt(r.partial, 10) || 50
+                                  const ovTrailing = partialToTrailing(ovPartial)
+                                  return (
+                                    <tr key={j}>
+                                      <td>
+                                        <input className="inp mono" value={r.symbol}
+                                          onChange={e => updateInstrumentOverride(t.asset as AssetKey, j, 'symbol', e.target.value)}
+                                          placeholder="SPX500USD, AMD.NAS, …"
+                                          style={{ width: 160 }} />
+                                      </td>
+                                      <td className="num">
+                                        <input className="inp num mono" value={r.thr} style={{ width: 76 }}
+                                          onChange={e => updateInstrumentOverride(t.asset as AssetKey, j, 'thr', e.target.value)} />
+                                      </td>
+                                      <td className="num">
+                                        <input className="inp num mono" value={r.trail} style={{ width: 76 }}
+                                          onChange={e => updateInstrumentOverride(t.asset as AssetKey, j, 'trail', e.target.value)} />
+                                      </td>
+                                      <td>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                          <input
+                                            type="range" min={0} max={100} step={5}
+                                            value={ovTrailing}
+                                            onChange={e => updateInstrumentOverride(t.asset as AssetKey, j, 'partial', String(trailingToPartial(parseInt(e.target.value, 10))))}
+                                            style={{ width: 140, accentColor: 'var(--accent)' }}
+                                          />
+                                          <span className="mono" style={{ width: 56, fontWeight: 600 }}>
+                                            {ovPartialSet ? `${ovTrailing}%` : <span className="faint">inherit</span>}
+                                          </span>
+                                          {ovPartialSet && (
+                                            <button className="btn sm ghost" onClick={() => updateInstrumentOverride(t.asset as AssetKey, j, 'partial', '')}>×</button>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td style={{ width: 40 }}>
+                                        <button className="btn sm ghost" onClick={() => removeInstrumentOverride(t.asset as AssetKey, j)}>×</button>
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                          <button className="btn sm ghost" onClick={() => addInstrumentOverride(t.asset as AssetKey)}>
+                            + Add symbol
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
+            </>
           ) : (
             <>
               <p className="faint" style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5 }}>
                 {tpTab === 'swing'
-                  ? 'Leave blank to fall back to 3× the standard threshold. Partial close left blank inherits from Standard.'
+                  ? 'Leave blank to fall back to 3× the standard threshold. Trailing % left blank inherits from Standard.'
                   : 'Leave blank to fall back to the standard asset-class settings.'}
               </p>
               <table className="tbl">
@@ -518,13 +737,14 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     <th className="num">Threshold</th>
                     <th>Unit</th>
                     <th className="num">Trail dist.</th>
-                    <th>Partial close</th>
+                    <th>Trailing %</th>
                   </tr>
                 </thead>
                 <tbody>
                   {tpRows.map((t, i) => {
                     const partialSet = t.overrides[tpTab].partial !== ''
                     const partialNum = parseInt(t.overrides[tpTab].partial, 10) || 50
+                    const trailingNum = partialToTrailing(partialNum)
                     return (
                       <tr key={t.asset}>
                         <td><span className="sym">{t.asset}</span></td>
@@ -541,12 +761,12 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <input
                               type="range" min={0} max={100} step={5}
-                              value={partialNum}
-                              onChange={e => updateTpOverride(i, tpTab, 'partial', e.target.value)}
+                              value={trailingNum}
+                              onChange={e => updateTpOverride(i, tpTab, 'partial', String(trailingToPartial(parseInt(e.target.value, 10))))}
                               style={{ width: 140, accentColor: 'var(--accent)' }}
                             />
                             <span className="mono" style={{ width: 56, fontWeight: 600 }}>
-                              {partialSet ? `${partialNum}%` : <span className="faint">inherit</span>}
+                              {partialSet ? `${trailingNum}%` : <span className="faint">inherit</span>}
                             </span>
                             {partialSet && (
                               <button className="btn sm ghost" onClick={() => updateTpOverride(i, tpTab, 'partial', '')}>×</button>

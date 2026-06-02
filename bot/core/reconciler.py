@@ -149,15 +149,23 @@ class Reconciler:
                     count += 1
                     continue
 
+            # Re-check SQLite right before cancelling — order_canceller may have
+            # already cancelled this ticket in the same cycle, in which case the
+            # snapshot above is stale and the cancel would noisily fail.
+            fresh = await sqlite.get_order_by_ticket(order.ticket)
+            if fresh and fresh["status"] in ("cancelled", "spread_cancelled", "filled", "closed"):
+                continue
+
             res = mt5_client.cancel_pending_order(order.ticket)
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 logger.info(
                     "Orphan cancelled: ticket=%d symbol=%s", order.ticket, order.symbol
                 )
             else:
+                retcode = res.retcode if res else "None"
                 logger.warning(
-                    "Orphan cancel failed: ticket=%d symbol=%s comment=%s",
-                    order.ticket, order.symbol, order.comment,
+                    "Orphan cancel failed: ticket=%d symbol=%s comment=%s retcode=%s",
+                    order.ticket, order.symbol, order.comment, retcode,
                 )
             count += 1
 

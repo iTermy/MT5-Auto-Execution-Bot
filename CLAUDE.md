@@ -1,14 +1,16 @@
 # CLAUDE.md — Auto-Execution Bot V2
 
 ## Current Implementation Status
-**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57) + V5 cross-codebase hardening complete (decisions 58-64) + V6 MT5 polling reduction complete (decisions 65-71) + V7 signal_type expansion complete (decision 72).**
+**All 14 phases complete (52/52 steps) + post-MVP fixes (decisions 31-37) + V2 dashboard overhaul (decisions 38-46) + V3 frontend redesign (decision 47) + V4 integration & bug fixes complete (decisions 48-57) + V5 cross-codebase hardening complete (decisions 58-64) + V6 MT5 polling reduction complete (decisions 65-71) + V7 signal_type expansion complete (decision 72) + Pre-production hardening Phases 1–2 (decisions 73-82) + Owner UX / production-log fixes complete (decisions 83-88).**
 Read STATE.md immediately — it lists all implementation decisions made during build that are not
 in the original ARCHITECTURE.md.
 
 ## What To Do Now
-All planned work is complete. NEXT_STEPS.md is fully executed. See STATE.md decision 72 for the
-V7 expansion that replaced the `is_scalp` boolean with a six-value `signal_type` (standard / scalp
-/ swing / toll / pa / 1-1) and added per-type TP overrides + the 1-1 fixed-TP path.
+All planned work is complete. See STATE.md decisions 83–88 for the latest bundle: lot-sizing
+per-symbol exceptions, removing `profit` from force-exit so the TP engine drives the close,
+`symbol_info_tick` failure cooldown to kill repeat-error spam, `US30USD` / `JP225` added to
+`symbol_map` and `offset_instruments` defaults, reconciler orphan-cancel race fix, and the
+Settings UI moving to "Trailing %" semantics + per-asset expand rows for per-symbol TP overrides.
 
 ## What This Is
 Python Windows desktop app that reads trading signals from Supabase PostgreSQL and places/manages pending orders on MetaTrader 5 (MT5) via ICMarkets. FastAPI backend + React/TypeScript frontend served at `localhost:8501`, system tray icon via pystray.
@@ -201,6 +203,7 @@ frontend/src/hooks/useSort.tsx        — generic sortable-table hook with sort 
 frontend/src/utils/money.ts           — money() and fmtBalance() formatters
 frontend/src/utils/stats.ts           — compute detailed stats, daily bars, cumulative P&L from trades
 frontend/src/utils/channels.ts — channel ID → name/type mapping
+frontend/src/utils/assetClass.ts — port of detect_asset_class for grouping per-symbol TP overrides
 supabase/functions/            — Edge Function for license validation
 tests/                         — pytest suite
 ```
@@ -282,3 +285,14 @@ These changes landed after V7 as part of a joint TM+EX hardening pass before liv
 - **1-1 trailing lockout** — `TPEngine._process_group` skips the trailing branch when `signal_type == '1-1'`, even if a stale `is_trailing=1` row exists. Belt-and-suspenders alongside the `partial_close_percent=100` config force.
 - **Config additions** — `TPConfig` gained `toll_overrides`, `swing_overrides`, `pa_overrides` (same shape as `scalp_overrides`) and `one_to_one: OneToOneConfig` (`profit_threshold: float = 10.0` + `overrides: dict[str, float]`). All new override maps default to `{}`.
 - **Frontend** — `TradeData.signal_type`, `PositionData.signal_type`, `PendingOrderData.signal_type` (replaces `is_scalp`); History page Type filter expanded to all six types and reads `signal_type` from DB; Settings TP table now has `Standard | Scalp | Toll | Swing | PA` tabs over the per-asset grid plus a separate 1-1 fixed-TP card. `channels.ts` keeps `getChannelName()` only — `getSignalType()`/`CHANNEL_TYPES` removed (replaced by authoritative DB field). New `frontend/src/utils/signalType.ts` holds the type list, display labels, and badge classes.
+
+## Owner UX + Production Log Fixes (decisions 83–88 in STATE.md)
+- **Lot-sizing exceptions** — `LotSizingConfig.exceptions: dict[str, LotExceptionConfig]` where each entry is `{mode: "risk_percent" | "fixed", value: float}`. `LotCalculator.calculate()` checks exceptions before the global mode. Top-level `risk_percent` / `fixed_lot` are now the global defaults; legacy dict shapes are migrated into the new Exceptions panel on UI load.
+- **`profit` not a force-exit** — `_FORCE_EXIT_STATUSES = {"cancelled", "breakeven"}`. When TM clicks "profit", EX leaves positions open and the TP engine continues to manage them (engine has no awareness of Supabase signal status; it iterates SQLite filled rows). A single INFO log fires on the `profit` transition. `is_trailing` is no longer flipped to 0 on `profit`.
+- **`symbol_info_tick` failure cooldown** — `MT5Client` adds `_tick_unavailable_until: dict[str, float]`. After a failed tick lookup, the next call for that symbol is silently short-circuited for 60s. Stops the repeat-ERROR spam when a DB symbol isn't present in the broker's terminal (the overnight log accumulated thousands of `symbol_info_tick(US30USD) failed` lines because `DashboardCache` bypassed `SyncCycle`'s 300s placement cooldown).
+- **Default symbol_map + offset_instruments expanded** — `US30USD → US30` added to `symbol_map`; `US30USD` and `JP225` added to `offset_instruments`. JP225 in particular was placing orders in TM/OANDA feed price space (~67k) while IC's JP225 trades much lower — orders expired without filling. `OffsetCalculator` already prefers `ic_bid`/`ic_ask` from `live_prices` and falls back to a live MT5 tick (with a one-time per-symbol WARNING) if those columns are NULL — no calc change needed.
+- **Reconciler orphan-cancel race fix** — `Reconciler.reconcile_orphans()` calls `SQLiteDB.get_order_by_ticket(ticket)` immediately before `cancel_pending_order()` and skips if the row is already `cancelled` / `spread_cancelled` / `filled` / `closed`. Avoids the benign WARNING that fired when `order_canceller` and the orphan sweep ran in the same second. The WARNING for genuine failures now includes the MT5 retcode. New `GET_ORDER_BY_TICKET` query.
+- **Settings UI — Trailing % + per-symbol TP overrides** — UI-only. Storage shape unchanged.
+  - "Partial close" slider relabeled to "Trailing %" across Standard and every override tab. Displayed value is `100 − partial_close_percent`; converted back on save via `partialToTrailing` / `trailingToPartial` helpers at the top of `SettingsPage.tsx`.
+  - Each asset-class row on the Standard tab gained a `+` button that expands an inline per-symbol overrides table (Symbol / Threshold / Trail dist. / Trailing %). Backed by the pre-existing `tp_config.instrument_overrides: dict[str, dict]` field — routing was already wired in `asset_config.get_config()`. Symbols are DB-form (`SPX500USD`, `JP225`, `AMD.NAS`); stock suffix mapping is handled internally by `symbol_mapper`. Per-symbol overrides layer on after signal-type routing, so they apply across all signal-type tabs.
+  - New utility `frontend/src/utils/assetClass.ts` ports `detect_asset_class` for grouping per-symbol overrides under the right asset class on load.

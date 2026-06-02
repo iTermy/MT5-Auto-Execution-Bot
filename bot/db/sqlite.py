@@ -10,6 +10,7 @@ from bot.db.queries import (
     GET_CLAIMED_ORDERS,
     GET_FILLED_POSITIONS,
     GET_FILLED_SIGNAL_IDS,
+    GET_ORDER_BY_TICKET,
     GET_ORDER_HISTORY,
     GET_PENDING_BY_SIGNAL,
     GET_PENDING_ORDERS,
@@ -152,6 +153,10 @@ class SQLiteDB:
     async def get_pending_orders(self) -> list[aiosqlite.Row]:
         async with self._db.execute(GET_PENDING_ORDERS) as cursor:
             return await cursor.fetchall()
+
+    async def get_order_by_ticket(self, mt5_ticket: int) -> aiosqlite.Row | None:
+        async with self._db.execute(GET_ORDER_BY_TICKET, (mt5_ticket,)) as cursor:
+            return await cursor.fetchone()
 
     async def get_filled_positions(self) -> list[aiosqlite.Row]:
         async with self._db.execute(GET_FILLED_POSITIONS) as cursor:

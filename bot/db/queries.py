@@ -142,6 +142,10 @@ GET_PENDING_BY_SIGNAL = """
 SELECT * FROM order_mappings WHERE signal_id = ? AND status = 'pending'
 """
 
+GET_ORDER_BY_TICKET = """
+SELECT * FROM order_mappings WHERE mt5_ticket = ?
+"""
+
 GET_FILLED_SIGNAL_IDS = """
 SELECT DISTINCT signal_id FROM order_mappings WHERE status = 'filled'
 """

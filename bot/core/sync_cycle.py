@@ -71,7 +71,7 @@ class SyncResult:
     skipped: int = 0  # proximity-filtered limits
 
 
-_FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven", "profit"})
+_FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
 _SL_FAIL_MAX = 5
 _FORCE_EXIT_MAX_ATTEMPTS = 5
 
@@ -673,6 +673,12 @@ class SyncCycle:
             closed_reason = entry.get("closed_reason")
 
             previous = self._last_signal_status.get(signal_id)
+
+            if current == "profit" and previous != "profit":
+                logger.info(
+                    "Signal %d profit-marked by TM — keeping positions; TP engine continues",
+                    signal_id,
+                )
 
             if current not in _FORCE_EXIT_STATUSES:
                 self._last_signal_status[signal_id] = current

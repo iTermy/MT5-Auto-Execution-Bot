@@ -11,11 +11,17 @@ logger = logging.getLogger(__name__)
 _CONFIG_PATH = Path("config.json")
 
 
+class LotExceptionConfig(BaseModel):
+    mode: str  # "risk_percent" | "fixed"
+    value: float  # percent for risk_percent, lots for fixed
+
+
 class LotSizingConfig(BaseModel):
     mode: str = "risk_percent"
     risk_percent: float | dict[str, float] = 1.0
     fixed_lot: float | dict[str, float] = 0.01
     max_lot_per_order: float = 5.0
+    exceptions: dict[str, LotExceptionConfig] = {}
 
 
 class PollingConfig(BaseModel):
@@ -97,11 +103,19 @@ class Settings(BaseModel):
         "NAS100USD": "USTEC",
         "BTCUSDT": "BTCUSD",
         "ETHUSDT": "ETHUSD",
+        "US30USD": "US30",
     }
     stock_suffix: str = "-24"
     stock_no_suffix: list[str] = []
     excluded_symbols: list[str] = []
-    offset_instruments: list[str] = ["SPX500USD", "NAS100USD", "BTCUSDT", "ETHUSDT"]
+    offset_instruments: list[str] = [
+        "SPX500USD",
+        "NAS100USD",
+        "BTCUSDT",
+        "ETHUSDT",
+        "US30USD",
+        "JP225",
+    ]
     offset_drift_threshold_pips: float = 5.0
     feed_max_staleness_seconds: int = 30
     spread_hour: SpreadHourConfig = SpreadHourConfig()

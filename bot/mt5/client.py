@@ -26,6 +26,7 @@ _TRANSIENT_RETCODES = frozenset({
 })
 
 _BULK_CACHE_TTL = 0.5  # seconds — collapses duplicate calls within a single cycle
+_TICK_FAIL_COOLDOWN = 60.0  # seconds — silence repeat errors for a missing symbol
 
 
 class MT5Client:
@@ -35,6 +36,7 @@ class MT5Client:
         self._positions_cache: tuple[float, list[PositionInfo]] | None = None
         self._orders_cache: tuple[float, list[OrderInfo]] | None = None
         self._account_cache: tuple[float, AccountInfo | None] | None = None
+        self._tick_unavailable_until: dict[str, float] = {}
 
     def ensure_connected(self) -> bool:
         return self._conn.ensure_connected()
@@ -174,10 +176,15 @@ class MT5Client:
         return info
 
     def symbol_info_tick(self, symbol: str) -> TickInfo | None:
+        now = time.monotonic()
+        if now < self._tick_unavailable_until.get(symbol, 0.0):
+            return None
         raw = mt5.symbol_info_tick(symbol)
         if raw is None:
             logger.error("symbol_info_tick(%s) failed: %s", symbol, mt5.last_error())
+            self._tick_unavailable_until[symbol] = now + _TICK_FAIL_COOLDOWN
             return None
+        self._tick_unavailable_until.pop(symbol, None)
         return TickInfo(symbol=symbol, bid=raw.bid, ask=raw.ask, time=raw.time)
 
     def account_info(self) -> AccountInfo | None:

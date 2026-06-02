@@ -1,8 +1,8 @@
-# Project State — 2026-05-31
+# Project State — 2026-06-02
 
 ## Current Status: Pre-Production Hardening In Progress (Phases 1–2 of 7 complete)
 
-**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71). V7 signal_type expansion complete (72). Pre-production hardening started (73-82, Phases 1-2 of plan in `C:\Python Stuff\TM Bot\IMPLEMENTATION_PLAN.md`).**
+**Original 52 steps complete. Post-MVP fixes (31-37). V2 dashboard overhaul (38-46). V3 frontend redesign (47). V4 integration & bug fixes complete (48-57). V5 cross-codebase hardening complete (58-64). V6 MT5 polling reduction complete (65-71). V7 signal_type expansion complete (72). Pre-production hardening (73-82, Phases 1-2 of plan in `C:\Python Stuff\TM Bot\IMPLEMENTATION_PLAN.md`). Owner UX + production log fixes complete (83-88).**
 
 ---
 
@@ -726,6 +726,65 @@ NEXT_STEPS.md — 7 steps, 4 phases. All implemented. See decisions 58–64 belo
     already filled when the ticket update runs). `update_ticket()` returns `bool` indicating whether
     a row was actually updated. A second call with the same arguments is a no-op because the first
     call changes `mt5_ticket` to the new value, so `WHERE mt5_ticket = old_ticket` no longer matches.
+
+### Owner UX + Production Log Fixes (decisions 83–88)
+
+83. **Lot-sizing per-symbol exceptions** — `LotSizingConfig` gained an `exceptions: dict[str,
+    LotExceptionConfig]` field where each entry has `{mode: "risk_percent" | "fixed", value:
+    float}`. `LotCalculator.calculate()` checks `exceptions[mt5_symbol]` first; if present, the
+    exception's mode and value override the global mode entirely. The pre-existing `risk_percent:
+    float | dict` and `fixed_lot: float | dict` shapes are still honored for back-compat (legacy
+    dict keys are migrated into the new Exceptions UI on load). The Settings page replaces the old
+    fixed-lot per-instrument table with a unified Exceptions panel: each row has a symbol, a
+    Risk%/Fixed toggle, and a value. Top-level `risk_percent` / `fixed_lot` save as flat floats
+    (the global default for non-exception symbols).
+
+84. **`profit` removed from `_FORCE_EXIT_STATUSES`** — `sync_cycle.py:74` now only force-closes on
+    `cancelled` and `breakeven`. When TM clicks "profit" on a signal, EX keeps the position open
+    and the TP engine continues to manage it (the engine has no awareness of Supabase signal
+    status — it iterates SQLite filled positions). One INFO log fires on the `profit` transition
+    so the carve-out is visible in `bot.log`. `is_trailing` is no longer flipped to 0 on `profit`,
+    so trailing continues uninterrupted.
+
+85. **`symbol_info_tick` failure cooldown (60s/symbol)** — `MT5Client.__init__` adds
+    `_tick_unavailable_until: dict[str, float]`. After a failed `symbol_info_tick(symbol)` (None
+    return), the next call for the same symbol is silently short-circuited for 60 seconds. Caps
+    repeat ERROR spam at ~1/min/symbol for missing instruments (e.g. when a DB symbol is not in
+    the broker's terminal) — previously the overnight production log accumulated thousands of
+    `symbol_info_tick(US30USD) failed: Terminal: Not found` lines because `DashboardCache`
+    bypassed `SyncCycle`'s 300s placement cooldown. Successful calls clear the cooldown entry.
+
+86. **Default `symbol_map` + `offset_instruments` expanded** — `bot/config/settings.py` defaults
+    now include `"US30USD": "US30"` in `symbol_map` and add `"US30USD"` + `"JP225"` to
+    `offset_instruments`. Rationale: the production log showed `US30USD` symbol lookup errors
+    (DB symbol, no MT5 mapping) and JP225 signal 2041 placed orders at `~67,000` (TM/OANDA feed
+    space) while IC's JP225 trades far below that — limits expired without ever filling. With
+    these instruments in `offset_instruments`, `OffsetCalculator` will compute `ic_mid − feed_mid`
+    from `live_prices.ic_bid/ic_ask` (or fall back to live MT5 tick with a one-time WARNING per
+    symbol if those columns are NULL).
+
+87. **Reconciler orphan-cancel race fix** — `bot/core/reconciler.py:reconcile_orphans()` now
+    re-checks SQLite via `get_order_by_ticket(ticket)` immediately before calling
+    `cancel_pending_order()`. If the row is already `cancelled` / `spread_cancelled` / `filled` /
+    `closed`, the orphan path is skipped (`continue`). Avoids the benign-but-noisy WARNING that
+    fired when `order_canceller` and the orphan sweep ran in the same second on the same ticket
+    (witnessed for JP225 ticket 1680604972). The WARNING for genuine failures now includes the
+    MT5 retcode. New helper: `SQLiteDB.get_order_by_ticket()` + `GET_ORDER_BY_TICKET` SQL.
+
+88. **Settings UI — "Trailing %" + per-symbol TP overrides** — UI-only changes; storage shape
+    unchanged.
+    (a) `Partial close` slider relabeled to `Trailing %`. Displayed value is `100 −
+        partial_close_percent`; slider input is converted back on save. Helpers
+        `partialToTrailing` / `trailingToPartial` at the top of `SettingsPage.tsx`. Applied
+        across the Standard tab and every override tab (Scalp/Toll/Swing/PA).
+    (b) Each asset-class row on the Standard tab gained a `+` button that expands an inline
+        per-symbol overrides table (Symbol / Threshold / Trail dist. / Trailing %). Backed by
+        the pre-existing `tp_config.instrument_overrides: dict[str, dict]` field; routing was
+        already wired in `asset_config.get_config()`. Symbols are entered as DB-form (e.g.
+        `SPX500USD`, `JP225`, `AMD.NAS`) — stock suffix mapping is handled internally. New
+        utility `frontend/src/utils/assetClass.ts` ports `detect_asset_class` for grouping rows
+        by asset class on load. Note in the UI: per-symbol overrides apply across all
+        signal-type tabs (they layer on after signal-type routing).
 
 ---
 

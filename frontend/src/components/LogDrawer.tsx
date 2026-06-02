@@ -10,19 +10,26 @@ interface Props {
 
 function levelClass(level: string): string {
   switch (level) {
-    case 'INFO': return 'INFO'
-    case 'WARNING': return 'WARNING'
+    case 'INFO':
+      return 'INFO'
+    case 'WARNING':
+      return 'WARNING'
     case 'ERROR':
-    case 'CRITICAL': return 'ERROR'
-    default: return 'INFO'
+    case 'CRITICAL':
+      return 'ERROR'
+    default:
+      return 'INFO'
   }
 }
 
 function levelLabel(level: string): string {
   switch (level) {
-    case 'WARNING': return 'WARN'
-    case 'CRITICAL': return 'ERR'
-    default: return level
+    case 'WARNING':
+      return 'WARN'
+    case 'CRITICAL':
+      return 'ERR'
+    default:
+      return level
   }
 }
 
@@ -36,7 +43,9 @@ export function LogDrawer({ open, onToggle, logs }: Props) {
   return (
     <div className={'logdrawer' + (open ? ' open' : '')}>
       <div className="logdrawer-head">
-        <span className="lab"><Icon name="logs" size={15} /> Activity log</span>
+        <span className="lab">
+          <Icon name="logs" size={15} /> Activity log
+        </span>
         <span className="pill">{logs.length} events</span>
         <button className="close" onClick={onToggle} aria-label="Close log">
           <Icon name="x" size={16} />

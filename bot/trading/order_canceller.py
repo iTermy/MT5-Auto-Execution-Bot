@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import MetaTrader5 as mt5
 
@@ -23,7 +23,7 @@ class OrderCanceller:
             logger.error("Cancel failed: ticket=%d retcode=%s", mt5_ticket, retcode)
             return False
 
-        cancelled_at = datetime.now(timezone.utc).isoformat()
+        cancelled_at = datetime.now(UTC).isoformat()
         await sqlite.mark_cancelled(mt5_ticket, cancelled_at, spread=spread)
         label = "spread_cancelled" if spread else "cancelled"
         logger.info("Order %s: ticket=%d", label, mt5_ticket)

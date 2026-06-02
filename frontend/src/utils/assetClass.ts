@@ -1,11 +1,4 @@
-export type AssetClass =
-  | 'forex'
-  | 'forex_jpy'
-  | 'metals'
-  | 'indices'
-  | 'stocks'
-  | 'crypto'
-  | 'oil'
+export type AssetClass = 'forex' | 'forex_jpy' | 'metals' | 'indices' | 'stocks' | 'crypto' | 'oil'
 
 const METALS = new Set(['XAUUSD', 'XAGUSD', 'GOLD', 'SILVER'])
 const OIL_KEYWORDS = ['OIL', 'WTI', 'BRENT']

@@ -19,11 +19,13 @@ from bot.mt5.types import (
 
 logger = logging.getLogger(__name__)
 
-_TRANSIENT_RETCODES = frozenset({
-    mt5.TRADE_RETCODE_REQUOTE,
-    mt5.TRADE_RETCODE_CONNECTION,
-    mt5.TRADE_RETCODE_TIMEOUT,
-})
+_TRANSIENT_RETCODES = frozenset(
+    {
+        mt5.TRADE_RETCODE_REQUOTE,
+        mt5.TRADE_RETCODE_CONNECTION,
+        mt5.TRADE_RETCODE_TIMEOUT,
+    }
+)
 
 _BULK_CACHE_TTL = 0.5  # seconds — collapses duplicate calls within a single cycle
 _TICK_FAIL_COOLDOWN = 60.0  # seconds — silence repeat errors for a missing symbol
@@ -65,7 +67,9 @@ class MT5Client:
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 break
             if result.retcode in _TRANSIENT_RETCODES:
-                logger.warning("Transient retcode %d on attempt %d, retrying", result.retcode, attempt)
+                logger.warning(
+                    "Transient retcode %d on attempt %d, retrying", result.retcode, attempt
+                )
                 continue
             break
         if result is None:
@@ -209,10 +213,12 @@ class MT5Client:
         return result
 
     def cancel_pending_order(self, ticket: int) -> OrderResult | None:
-        result = mt5.order_send({
-            "action": mt5.TRADE_ACTION_REMOVE,
-            "order": ticket,
-        })
+        result = mt5.order_send(
+            {
+                "action": mt5.TRADE_ACTION_REMOVE,
+                "order": ticket,
+            }
+        )
         if result is None:
             logger.error("cancel_pending_order(%d) returned None", ticket)
             return None
@@ -263,7 +269,9 @@ class MT5Client:
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 break
             if result.retcode in _TRANSIENT_RETCODES:
-                logger.warning("Transient retcode %d closing %d attempt %d", result.retcode, ticket, attempt)
+                logger.warning(
+                    "Transient retcode %d closing %d attempt %d", result.retcode, ticket, attempt
+                )
                 continue
             break
         if result is None:
@@ -277,13 +285,15 @@ class MT5Client:
         )
 
     def modify_position_sl(self, ticket: int, symbol: str, new_sl: float) -> OrderResult | None:
-        result = mt5.order_send({
-            "action": mt5.TRADE_ACTION_SLTP,
-            "position": ticket,
-            "symbol": symbol,
-            "sl": new_sl,
-            "tp": 0.0,
-        })
+        result = mt5.order_send(
+            {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "position": ticket,
+                "symbol": symbol,
+                "sl": new_sl,
+                "tp": 0.0,
+            }
+        )
         if result is None:
             logger.error("modify_position_sl(%d) returned None", ticket)
             return None

@@ -1,4 +1,4 @@
-import type { TradeData, HistoryStats } from '../types'
+import type { TradeData } from '../types'
 
 export interface DetailedStats {
   netPnl: number
@@ -27,23 +27,41 @@ export function computeDetailedStats(trades: TradeData[]): DetailedStats {
   const grossLoss = Math.abs(losses.reduce((s, t) => s + t.realized_pnl, 0))
   const netPnl = closed.reduce((s, t) => s + t.realized_pnl, 0)
 
-  const best = closed.reduce((b, t) => t.realized_pnl > b.pnl ? { pnl: t.realized_pnl, symbol: t.symbol } : b, { pnl: -Infinity, symbol: '' })
-  const worst = closed.reduce((w, t) => t.realized_pnl < w.pnl ? { pnl: t.realized_pnl, symbol: t.symbol } : w, { pnl: Infinity, symbol: '' })
+  const best = closed.reduce(
+    (b, t) => (t.realized_pnl > b.pnl ? { pnl: t.realized_pnl, symbol: t.symbol } : b),
+    { pnl: -Infinity, symbol: '' }
+  )
+  const worst = closed.reduce(
+    (w, t) => (t.realized_pnl < w.pnl ? { pnl: t.realized_pnl, symbol: t.symbol } : w),
+    { pnl: Infinity, symbol: '' }
+  )
 
-  let winStreak = 0, lossStreak = 0, curWin = 0, curLoss = 0
+  let winStreak = 0,
+    lossStreak = 0,
+    curWin = 0,
+    curLoss = 0
   for (const t of closed) {
-    if (t.realized_pnl > 0) { curWin++; curLoss = 0 }
-    else if (t.realized_pnl < 0) { curLoss++; curWin = 0 }
+    if (t.realized_pnl > 0) {
+      curWin++
+      curLoss = 0
+    } else if (t.realized_pnl < 0) {
+      curLoss++
+      curWin = 0
+    }
     winStreak = Math.max(winStreak, curWin)
     lossStreak = Math.max(lossStreak, curLoss)
   }
 
-  let totalHold = 0, holdCount = 0
+  let totalHold = 0,
+    holdCount = 0
   for (const t of closed) {
     const closeTs = t.closed_at || t.filled_at || t.placed_at
     if (t.filled_at && closeTs) {
       const ms = new Date(closeTs).getTime() - new Date(t.filled_at).getTime()
-      if (ms > 0) { totalHold += ms; holdCount++ }
+      if (ms > 0) {
+        totalHold += ms
+        holdCount++
+      }
     }
   }
 
@@ -120,15 +138,6 @@ export function computeCumulativePnl(trades: TradeData[]): CurvePoint[] {
   return points
 }
 
-export function computeBasicStats(stats: HistoryStats | null) {
-  if (!stats) return null
-  return {
-    winRate: stats.win_rate,
-    wins: stats.wins,
-    losses: stats.losses,
-  }
-}
-
 export function formatHoldTime(minutes: number): string {
   if (minutes < 60) return `${Math.round(minutes)}m`
   const h = Math.floor(minutes / 60)
@@ -156,4 +165,3 @@ export function groupBySignalId<T extends { signal_id: number }>(items: T[]): Ma
   }
   return map
 }
-

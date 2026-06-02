@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import MetaTrader5 as mt5
 
@@ -34,9 +34,7 @@ class ReconciliationResult:
 
 
 class Reconciler:
-    async def reconcile(
-        self, mt5_client: MT5Client, sqlite: SQLiteDB
-    ) -> ReconciliationResult:
+    async def reconcile(self, mt5_client: MT5Client, sqlite: SQLiteDB) -> ReconciliationResult:
         result = ReconciliationResult()
 
         mt5_orders = mt5_client.orders_get()
@@ -50,7 +48,7 @@ class Reconciler:
         pending_rows = await sqlite.get_pending_orders()
         filled_rows = await sqlite.get_filled_positions()
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
 
         for row in pending_rows:
             ticket = row["mt5_ticket"]
@@ -87,8 +85,11 @@ class Reconciler:
 
         logger.info(
             "Reconciliation: filled=%d cancelled=%d closed=%d trailing=%d orphans=%d",
-            result.filled, result.cancelled, result.closed,
-            result.trailing_resumed, result.orphans,
+            result.filled,
+            result.cancelled,
+            result.closed,
+            result.trailing_resumed,
+            result.orphans,
         )
         return result
 
@@ -117,14 +118,14 @@ class Reconciler:
         # never ran or failed, then the bot crashed before delete_claimed_order).
         for row in claimed_rows:
             matched = any(
-                _parse_comment(o.comment) == (row["signal_id"], row["limit_id"])
-                for o in mt5_orders
+                _parse_comment(o.comment) == (row["signal_id"], row["limit_id"]) for o in mt5_orders
             )
             if not matched:
                 await sqlite.delete_claimed_order(row["limit_id"])
                 logger.info(
                     "Stale claim removed: limit=%d signal=%d",
-                    row["limit_id"], row["signal_id"],
+                    row["limit_id"],
+                    row["signal_id"],
                 )
                 count += 1
 
@@ -144,7 +145,9 @@ class Reconciler:
                     await sqlite.promote_claimed_to_pending(lim_id, order.ticket)
                     logger.info(
                         "Orphan re-linked: ticket=%d signal=%d limit=%d",
-                        order.ticket, sig_id, lim_id,
+                        order.ticket,
+                        sig_id,
+                        lim_id,
                     )
                     count += 1
                     continue
@@ -158,14 +161,15 @@ class Reconciler:
 
             res = mt5_client.cancel_pending_order(order.ticket)
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                logger.info(
-                    "Orphan cancelled: ticket=%d symbol=%s", order.ticket, order.symbol
-                )
+                logger.info("Orphan cancelled: ticket=%d symbol=%s", order.ticket, order.symbol)
             else:
                 retcode = res.retcode if res else "None"
                 logger.warning(
                     "Orphan cancel failed: ticket=%d symbol=%s comment=%s retcode=%s",
-                    order.ticket, order.symbol, order.comment, retcode,
+                    order.ticket,
+                    order.symbol,
+                    order.comment,
+                    retcode,
                 )
             count += 1
 

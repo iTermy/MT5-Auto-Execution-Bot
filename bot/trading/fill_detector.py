@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -13,15 +13,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FillEvent:
-    mt5_ticket: int       # original order ticket stored in SQLite
+    mt5_ticket: int  # original order ticket stored in SQLite
     position_ticket: int  # actual MT5 position ticket (may differ in hedging mode)
-    filled_at: str        # ISO UTC timestamp
+    filled_at: str  # ISO UTC timestamp
 
 
 @dataclass
 class NewTicketEvent:
     original_ticket: int  # SQLite row being replaced
-    new_ticket: int       # new position ticket from partial close
+    new_ticket: int  # new position ticket from partial close
     signal_id: int
     signal_type: str
 
@@ -38,7 +38,7 @@ class FillDetector:
         position_by_identifier = {p.identifier: p for p in mt5_positions}
 
         fills: list[FillEvent] = []
-        filled_at = datetime.now(timezone.utc).isoformat()
+        filled_at = datetime.now(UTC).isoformat()
 
         for row in pending_rows:
             ticket = row["mt5_ticket"]
@@ -47,11 +47,13 @@ class FillDetector:
             pos = position_by_identifier.get(ticket)
             if pos is None:
                 continue  # Gone from MT5 entirely — reconciler handles this
-            fills.append(FillEvent(
-                mt5_ticket=ticket,
-                position_ticket=pos.ticket,
-                filled_at=filled_at,
-            ))
+            fills.append(
+                FillEvent(
+                    mt5_ticket=ticket,
+                    position_ticket=pos.ticket,
+                    filled_at=filled_at,
+                )
+            )
 
         return fills
 
@@ -80,15 +82,19 @@ class FillDetector:
             expected_comment = f"s{signal_id}"
             for pos in positions:
                 if pos.comment == expected_comment and pos.ticket not in known_tickets:
-                    results.append(NewTicketEvent(
-                        original_ticket=original_ticket,
-                        new_ticket=pos.ticket,
-                        signal_id=signal_id,
-                        signal_type=row["signal_type"],
-                    ))
+                    results.append(
+                        NewTicketEvent(
+                            original_ticket=original_ticket,
+                            new_ticket=pos.ticket,
+                            signal_id=signal_id,
+                            signal_type=row["signal_type"],
+                        )
+                    )
                     logger.info(
                         "Partial close detected: signal=%d old_ticket=%d new_ticket=%d",
-                        signal_id, original_ticket, pos.ticket,
+                        signal_id,
+                        original_ticket,
+                        pos.ticket,
                     )
                     break
 

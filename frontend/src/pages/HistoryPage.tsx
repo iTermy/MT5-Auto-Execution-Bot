@@ -3,6 +3,7 @@ import { fetchHistory } from '../api'
 import { Seg } from '../components/Seg'
 import { money } from '../utils/money'
 import { computeDetailedStats, formatHoldTime, groupBySignalId } from '../utils/stats'
+import { directionFromOrderType } from '../utils/orderType'
 import { badgeClassFor, formatSignalType } from '../utils/signalType'
 import type { HistoryData, SignalType, TradeData } from '../types'
 
@@ -19,12 +20,11 @@ function monthAgoStr(): string {
 function formatTime(iso: string): string {
   if (!iso) return '—'
   const d = new Date(iso)
-  return d.toLocaleDateString('en', { month: 'short', day: 'numeric' }) + ' · ' +
+  return (
+    d.toLocaleDateString('en', { month: 'short', day: 'numeric' }) +
+    ' · ' +
     d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function directionFromOrderType(dir: string): 'long' | 'short' {
-  return dir.includes('buy') || dir.includes('long') ? 'long' : 'short'
+  )
 }
 
 interface SignalGroup {
@@ -43,16 +43,16 @@ interface SignalGroup {
 function buildGroups(trades: TradeData[]): SignalGroup[] {
   const grouped = groupBySignalId(trades)
   return [...grouped.values()].map(group => {
-    const timestamps = group
-      .map(t => t.closed_at || t.filled_at || t.placed_at)
-      .filter(Boolean)
+    const timestamps = group.map(t => t.closed_at || t.filled_at || t.placed_at).filter(Boolean)
     const closedAt = [...timestamps].sort().reverse()[0] ?? ''
     const totalPnl = group.reduce((s, t) => s + t.realized_pnl, 0)
     const totalLots = group.reduce((s, t) => s + (t.lot_size ?? 0), 0)
     const sideOrder = group.find(t => t.direction !== 'remainder') ?? group[0]
-    const status = group.some(t => t.status === 'closed') ? 'closed'
-      : group.every(t => t.status === 'cancelled') ? 'cancelled'
-      : group[0].status
+    const status = group.some(t => t.status === 'closed')
+      ? 'closed'
+      : group.every(t => t.status === 'cancelled')
+        ? 'cancelled'
+        : group[0].status
     const channelId = group[0].channel_id
     return {
       signalId: group[0].signal_id,
@@ -74,11 +74,16 @@ type SortKey = 'newest' | 'oldest' | 'pnl_high' | 'pnl_low' | 'symbol'
 function sortGroups(groups: SignalGroup[], by: SortKey): SignalGroup[] {
   const s = [...groups]
   switch (by) {
-    case 'newest':   return s.sort((a, b) => b.closedAt.localeCompare(a.closedAt))
-    case 'oldest':   return s.sort((a, b) => a.closedAt.localeCompare(b.closedAt))
-    case 'pnl_high': return s.sort((a, b) => b.totalPnl - a.totalPnl)
-    case 'pnl_low':  return s.sort((a, b) => a.totalPnl - b.totalPnl)
-    case 'symbol':   return s.sort((a, b) => a.symbol.localeCompare(b.symbol))
+    case 'newest':
+      return s.sort((a, b) => b.closedAt.localeCompare(a.closedAt))
+    case 'oldest':
+      return s.sort((a, b) => a.closedAt.localeCompare(b.closedAt))
+    case 'pnl_high':
+      return s.sort((a, b) => b.totalPnl - a.totalPnl)
+    case 'pnl_low':
+      return s.sort((a, b) => a.totalPnl - b.totalPnl)
+    case 'symbol':
+      return s.sort((a, b) => a.symbol.localeCompare(b.symbol))
   }
 }
 
@@ -94,7 +99,9 @@ export function HistoryPage() {
   useEffect(() => {
     const from = `${fromDate}T00:00:00`
     const to = `${toDate}T23:59:59`
-    fetchHistory(from, to).then(setData).catch(() => {})
+    fetchHistory(from, to)
+      .then(setData)
+      .catch(() => {})
   }, [fromDate, toDate])
 
   const trades: TradeData[] = data?.trades ?? []
@@ -131,7 +138,9 @@ export function HistoryPage() {
     <div className="page">
       <div>
         <div className="eyebrow">Analytics</div>
-        <h2 style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' }}>Trade history</h2>
+        <h2 style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' }}>
+          Trade history
+        </h2>
       </div>
 
       {/* FILTERS */}
@@ -165,7 +174,11 @@ export function HistoryPage() {
               onChange={e => setInstrumentFilter(e.target.value)}
             >
               <option value="all">All</option>
-              {uniqueSymbols.map(s => <option key={s} value={s}>{s}</option>)}
+              {uniqueSymbols.map(s => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </div>
           <div className="field">
@@ -217,20 +230,72 @@ export function HistoryPage() {
       {trades.length > 0 && (
         <div className="panel" style={{ overflow: 'hidden' }}>
           <div className="panel-head" style={{ padding: '20px 22px 0', marginBottom: 0 }}>
-            <h3>Performance <span className="sub" style={{ fontWeight: 400 }}>— {tradeCount} trades</span></h3>
+            <h3>
+              Performance{' '}
+              <span className="sub" style={{ fontWeight: 400 }}>
+                — {tradeCount} trades
+              </span>
+            </h3>
           </div>
           <div className="statgrid" style={{ marginTop: 18 }}>
-            {stat('Net P&L', money(detailedStats.netPnl), detailedStats.netPnl >= 0 ? 'pos' : 'neg')}
-            {stat('Win rate', `${detailedStats.winRate.toFixed(0)}%`, '', `${detailedStats.wins} W · ${detailedStats.losses} L`)}
-            {stat('Profit factor', detailedStats.profitFactor === Infinity ? '∞' : detailedStats.profitFactor.toFixed(2))}
-            {stat('Expectancy', money(detailedStats.expectancy), detailedStats.expectancy >= 0 ? 'pos' : 'neg', 'avg per trade')}
-            {stat('Average win', money(detailedStats.avgWin), 'pos', `across ${detailedStats.wins} wins`, true)}
-            {stat('Average loss', money(detailedStats.avgLoss), 'neg', `across ${detailedStats.losses} losses`, true)}
-            {stat('Best trade', money(detailedStats.bestTrade.pnl), 'pos', detailedStats.bestTrade.symbol, true)}
-            {stat('Worst trade', money(detailedStats.worstTrade.pnl), 'neg', detailedStats.worstTrade.symbol, true)}
+            {stat(
+              'Net P&L',
+              money(detailedStats.netPnl),
+              detailedStats.netPnl >= 0 ? 'pos' : 'neg'
+            )}
+            {stat(
+              'Win rate',
+              `${detailedStats.winRate.toFixed(0)}%`,
+              '',
+              `${detailedStats.wins} W · ${detailedStats.losses} L`
+            )}
+            {stat(
+              'Profit factor',
+              detailedStats.profitFactor === Infinity ? '∞' : detailedStats.profitFactor.toFixed(2)
+            )}
+            {stat(
+              'Expectancy',
+              money(detailedStats.expectancy),
+              detailedStats.expectancy >= 0 ? 'pos' : 'neg',
+              'avg per trade'
+            )}
+            {stat(
+              'Average win',
+              money(detailedStats.avgWin),
+              'pos',
+              `across ${detailedStats.wins} wins`,
+              true
+            )}
+            {stat(
+              'Average loss',
+              money(detailedStats.avgLoss),
+              'neg',
+              `across ${detailedStats.losses} losses`,
+              true
+            )}
+            {stat(
+              'Best trade',
+              money(detailedStats.bestTrade.pnl),
+              'pos',
+              detailedStats.bestTrade.symbol,
+              true
+            )}
+            {stat(
+              'Worst trade',
+              money(detailedStats.worstTrade.pnl),
+              'neg',
+              detailedStats.worstTrade.symbol,
+              true
+            )}
             {stat('Win streak', String(detailedStats.winStreak), '', undefined, true)}
             {stat('Loss streak', String(detailedStats.lossStreak), '', undefined, true)}
-            {stat('Avg hold', formatHoldTime(detailedStats.avgHoldMinutes), '', 'open → close', true)}
+            {stat(
+              'Avg hold',
+              formatHoldTime(detailedStats.avgHoldMinutes),
+              '',
+              'open → close',
+              true
+            )}
             {stat('Scalp share', `${detailedStats.scalpShare.toFixed(0)}%`, '', undefined, true)}
           </div>
         </div>
@@ -243,7 +308,9 @@ export function HistoryPage() {
           <span className="sub">{filteredGroups.length} groups</span>
         </div>
         {filteredGroups.length === 0 ? (
-          <p className="faint" style={{ padding: '12px 0' }}>No trades match filters</p>
+          <p className="faint" style={{ padding: '12px 0' }}>
+            No trades match filters
+          </p>
         ) : (
           <table className="tbl">
             <thead>
@@ -262,21 +329,34 @@ export function HistoryPage() {
               {filteredGroups.map(g => (
                 <tr key={g.signalId}>
                   <td className="t-sub mono">{formatTime(g.closedAt)}</td>
-                  <td><span className="sym">{g.symbol || '—'}</span></td>
-                  <td><span className={'tag ' + g.direction}>{g.direction}</span></td>
+                  <td>
+                    <span className="sym">{g.symbol || '—'}</span>
+                  </td>
+                  <td>
+                    <span className={'tag ' + g.direction}>{g.direction}</span>
+                  </td>
                   <td className="num mono dim">{g.tradeCount}</td>
                   <td className="num mono">{g.totalLots.toFixed(2)}</td>
                   <td>
-                    {g.signalType === 'standard'
-                      ? <span className="t-sub">Standard</span>
-                      : <span className={'tag ' + badgeClassFor(g.signalType)}>{formatSignalType(g.signalType)}</span>}
+                    {g.signalType === 'standard' ? (
+                      <span className="t-sub">Standard</span>
+                    ) : (
+                      <span className={'tag ' + badgeClassFor(g.signalType)}>
+                        {formatSignalType(g.signalType)}
+                      </span>
+                    )}
                   </td>
                   <td>
-                    {g.status === 'closed'
-                      ? <span className="tag trail">closed</span>
-                      : <span className="tag ghost">{g.status}</span>}
+                    {g.status === 'closed' ? (
+                      <span className="tag trail">closed</span>
+                    ) : (
+                      <span className="tag ghost">{g.status}</span>
+                    )}
                   </td>
-                  <td className={`num mono ${g.totalPnl > 0 ? 'pos' : g.totalPnl < 0 ? 'neg' : 'faint'}`} style={{ fontWeight: 600 }}>
+                  <td
+                    className={`num mono ${g.totalPnl > 0 ? 'pos' : g.totalPnl < 0 ? 'neg' : 'faint'}`}
+                    style={{ fontWeight: 600 }}
+                  >
                     {g.totalPnl === 0 ? '—' : money(g.totalPnl)}
                   </td>
                 </tr>

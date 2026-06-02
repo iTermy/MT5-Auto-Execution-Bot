@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import ValidationError
 from sse_starlette.sse import EventSourceResponse
 
 from bot.config.settings import Settings
@@ -34,7 +33,7 @@ async def get_config() -> dict:
     try:
         return json.loads(_CONFIG_PATH.read_text())
     except FileNotFoundError:
-        raise HTTPException(404, "config.json not found")
+        raise HTTPException(404, "config.json not found") from None
 
 
 @router.put("/api/config")
@@ -93,20 +92,22 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
     for row in rows:
         pnl = row["realized_pnl"] or 0.0
         ch = row["channel_id"]
-        trades.append({
-            "id": row["id"],
-            "signal_id": row["signal_id"],
-            "symbol": row["symbol"] or "",
-            "direction": row["order_type"],
-            "lot_size": row["lot_size"],
-            "placed_at": row["placed_at"],
-            "filled_at": row["filled_at"] or "",
-            "closed_at": row["cancelled_at"] or "",
-            "status": row["status"],
-            "signal_type": row["signal_type"],
-            "realized_pnl": pnl,
-            "channel_id": str(ch) if ch is not None else None,
-        })
+        trades.append(
+            {
+                "id": row["id"],
+                "signal_id": row["signal_id"],
+                "symbol": row["symbol"] or "",
+                "direction": row["order_type"],
+                "lot_size": row["lot_size"],
+                "placed_at": row["placed_at"],
+                "filled_at": row["filled_at"] or "",
+                "closed_at": row["cancelled_at"] or "",
+                "status": row["status"],
+                "signal_type": row["signal_type"],
+                "realized_pnl": pnl,
+                "channel_id": str(ch) if ch is not None else None,
+            }
+        )
         if row["status"] == "closed" and pnl != 0:
             total_pnl += pnl
             if pnl > 0:

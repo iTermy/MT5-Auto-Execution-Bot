@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bot.config.constants import AssetClass
 from bot.config.settings import Settings
@@ -16,12 +16,14 @@ class DashboardData:
     positions: list[dict] = field(default_factory=list)
     pending_orders: list[dict] = field(default_factory=list)
     nearby_signals: list[dict] = field(default_factory=list)
-    summary: dict = field(default_factory=lambda: {
-        "total_profit": 0.0,
-        "open_count": 0,
-        "pending_count": 0,
-        "trailing_count": 0,
-    })
+    summary: dict = field(
+        default_factory=lambda: {
+            "total_profit": 0.0,
+            "open_count": 0,
+            "pending_count": 0,
+            "trailing_count": 0,
+        }
+    )
     updated_at: str = ""
 
 
@@ -45,7 +47,7 @@ class DashboardCache:
         pending_limit_ids: set[int] | None = None,
         config: Settings | None = None,
     ) -> None:
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
 
         sqlite_by_ticket = {r["mt5_ticket"]: r for r in sqlite_active}
 
@@ -82,20 +84,22 @@ class DashboardCache:
             if tick:
                 current_price = tick.bid if pos.type == 0 else tick.ask
             ch = row["channel_id"] if row else None
-            positions.append({
-                "ticket": pos.ticket,
-                "symbol": pos.symbol,
-                "direction": "long" if pos.type == 0 else "short",
-                "volume": pos.volume,
-                "price_open": pos.price_open,
-                "current_price": current_price,
-                "sl": pos.sl,
-                "profit": pos.profit,
-                "is_trailing": bool(row["is_trailing"]) if row else False,
-                "signal_id": row["signal_id"] if row else 0,
-                "channel_id": str(ch) if ch is not None else None,
-                "signal_type": (row["signal_type"] if row else None) or "standard",
-            })
+            positions.append(
+                {
+                    "ticket": pos.ticket,
+                    "symbol": pos.symbol,
+                    "direction": "long" if pos.type == 0 else "short",
+                    "volume": pos.volume,
+                    "price_open": pos.price_open,
+                    "current_price": current_price,
+                    "sl": pos.sl,
+                    "profit": pos.profit,
+                    "is_trailing": bool(row["is_trailing"]) if row else False,
+                    "signal_id": row["signal_id"] if row else 0,
+                    "channel_id": str(ch) if ch is not None else None,
+                    "signal_type": (row["signal_type"] if row else None) or "standard",
+                }
+            )
 
         pending = []
         for order in mt5_orders:
@@ -108,19 +112,21 @@ class DashboardCache:
                 current_price = mid
                 distance = abs(order.price_open - mid)
             ch = row["channel_id"] if row else None
-            pending.append({
-                "ticket": order.ticket,
-                "symbol": order.symbol,
-                "direction": "long" if order.type in (2, 4) else "short",
-                "volume": order.volume_current,
-                "price_level": order.price_open,
-                "current_price": current_price,
-                "sl": order.sl,
-                "distance": round(distance, 5),
-                "signal_id": row["signal_id"] if row else 0,
-                "channel_id": str(ch) if ch is not None else None,
-                "signal_type": (row["signal_type"] if row else None) or "standard",
-            })
+            pending.append(
+                {
+                    "ticket": order.ticket,
+                    "symbol": order.symbol,
+                    "direction": "long" if order.type in (2, 4) else "short",
+                    "volume": order.volume_current,
+                    "price_level": order.price_open,
+                    "current_price": current_price,
+                    "sl": order.sl,
+                    "distance": round(distance, 5),
+                    "signal_id": row["signal_id"] if row else 0,
+                    "channel_id": str(ch) if ch is not None else None,
+                    "signal_type": (row["signal_type"] if row else None) or "standard",
+                }
+            )
 
         nearby = _build_nearby_signals(
             supabase_rows or [],
@@ -188,21 +194,23 @@ def _build_nearby_signals(
         distance_display = _format_distance(distance, asset_class)
         price_display = _format_price(closest_price, asset_class)
 
-        result.append({
-            "signal_id": sig_id,
-            "distance_display": distance_display,
-            "closest_price_display": price_display,
-            "symbol": db_sym,
-            "mt5_symbol": mt5_sym,
-            "direction": first["direction"],
-            "channel_id": str(ch) if ch is not None else None,
-            "signal_type": first["signal_type"] or "standard",
-            "limit_count": len(rows),
-            "closest_price": closest_price,
-            "current_price": round(current_price, 5),
-            "distance": round(distance, 5),
-            "placed": placed,
-        })
+        result.append(
+            {
+                "signal_id": sig_id,
+                "distance_display": distance_display,
+                "closest_price_display": price_display,
+                "symbol": db_sym,
+                "mt5_symbol": mt5_sym,
+                "direction": first["direction"],
+                "channel_id": str(ch) if ch is not None else None,
+                "signal_type": first["signal_type"] or "standard",
+                "limit_count": len(rows),
+                "closest_price": closest_price,
+                "current_price": round(current_price, 5),
+                "distance": round(distance, 5),
+                "placed": placed,
+            }
+        )
 
     result.sort(key=lambda x: abs(x["distance"]))
     return result

@@ -1,36 +1,51 @@
-import pytest
-import pytest_asyncio
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 import MetaTrader5 as mt5
+import pytest
+import pytest_asyncio
 
 from bot.config.settings import (
-    Settings, LotSizingConfig, PollingConfig, SpreadHourConfig,
-    TPConfig, AssetTPConfig,
+    AssetTPConfig,
+    LotSizingConfig,
+    PollingConfig,
+    Settings,
+    TPConfig,
 )
 from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
 from bot.mt5.types import AccountInfo, OrderInfo, OrderResult, PositionInfo, SymbolInfo, TickInfo
 
-
 # ---------------------------------------------------------------------------
 # Factory helpers — used by multiple test modules
 # ---------------------------------------------------------------------------
 
+
 def make_settings(**overrides) -> Settings:
     base = dict(
         license_key="test-key",
-        lot_sizing=LotSizingConfig(mode="risk_percent", risk_percent=1.0, fixed_lot=0.01, max_lot_per_order=5.0),
+        lot_sizing=LotSizingConfig(
+            mode="risk_percent", risk_percent=1.0, fixed_lot=0.01, max_lot_per_order=5.0
+        ),
         polling=PollingConfig(),
         tp_config=TPConfig(
             partial_close_percent=50,
             forex=AssetTPConfig(profit_threshold=7, threshold_unit="pips", trailing_distance=3),
             forex_jpy=AssetTPConfig(profit_threshold=7, threshold_unit="pips", trailing_distance=3),
-            metals=AssetTPConfig(profit_threshold=4.0, threshold_unit="dollars", trailing_distance=2.0),
-            indices=AssetTPConfig(profit_threshold=20.0, threshold_unit="dollars", trailing_distance=5.0),
-            stocks=AssetTPConfig(profit_threshold=1.0, threshold_unit="dollars", trailing_distance=0.5),
-            crypto=AssetTPConfig(profit_threshold=300.0, threshold_unit="dollars", trailing_distance=50.0),
-            oil=AssetTPConfig(profit_threshold=0.5, threshold_unit="dollars", trailing_distance=0.2),
+            metals=AssetTPConfig(
+                profit_threshold=4.0, threshold_unit="dollars", trailing_distance=2.0
+            ),
+            indices=AssetTPConfig(
+                profit_threshold=20.0, threshold_unit="dollars", trailing_distance=5.0
+            ),
+            stocks=AssetTPConfig(
+                profit_threshold=1.0, threshold_unit="dollars", trailing_distance=0.5
+            ),
+            crypto=AssetTPConfig(
+                profit_threshold=300.0, threshold_unit="dollars", trailing_distance=50.0
+            ),
+            oil=AssetTPConfig(
+                profit_threshold=0.5, threshold_unit="dollars", trailing_distance=0.2
+            ),
         ),
     )
     base.update(overrides)
@@ -107,8 +122,13 @@ def make_order_result(retcode=None, ticket=1001) -> OrderResult:
 
 def make_account_info(**overrides) -> AccountInfo:
     defaults = dict(
-        login=123456, balance=10000.0, equity=10000.0,
-        margin=0.0, margin_free=10000.0, leverage=100, currency="USD",
+        login=123456,
+        balance=10000.0,
+        equity=10000.0,
+        margin=0.0,
+        margin_free=10000.0,
+        leverage=100,
+        currency="USD",
     )
     defaults.update(overrides)
     return AccountInfo(**defaults)
@@ -117,6 +137,7 @@ def make_account_info(**overrides) -> AccountInfo:
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture
 async def sqlite_db():

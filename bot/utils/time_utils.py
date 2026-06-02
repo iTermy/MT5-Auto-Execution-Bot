@@ -1,12 +1,17 @@
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 
 import pytz
 
 from bot.config.settings import SpreadHourConfig
 
 _DAY_MAP = {
-    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-    "friday": 4, "saturday": 5, "sunday": 6,
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
 }
 
 
@@ -31,7 +36,7 @@ class MarketScheduler:
         self._weekend_end = _DAY_MAP[config.weekend_end_day.lower()]
 
     def is_spread_hour(self, now: datetime | None = None) -> bool:
-        now_local = (now or datetime.now(timezone.utc)).astimezone(self._tz)
+        now_local = (now or datetime.now(UTC)).astimezone(self._tz)
         t = now_local.time()
         day = now_local.weekday()  # 0=Mon ... 4=Fri, 5=Sat, 6=Sun
 

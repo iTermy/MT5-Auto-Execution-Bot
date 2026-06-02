@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import MetaTrader5 as mt5
 
@@ -94,7 +94,7 @@ class TPEngine:
         pending = await sqlite.get_pending_by_signal(signal_id)
         if not pending:
             return
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         for row in pending:
             ticket = row["mt5_ticket"]
             res = mt5_client.cancel_pending_order(ticket)

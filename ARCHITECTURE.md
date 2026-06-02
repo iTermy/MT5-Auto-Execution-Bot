@@ -1,4 +1,4 @@
-# Architecture — Auto-Execution Bot V2
+# Architecture
 
 ## Tech Stack
 | Layer | Tech | Notes |

@@ -1,7 +1,5 @@
 import pytest
 
-import MetaTrader5 as mt5
-
 from bot.tp.asset_config import AssetClassConfig
 from bot.tp.trailing import TrailingStopManager
 from tests.conftest import make_order_result, make_position, make_symbol_info, make_tick
@@ -29,6 +27,7 @@ def _pips_cfg(trail_pips=20.0) -> AssetClassConfig:
 # Long positions — SL ratchets up
 # ---------------------------------------------------------------------------
 
+
 async def test_long_initial_sl_set_when_zero(sqlite_db, mock_mt5) -> None:
     # sl=0 → initial set always happens regardless of guard
     pos = make_position(ticket=1001, type=0, sl=0.0)
@@ -38,10 +37,14 @@ async def test_long_initial_sl_set_when_zero(sqlite_db, mock_mt5) -> None:
     mock_mt5.modify_position_sl.return_value = make_order_result(ticket=1001)
 
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.1,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, signal_type="standard",
+        db_stop_loss=1.08500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1001)
@@ -64,10 +67,14 @@ async def test_long_sl_ratchets_up(sqlite_db, mock_mt5) -> None:
     mock_mt5.modify_position_sl.return_value = make_order_result(ticket=1001)
 
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.1,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.09000, signal_type="standard",
+        db_stop_loss=1.09000,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1001)
@@ -85,10 +92,14 @@ async def test_long_sl_never_retreats(sqlite_db, mock_mt5) -> None:
     mock_mt5.symbol_info.return_value = make_symbol_info(digits=5, point=0.00001)
 
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.1,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.09000, signal_type="standard",
+        db_stop_loss=1.09000,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
 
@@ -103,6 +114,7 @@ async def test_long_sl_never_retreats(sqlite_db, mock_mt5) -> None:
 # Short positions — SL ratchets down
 # ---------------------------------------------------------------------------
 
+
 async def test_short_sl_ratchets_down(sqlite_db, mock_mt5) -> None:
     # sl=1.15000; new_sl = ask + trail = 1.10002 + 0.002 = 1.10202 < 1.15000 → moves
     pos = make_position(ticket=1002, type=1, sl=1.15000)
@@ -111,10 +123,14 @@ async def test_short_sl_ratchets_down(sqlite_db, mock_mt5) -> None:
     mock_mt5.modify_position_sl.return_value = make_order_result(ticket=1002)
 
     await sqlite_db.insert_order(
-        limit_id=2, signal_id=2, mt5_ticket=1002,
-        order_type="sell_limit", lot_size=0.1,
+        limit_id=2,
+        signal_id=2,
+        mt5_ticket=1002,
+        order_type="sell_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.15500, signal_type="standard",
+        db_stop_loss=1.15500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1002, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1002)
@@ -135,10 +151,14 @@ async def test_short_sl_never_retreats(sqlite_db, mock_mt5) -> None:
     mock_mt5.symbol_info.return_value = make_symbol_info(digits=5, point=0.00001)
 
     await sqlite_db.insert_order(
-        limit_id=2, signal_id=2, mt5_ticket=1002,
-        order_type="sell_limit", lot_size=0.1,
+        limit_id=2,
+        signal_id=2,
+        mt5_ticket=1002,
+        order_type="sell_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.15500, signal_type="standard",
+        db_stop_loss=1.15500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1002, "2026-01-01T00:01:00+00:00")
 
@@ -153,6 +173,7 @@ async def test_short_sl_never_retreats(sqlite_db, mock_mt5) -> None:
 # Pips mode — trail_dist converted to price
 # ---------------------------------------------------------------------------
 
+
 async def test_trailing_pips_mode_converts_to_price(sqlite_db, mock_mt5) -> None:
     # digits=5, point=0.00001 → pip_sz=0.0001
     # trail_pips=20 → trail_dist=0.0020 (same as dollars test above, but via pips mode)
@@ -162,10 +183,14 @@ async def test_trailing_pips_mode_converts_to_price(sqlite_db, mock_mt5) -> None
     mock_mt5.modify_position_sl.return_value = make_order_result(ticket=1001)
 
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.1,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, signal_type="standard",
+        db_stop_loss=1.08500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     await sqlite_db.set_trailing(1001)

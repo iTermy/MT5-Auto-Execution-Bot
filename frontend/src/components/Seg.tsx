@@ -17,11 +17,7 @@ export function Seg({ value, options, onChange, accent }: SegProps) {
         const v = typeof o === 'string' ? o : o.value
         const label = typeof o === 'string' ? o : o.label
         return (
-          <button
-            key={v}
-            className={value === v ? 'on' : ''}
-            onClick={() => onChange(v)}
-          >
+          <button key={v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>
             {label}
           </button>
         )

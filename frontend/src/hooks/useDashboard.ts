@@ -11,7 +11,9 @@ export function useDashboard(intervalMs: number = 1000) {
       try {
         const d = await fetchDashboard()
         if (alive) setData(d)
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     poll()
     const timer = setInterval(poll, intervalMs)

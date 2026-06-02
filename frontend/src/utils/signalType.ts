@@ -1,21 +1,21 @@
 import type { SignalType } from '../types'
 
 const LABELS: Record<SignalType, string> = {
-  'standard': 'Standard',
-  'scalp':    'Scalp',
-  'swing':    'Swing',
-  'toll':     'Toll',
-  'pa':       'PA',
-  '1-1':      '1-1',
+  standard: 'Standard',
+  scalp: 'Scalp',
+  swing: 'Swing',
+  toll: 'Toll',
+  pa: 'PA',
+  '1-1': '1-1',
 }
 
 const BADGE_CLASS: Record<SignalType, string> = {
-  'standard': 'ghost',
-  'scalp':    'scalp',
-  'swing':    'swing',
-  'toll':     'toll',
-  'pa':       'pa',
-  '1-1':      'one-to-one',
+  standard: 'ghost',
+  scalp: 'scalp',
+  swing: 'swing',
+  toll: 'toll',
+  pa: 'pa',
+  '1-1': 'one-to-one',
 }
 
 export const SIGNAL_TYPES: SignalType[] = ['standard', 'scalp', 'swing', 'toll', 'pa', '1-1']

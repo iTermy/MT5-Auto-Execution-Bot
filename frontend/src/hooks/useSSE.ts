@@ -26,7 +26,9 @@ export function useSSE() {
         try {
           const entry = JSON.parse(e.data) as LogEntry
           setLogs(prev => [...prev.slice(-(MAX_LOGS - 1)), entry])
-        } catch { /* malformed message — skip */ }
+        } catch {
+          /* malformed message — skip */
+        }
       })
 
       src.onerror = () => {
@@ -44,7 +46,9 @@ export function useSSE() {
         try {
           setStatus(JSON.parse(e.data) as StatusData)
           setConnected(true)
-        } catch { /* malformed message — skip */ }
+        } catch {
+          /* malformed message — skip */
+        }
       })
 
       src.onerror = () => {

@@ -117,8 +117,21 @@ class SQLiteDB:
         )
         await self._db.execute(
             INSERT_ORDER,
-            (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
-             db_stop_loss, signal_type, feed_price, mt5_price, offset, symbol, channel_id),
+            (
+                limit_id,
+                signal_id,
+                mt5_ticket,
+                order_type,
+                lot_size,
+                placed_at,
+                db_stop_loss,
+                signal_type,
+                feed_price,
+                mt5_price,
+                offset,
+                symbol,
+                channel_id,
+            ),
         )
         await self._db.commit()
 
@@ -202,8 +215,21 @@ class SQLiteDB:
         )
         await self._db.execute(
             INSERT_CLAIMED_ORDER,
-            (limit_id, signal_id, -limit_id, order_type, lot_size, placed_at,
-             db_stop_loss, signal_type, feed_price, mt5_price, offset, symbol, channel_id),
+            (
+                limit_id,
+                signal_id,
+                -limit_id,
+                order_type,
+                lot_size,
+                placed_at,
+                db_stop_loss,
+                signal_type,
+                feed_price,
+                mt5_price,
+                offset,
+                symbol,
+                channel_id,
+            ),
         )
         await self._db.commit()
 
@@ -240,6 +266,8 @@ class SQLiteDB:
         async with self._db.execute(GET_ORDER_HISTORY, (from_date, to_date)) as cursor:
             return await cursor.fetchall()
 
-    async def update_db_stop_loss(self, mt5_ticket: int, new_db_sl: float, new_mt5_sl: float) -> None:
+    async def update_db_stop_loss(
+        self, mt5_ticket: int, new_db_sl: float, new_mt5_sl: float
+    ) -> None:
         await self._db.execute(UPDATE_DB_STOP_LOSS, (new_db_sl, new_mt5_sl, mt5_ticket))
         await self._db.commit()

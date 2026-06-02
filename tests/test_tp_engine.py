@@ -1,11 +1,12 @@
 import pytest
 
-import MetaTrader5 as mt5
-
 from bot.tp.asset_config import AssetClassConfig
 from bot.tp.default_strategy import DefaultTPStrategy
 from tests.conftest import (
-    make_order_result, make_position, make_symbol_info, make_tick, make_settings,
+    make_order_result,
+    make_position,
+    make_symbol_info,
+    make_tick,
 )
 
 
@@ -30,6 +31,7 @@ def _pips_cfg(threshold=7.0, trail=3.0, pct=50) -> AssetClassConfig:
 # ---------------------------------------------------------------------------
 # should_trigger — dollars mode
 # ---------------------------------------------------------------------------
+
 
 def test_trigger_dollars_newest_above_threshold(mock_mt5) -> None:
     # price_open=1.0, bid=5.5, move=4.5 >= threshold=4.0 → True (no others)
@@ -59,7 +61,7 @@ def test_trigger_dollars_others_negative_blocks(mock_mt5) -> None:
 
 
 def test_trigger_dollars_others_nonnegative_passes(mock_mt5) -> None:
-    pos1 = make_position(ticket=1, price_open=1.0, type=0, profit=0.0)   # others sum = 0
+    pos1 = make_position(ticket=1, price_open=1.0, type=0, profit=0.0)  # others sum = 0
     pos2 = make_position(ticket=2, price_open=1.0, type=0, profit=0.0)
     mock_mt5.symbol_info_tick.return_value = make_tick(bid=6.0, ask=6.002)
 
@@ -70,6 +72,7 @@ def test_trigger_dollars_others_nonnegative_passes(mock_mt5) -> None:
 # ---------------------------------------------------------------------------
 # should_trigger — pips mode
 # ---------------------------------------------------------------------------
+
 
 def test_trigger_pips_mode(mock_mt5) -> None:
     # price_open=1.09000, bid=1.09800 → move=0.008, pip_sz=0.0001 → 80 pips >= 7 → True
@@ -95,14 +98,19 @@ def test_trigger_pips_mode_below_threshold(mock_mt5) -> None:
 # execute — partial_close_percent variants
 # ---------------------------------------------------------------------------
 
+
 async def test_execute_pct_zero_sets_trailing(sqlite_db, mock_mt5) -> None:
     # pct=0 → set_trailing, no close
     pos = make_position(ticket=1001)
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.1,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, signal_type="standard",
+        db_stop_loss=1.08500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
 
@@ -121,10 +129,14 @@ async def test_execute_pct_100_closes_all(sqlite_db, mock_mt5) -> None:
     # pct=100 → close newest fully, no trailing
     pos = make_position(ticket=1001)
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.1,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.1,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, signal_type="standard",
+        db_stop_loss=1.08500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     mock_mt5.close_position.return_value = make_order_result(ticket=1001)
@@ -143,10 +155,14 @@ async def test_execute_pct_50_partial_close(sqlite_db, mock_mt5) -> None:
     # pct=50 → partial close (close vol = volume * 0.5)
     pos = make_position(ticket=1001, volume=0.2)
     await sqlite_db.insert_order(
-        limit_id=1, signal_id=1, mt5_ticket=1001,
-        order_type="buy_limit", lot_size=0.2,
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.2,
         placed_at="2026-01-01T00:00:00+00:00",
-        db_stop_loss=1.08500, signal_type="standard",
+        db_stop_loss=1.08500,
+        signal_type="standard",
     )
     await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
     mock_mt5.close_position.return_value = make_order_result(ticket=1001)
@@ -166,10 +182,14 @@ async def test_execute_closes_earlier_positions_first(sqlite_db, mock_mt5) -> No
     pos2 = make_position(ticket=1002, volume=0.1)
     for ticket, lid in [(1001, 1), (1002, 2)]:
         await sqlite_db.insert_order(
-            limit_id=lid, signal_id=1, mt5_ticket=ticket,
-            order_type="buy_limit", lot_size=0.1,
+            limit_id=lid,
+            signal_id=1,
+            mt5_ticket=ticket,
+            order_type="buy_limit",
+            lot_size=0.1,
             placed_at="2026-01-01T00:00:00+00:00",
-            db_stop_loss=1.08500, signal_type="standard",
+            db_stop_loss=1.08500,
+            signal_type="standard",
         )
         await sqlite_db.mark_filled(ticket, "2026-01-01T00:01:00+00:00")
     mock_mt5.close_position.return_value = make_order_result()

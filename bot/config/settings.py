@@ -71,8 +71,8 @@ class ScalpOverrideConfig(BaseModel):
 
 
 class OneToOneConfig(BaseModel):
-    profit_threshold: float = 10.0          # global default in account dollars
-    overrides: dict[str, float] = {}        # per asset_class override (dollars)
+    profit_threshold: float = 10.0  # global default in account dollars
+    overrides: dict[str, float] = {}  # per asset_class override (dollars)
 
 
 class TPConfig(BaseModel):

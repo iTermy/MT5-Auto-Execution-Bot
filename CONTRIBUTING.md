@@ -21,12 +21,11 @@ pip install -r requirements.txt
 
 ### 2. Create your `.env` file
 
-```
-SUPABASE_DSN=postgresql://contributor_bot:PASSWORD@db.xxxxx.supabase.co:5432/postgres
-LICENSE_API_URL=https://xxxxx.supabase.co/functions/v1/validate-license
+```bash
+copy .env.example .env
 ```
 
-The owner shares the contributor DSN and Edge Function URL. The `LICENSE_API_URL` can be left empty — the bot runs in dev-bypass mode and skips license validation when the URL is absent.
+Then fill in `SUPABASE_DSN` (ask the owner for the contributor DSN). `LICENSE_API_URL` can be left empty — the bot runs in dev-bypass mode and skips license validation when the URL is absent.
 
 ### 3. Create `config.json`
 

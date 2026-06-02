@@ -25,7 +25,7 @@ export function Bars({ data, height = 172 }: BarsProps) {
 
   const posMax = Math.max(0, ...data.map(d => d.value))
   const negMax = Math.max(0, ...data.map(d => -d.value))
-  const span = (posMax + negMax) || 1
+  const span = posMax + negMax || 1
   const chartH = height - 4
   const ppx = chartH / span
   const zeroY = posMax * ppx
@@ -51,7 +51,7 @@ export function Bars({ data, height = 172 }: BarsProps) {
                   top: up ? zeroY - barH : zeroY,
                   height: barH,
                   background: up ? 'var(--accent)' : 'var(--neg)',
-                  opacity: hi === null ? (up ? 0.92 : 0.82) : (hi === i ? 1 : 0.4),
+                  opacity: hi === null ? (up ? 0.92 : 0.82) : hi === i ? 1 : 0.4,
                   transformOrigin: up ? 'bottom' : 'top',
                   animation: `grow .5s ${i * 0.03}s ease both`,
                 }}
@@ -62,7 +62,9 @@ export function Bars({ data, height = 172 }: BarsProps) {
       </div>
       <div className="bars-labels">
         {data.map((d, i) => (
-          <span key={i} className="mono">{d.label}</span>
+          <span key={i} className="mono">
+            {d.label}
+          </span>
         ))}
       </div>
       {hi !== null && (

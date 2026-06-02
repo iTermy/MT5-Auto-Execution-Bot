@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import MetaTrader5 as mt5
 
@@ -64,7 +64,7 @@ class OrderPlacer:
                 order_type_str = "sell_stop"
 
         comment = f"s{signal_id}_l{limit_id}"[:32]
-        placed_at = datetime.now(timezone.utc).isoformat()
+        placed_at = datetime.now(UTC).isoformat()
 
         # C2: pre-write claim so a crash between order_send and SQLite commit is recoverable
         await sqlite.insert_claimed_order(
@@ -119,18 +119,27 @@ class OrderPlacer:
             if abs(placed.sl - adj_sl) > info.point:
                 logger.warning(
                     "Placement SL mismatch: ticket=%d requested=%.5f broker=%.5f",
-                    result.ticket, adj_sl, placed.sl,
+                    result.ticket,
+                    adj_sl,
+                    placed.sl,
                 )
             if abs(placed.price_open - adj_price) > info.point:
                 logger.warning(
                     "Placement price mismatch: ticket=%d requested=%.5f broker=%.5f",
-                    result.ticket, adj_price, placed.price_open,
+                    result.ticket,
+                    adj_price,
+                    placed.price_open,
                 )
         else:
             logger.warning("Placement readback: order ticket=%d not found", result.ticket)
 
         logger.info(
             "Placed %s ticket=%d signal=%d limit=%d price=%.5f lot=%.2f",
-            order_type_str, result.ticket, signal_id, limit_id, adj_price, lot,
+            order_type_str,
+            result.ticket,
+            signal_id,
+            limit_id,
+            adj_price,
+            lot,
         )
         return True

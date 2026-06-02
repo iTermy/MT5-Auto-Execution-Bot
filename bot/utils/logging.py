@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 _LOG_QUEUE: asyncio.Queue = asyncio.Queue(maxsize=1000)
 
@@ -12,11 +12,13 @@ class SSELogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self._queue.put_nowait({
-                "level": record.levelname,
-                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-                "message": record.getMessage(),
-            })
+            self._queue.put_nowait(
+                {
+                    "level": record.levelname,
+                    "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+                    "message": record.getMessage(),
+                }
+            )
         except asyncio.QueueFull:
             pass
 

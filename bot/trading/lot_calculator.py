@@ -91,8 +91,6 @@ class LotCalculator:
             logger.warning("Zero SL distance for %s, using volume_min", mt5_symbol)
             return _clamp(info.volume_min, info)
 
-        raw = (account.balance * risk_percent / 100) / (
-            len(limit_prices) * avg_sl_pips * pip_val
-        )
+        raw = (account.balance * risk_percent / 100) / (len(limit_prices) * avg_sl_pips * pip_val)
         capped = min(raw, self._config.lot_sizing.max_lot_per_order)
         return _clamp(capped, info)

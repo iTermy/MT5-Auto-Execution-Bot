@@ -25,7 +25,7 @@ def get_config(
     profit_threshold = base.profit_threshold
     trailing_distance = base.trailing_distance
     threshold_unit = base.threshold_unit
-    # Per-asset partial close, falling back to legacy global default
+    # Per-asset partial close, falling back to the top-level default
     partial_close_percent = getattr(base, "partial_close_percent", None)
     if partial_close_percent is None:
         partial_close_percent = tp.partial_close_percent
@@ -39,9 +39,9 @@ def get_config(
     else:
         override_map = {
             "scalp": tp.scalp_overrides,
-            "toll":  tp.toll_overrides,
+            "toll": tp.toll_overrides,
             "swing": tp.swing_overrides,
-            "pa":    tp.pa_overrides,
+            "pa": tp.pa_overrides,
         }.get(signal_type)
         if override_map and key in override_map:
             ov = override_map[key]

@@ -15,6 +15,7 @@ import {
 } from '../utils/stats'
 import type { Period } from '../utils/stats'
 import { getChannelName } from '../utils/channels'
+import { directionFromOrderType } from '../utils/orderType'
 import { formatSignalType } from '../utils/signalType'
 import type { DashboardData, HistoryData, TradeData } from '../types'
 
@@ -30,10 +31,6 @@ function proximityPctFromPrice(closestPrice: number, currentPrice: number): numb
   const frac = Math.abs(currentPrice - closestPrice) / Math.abs(closestPrice)
   const closeness = 1 - Math.min(frac / 0.01, 1)
   return Math.max(0, Math.min(100, Math.round(closeness * 100)))
-}
-
-function directionFromOrderType(dir: string): 'long' | 'short' {
-  return dir.includes('buy') || dir.includes('long') ? 'long' : 'short'
 }
 
 export function DashboardPage({ dashboard, history }: Props) {
@@ -57,24 +54,33 @@ export function DashboardPage({ dashboard, history }: Props) {
   const curveData = curve.map(p => p.value)
   const curveLabels = curve.map(p => p.label)
   const pnlValue = curve.length > 0 ? curve[curve.length - 1].value : 0
-  const pnlLabel = pnlP === 'daily' ? "Today's P&L" : pnlP === 'weekly' ? 'P&L · this week' : 'Cumulative P&L · all time'
+  const pnlLabel =
+    pnlP === 'daily'
+      ? "Today's P&L"
+      : pnlP === 'weekly'
+        ? 'P&L · this week'
+        : 'Cumulative P&L · all time'
 
   const wlClosed = useMemo(() => filteredForWL.filter(t => t.status === 'closed'), [filteredForWL])
   const wins = wlClosed.filter(t => t.realized_pnl > 0).length
   const losses = wlClosed.filter(t => t.realized_pnl < 0).length
-  const winRate = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0
+  const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0
 
   // Positions table
-  const posRows = useMemo(() => positions.map(p => ({
-    sym: p.symbol,
-    side: p.direction as 'long' | 'short',
-    lot: p.volume,
-    entry: p.price_open,
-    cur: p.current_price,
-    pnl: p.profit,
-    trailing: p.is_trailing,
-    ticket: p.ticket,
-  })), [positions])
+  const posRows = useMemo(
+    () =>
+      positions.map(p => ({
+        sym: p.symbol,
+        side: p.direction as 'long' | 'short',
+        lot: p.volume,
+        entry: p.price_open,
+        cur: p.current_price,
+        pnl: p.profit,
+        trailing: p.is_trailing,
+        ticket: p.ticket,
+      })),
+    [positions]
+  )
 
   const pos = useSort(posRows, 'pnl')
 
@@ -102,9 +108,7 @@ export function DashboardPage({ dashboard, history }: Props) {
     const grouped = groupBySignalId(closed)
     return [...grouped.values()]
       .map(group => {
-        const timestamps = group
-          .map(t => t.closed_at || t.filled_at || t.placed_at)
-          .filter(Boolean)
+        const timestamps = group.map(t => t.closed_at || t.filled_at || t.placed_at).filter(Boolean)
         const closedAt = [...timestamps].sort().reverse()[0] ?? ''
         const totalPnl = group.reduce((s, t) => s + t.realized_pnl, 0)
         const sideOrder = group.find(t => t.direction !== 'remainder') ?? group[0]
@@ -136,7 +140,9 @@ export function DashboardPage({ dashboard, history }: Props) {
             <div>
               <div className="eyebrow">{pnlLabel}</div>
               <div className="metric" style={{ marginTop: 10 }}>
-                <span className={`big mono ${pnlValue >= 0 ? 'pos' : 'neg'}`}>{money(pnlValue)}</span>
+                <span className={`big mono ${pnlValue >= 0 ? 'pos' : 'neg'}`}>
+                  {money(pnlValue)}
+                </span>
               </div>
             </div>
             <Seg value={pnlP} options={periods} onChange={v => setPnlP(v as Period)} />
@@ -148,25 +154,47 @@ export function DashboardPage({ dashboard, history }: Props) {
                 curveLabels[0],
                 curveLabels[Math.floor(curveLabels.length / 4)],
                 curveLabels[Math.floor(curveLabels.length / 2)],
-                curveLabels[Math.floor(curveLabels.length * 3 / 4)],
+                curveLabels[Math.floor((curveLabels.length * 3) / 4)],
                 curveLabels[curveLabels.length - 1],
-              ].filter(Boolean).map((a, i) => (
-                <span key={i} className="mono">{a}</span>
-              ))}
+              ]
+                .filter(Boolean)
+                .map((a, i) => (
+                  <span key={i} className="mono">
+                    {a}
+                  </span>
+                ))}
             </div>
           )}
         </div>
 
-        <div className="panel pad" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          className="panel pad"
+          style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
+        >
           <div className="panel-head">
             <div className="eyebrow">Win / loss</div>
             <Seg value={wlP} options={periods} onChange={v => setWlP(v as Period)} />
           </div>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 16,
+            }}
+          >
             <Donut pct={winRate} size={160} />
             <div className="legend">
-              <span><i style={{ background: 'var(--accent)' }} />{wins} wins</span>
-              <span><i style={{ background: 'var(--surface-3)' }} />{losses} losses</span>
+              <span>
+                <i style={{ background: 'var(--accent)' }} />
+                {wins} wins
+              </span>
+              <span>
+                <i style={{ background: 'var(--surface-3)' }} />
+                {losses} losses
+              </span>
             </div>
           </div>
         </div>
@@ -175,37 +203,66 @@ export function DashboardPage({ dashboard, history }: Props) {
       {/* POSITIONS */}
       <div className="panel pad">
         <div className="panel-head">
-          <h3>Open positions <span className="sub" style={{ fontWeight: 400 }}>— {positions.length} live</span></h3>
-          <span className="sub">total <span className={`mono ${totalPnl >= 0 ? 'pos' : 'neg'}`} style={{ fontWeight: 600 }}>{money(totalPnl)}</span></span>
+          <h3>
+            Open positions{' '}
+            <span className="sub" style={{ fontWeight: 400 }}>
+              — {positions.length} live
+            </span>
+          </h3>
+          <span className="sub">
+            total{' '}
+            <span className={`mono ${totalPnl >= 0 ? 'pos' : 'neg'}`} style={{ fontWeight: 600 }}>
+              {money(totalPnl)}
+            </span>
+          </span>
         </div>
         {positions.length === 0 ? (
-          <p className="faint" style={{ padding: '12px 0' }}>No open positions</p>
+          <p className="faint" style={{ padding: '12px 0' }}>
+            No open positions
+          </p>
         ) : (
           <table className="tbl">
             <thead>
               <tr>
                 <th onClick={() => pos.onSort('sym')}>Symbol{pos.ind('sym')}</th>
                 <th onClick={() => pos.onSort('side')}>Side{pos.ind('side')}</th>
-                <th className="num" onClick={() => pos.onSort('lot')}>Lot{pos.ind('lot')}</th>
+                <th className="num" onClick={() => pos.onSort('lot')}>
+                  Lot{pos.ind('lot')}
+                </th>
                 <th className="num">Entry</th>
                 <th className="num">Current</th>
-                <th className="num" onClick={() => pos.onSort('pnl')}>P&L{pos.ind('pnl')}</th>
+                <th className="num" onClick={() => pos.onSort('pnl')}>
+                  P&L{pos.ind('pnl')}
+                </th>
                 <th>Stage</th>
               </tr>
             </thead>
             <tbody>
               {pos.sorted.map(p => (
                 <tr key={p.ticket}>
-                  <td><span className="sym">{p.sym}</span></td>
-                  <td><span className={'tag ' + p.side}>{p.side}</span></td>
+                  <td>
+                    <span className="sym">{p.sym}</span>
+                  </td>
+                  <td>
+                    <span className={'tag ' + p.side}>{p.side}</span>
+                  </td>
                   <td className="num mono">{p.lot.toFixed(2)}</td>
                   <td className="num mono dim">{p.entry.toFixed(5)}</td>
                   <td className="num mono">{p.cur.toFixed(5)}</td>
-                  <td className={'num mono ' + (p.pnl >= 0 ? 'pos' : 'neg')} style={{ fontWeight: 600 }}>{money(p.pnl)}</td>
+                  <td
+                    className={'num mono ' + (p.pnl >= 0 ? 'pos' : 'neg')}
+                    style={{ fontWeight: 600 }}
+                  >
+                    {money(p.pnl)}
+                  </td>
                   <td>
-                    {p.trailing
-                      ? <span className="tag trail"><span className="dot-live" /> trailing</span>
-                      : <span className="tag ghost">holding</span>}
+                    {p.trailing ? (
+                      <span className="tag trail">
+                        <span className="dot-live" /> trailing
+                      </span>
+                    ) : (
+                      <span className="tag ghost">holding</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -218,11 +275,17 @@ export function DashboardPage({ dashboard, history }: Props) {
       {signalGroups.length > 0 && (
         <div className="panel pad">
           <div className="panel-head">
-            <h3><Icon name="bell" size={17} /> Closest Signals</h3>
+            <h3>
+              <Icon name="bell" size={17} /> Closest Signals
+            </h3>
             {signalGroups.length > 3 && (
               <button className="btn sm ghost" onClick={() => setShowAll(!showAll)}>
                 {showAll ? 'Show fewer' : `Show all ${signalGroups.length}`}{' '}
-                <Icon name="chevDown" size={14} style={{ transform: showAll ? 'rotate(180deg)' : '', transition: '.2s' }} />
+                <Icon
+                  name="chevDown"
+                  size={14}
+                  style={{ transform: showAll ? 'rotate(180deg)' : '', transition: '.2s' }}
+                />
               </button>
             )}
           </div>
@@ -232,15 +295,27 @@ export function DashboardPage({ dashboard, history }: Props) {
                 <div className="top">
                   <span className="sym">{g.sym}</span>
                   <span className={'tag ' + g.side}>{g.side}</span>
-                  <span className={'tag ' + (g.placed ? 'long' : 'ghost')} style={{ marginLeft: 'auto' }}>
+                  <span
+                    className={'tag ' + (g.placed ? 'long' : 'ghost')}
+                    style={{ marginLeft: 'auto' }}
+                  >
                     {g.placed ? 'placed' : 'watching'}
                   </span>
                 </div>
                 <ProxMeter pct={g.pct} label={g.dist} />
                 <div className="fill-kv">
-                  <div className="r"><span className="k">Closest</span><span className="val mono">{g.closestPrice}</span></div>
-                  <div className="r"><span className="k">Channel</span><span className="val">{g.channelName}</span></div>
-                  <div className="r"><span className="k">Type</span><span className="val">{g.signalType}</span></div>
+                  <div className="r">
+                    <span className="k">Closest</span>
+                    <span className="val mono">{g.closestPrice}</span>
+                  </div>
+                  <div className="r">
+                    <span className="k">Channel</span>
+                    <span className="val">{g.channelName}</span>
+                  </div>
+                  <div className="r">
+                    <span className="k">Type</span>
+                    <span className="val">{g.signalType}</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -271,15 +346,28 @@ export function DashboardPage({ dashboard, history }: Props) {
               <tbody>
                 {recentTradeGroups.map(g => (
                   <tr key={g.signal_id}>
-                    <td><span className="sym">{g.symbol || '—'}</span></td>
-                    <td><span className={'tag ' + g.side}>{g.side}</span></td>
+                    <td>
+                      <span className="sym">{g.symbol || '—'}</span>
+                    </td>
+                    <td>
+                      <span className={'tag ' + g.side}>{g.side}</span>
+                    </td>
                     <td className="num mono dim">{g.limitCount}</td>
-                    <td className="num mono" style={{ color: g.totalPnl >= 0 ? 'var(--pos)' : 'var(--neg)', fontWeight: 600 }}>
+                    <td
+                      className="num mono"
+                      style={{
+                        color: g.totalPnl >= 0 ? 'var(--pos)' : 'var(--neg)',
+                        fontWeight: 600,
+                      }}
+                    >
                       {money(g.totalPnl)}
                     </td>
                     <td className="num t-sub">
                       {g.closedAt
-                        ? new Date(g.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        ? new Date(g.closedAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
                         : '—'}
                     </td>
                   </tr>

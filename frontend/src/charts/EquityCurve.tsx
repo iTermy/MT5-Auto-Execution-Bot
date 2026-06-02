@@ -66,7 +66,15 @@ export function EquityCurve({ data, labels, height = 210 }: EquityCurveProps) {
           </linearGradient>
         </defs>
         {[0.25, 0.5, 0.75].map(g => (
-          <line key={g} x1={pad} x2={w - pad} y1={h * g} y2={h * g} stroke="var(--hairline)" strokeWidth="1" />
+          <line
+            key={g}
+            x1={pad}
+            x2={w - pad}
+            y1={h * g}
+            y2={h * g}
+            stroke="var(--hairline)"
+            strokeWidth="1"
+          />
         ))}
         <path d={area} fill={`url(#g${gid})`} />
         <path
@@ -80,10 +88,31 @@ export function EquityCurve({ data, labels, height = 210 }: EquityCurveProps) {
         />
         {hi == null && (
           <>
-            <circle cx={X(n - 1)} cy={Y(data[n - 1])} r={4.5} fill="var(--accent)" stroke="var(--surface)" strokeWidth={2.5} />
-            <circle cx={X(n - 1)} cy={Y(data[n - 1])} r={4.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} opacity={0.5}>
+            <circle
+              cx={X(n - 1)}
+              cy={Y(data[n - 1])}
+              r={4.5}
+              fill="var(--accent)"
+              stroke="var(--surface)"
+              strokeWidth={2.5}
+            />
+            <circle
+              cx={X(n - 1)}
+              cy={Y(data[n - 1])}
+              r={4.5}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth={1.5}
+              opacity={0.5}
+            >
               <animate attributeName="r" from="4.5" to="11" dur="1.8s" repeatCount="indefinite" />
-              <animate attributeName="opacity" from="0.5" to="0" dur="1.8s" repeatCount="indefinite" />
+              <animate
+                attributeName="opacity"
+                from="0.5"
+                to="0"
+                dur="1.8s"
+                repeatCount="indefinite"
+              />
             </circle>
           </>
         )}

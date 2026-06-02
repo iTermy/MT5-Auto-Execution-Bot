@@ -32,9 +32,7 @@ class LicenseValidator:
                     json={"license_key": license_key, "mt5_account": mt5_account},
                 )
             if resp.status_code >= 400:
-                result = LicenseResult(
-                    LicenseStatus.INVALID, None, f"HTTP {resp.status_code}"
-                )
+                result = LicenseResult(LicenseStatus.INVALID, None, f"HTTP {resp.status_code}")
             else:
                 data = resp.json()
                 raw_status = data.get("status", "error")
@@ -68,7 +66,8 @@ class LicenseValidator:
                 if not self.license_valid:
                     logger.warning(
                         "License heartbeat failed: %s — %s",
-                        result.status.value, result.message,
+                        result.status.value,
+                        result.message,
                     )
             except Exception:
                 logger.error("License heartbeat unhandled error", exc_info=True)

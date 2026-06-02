@@ -3,7 +3,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import MetaTrader5 as mt5
@@ -24,6 +24,7 @@ from bot.utils.time_utils import MarketScheduler
 logger = logging.getLogger(__name__)
 
 _UNAVAILABLE_COOLDOWN = 300.0  # seconds before retrying a "not in terminal" symbol
+
 
 def _within_proximity(
     limit_prices: list[float], mid: float, asset_class: AssetClass, info, prox, db_sym: str = ""
@@ -116,11 +117,13 @@ class SyncCycle:
         # signal_ids whose proximity rejection has been logged (logged once per lifetime)
         self._logged_proximity: set[int] = set()
         # C8: SL sync consecutive failure tracking
-        self._sl_fail_count: dict[int, int] = {}    # ticket -> consecutive fail count
-        self._sl_fail_target: dict[int, float] = {} # ticket -> last failed target sl
+        self._sl_fail_count: dict[int, int] = {}  # ticket -> consecutive fail count
+        self._sl_fail_target: dict[int, float] = {}  # ticket -> last failed target sl
         # M13: force-exit consecutive failure tracking
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
-        self._last_force_exit_status: dict[int, str] = {}  # signal_id -> force-exit status at first detection
+        self._last_force_exit_status: dict[
+            int, str
+        ] = {}  # signal_id -> force-exit status at first detection
         self._feed_health_failed: bool = False
         # Snapshots read by DashboardCache to render unplaced "watching" signals.
         # Preserved across Supabase outages so the UI doesn't blank out.
@@ -142,7 +145,10 @@ class SyncCycle:
         try:
             supabase_rows = await supabase.fetch_active_signals()
         except Exception:
-            logger.error("Supabase fetch failed — skipping placement phase, running fill detection only", exc_info=True)
+            logger.error(
+                "Supabase fetch failed — skipping placement phase, running fill detection only",
+                exc_info=True,
+            )
             supabase_rows = None
 
         if supabase_rows is not None:
@@ -155,7 +161,9 @@ class SyncCycle:
                         if lid not in self._logged_excluded:
                             logger.info(
                                 "Excluded symbol: signal_id=%d limit_id=%d symbol=%s",
-                                r["signal_id"], lid, r["instrument"],
+                                r["signal_id"],
+                                lid,
+                                r["instrument"],
                             )
                             self._logged_excluded.add(lid)
                     else:
@@ -201,8 +209,7 @@ class SyncCycle:
             # set — used for placement, drift checks, SL sync, and the dashboard's
             # "Closest Signals" view (which needs feed_mid for offset symbols).
             offset_needed: set[str] = {
-                r["instrument"] for r in supabase_rows
-                if needs_offset(r["instrument"], config)
+                r["instrument"] for r in supabase_rows if needs_offset(r["instrument"], config)
             }
             live_prices: dict = {}
             if offset_needed:
@@ -238,7 +245,9 @@ class SyncCycle:
                     if pip_sz > 0 and abs(current_sl - stored_sl) >= pip_sz:
                         logger.info(
                             "SL change on pending: ticket=%d sl %.5f -> %.5f — cancelling for re-placement",
-                            row["mt5_ticket"], stored_sl, current_sl,
+                            row["mt5_ticket"],
+                            stored_sl,
+                            current_sl,
                         )
                         ok = await self._canceller.cancel_order(
                             row["mt5_ticket"], mt5_client, sqlite, spread=False
@@ -253,7 +262,8 @@ class SyncCycle:
                     try:
                         feed_health = await supabase.fetch_feed_health()
                         stale_feeds = {
-                            feed for feed, status in feed_health.items()
+                            feed
+                            for feed, status in feed_health.items()
                             if status in ("degraded", "down")
                         }
                         if stale_feeds:
@@ -294,14 +304,19 @@ class SyncCycle:
                         tick = mt5_client.symbol_info_tick(mt5_sym)
 
                         # Stock suffix fallback: try without suffix
-                        if tick is None and config.stock_suffix and mt5_sym.endswith(config.stock_suffix):
+                        if (
+                            tick is None
+                            and config.stock_suffix
+                            and mt5_sym.endswith(config.stock_suffix)
+                        ):
                             base_sym = mt5_sym[: -len(config.stock_suffix)]
                             fallback_tick = mt5_client.symbol_info_tick(base_sym)
                             if fallback_tick is not None:
                                 db_sym = unique_syms[mt5_sym]
                                 logger.info(
                                     "Stock suffix fallback: %s unavailable, using %s",
-                                    mt5_sym, base_sym,
+                                    mt5_sym,
+                                    base_sym,
                                 )
                                 _persist_stock_no_suffix(db_sym, config)
                                 # Remap: remove old key, add base as the symbol for this cycle
@@ -311,7 +326,9 @@ class SyncCycle:
                                 mt5_sym = base_sym
 
                         sym_ticks[mt5_sym] = tick
-                        sym_infos[mt5_sym] = mt5_client.symbol_info(mt5_sym) if tick is not None else None
+                        sym_infos[mt5_sym] = (
+                            mt5_client.symbol_info(mt5_sym) if tick is not None else None
+                        )
                         if tick is None:
                             self._unavailable_until[mt5_sym] = now_mono + _UNAVAILABLE_COOLDOWN
                             newly_unavailable.add(mt5_sym)
@@ -321,23 +338,27 @@ class SyncCycle:
                     # Log and count errors only for symbols newly detected as unavailable.
                     # Cooldown-suppressed symbols are skipped silently this cycle.
                     unavailable_mt5: set[str] = set()
-                    for mt5_sym, db_sym in unique_syms.items():
+                    for mt5_sym in unique_syms:
                         if sym_ticks[mt5_sym] is None:
                             unavailable_mt5.add(mt5_sym)
                             if mt5_sym in newly_unavailable:
                                 count = sum(
-                                    1 for lid in new_limit_ids
-                                    if map_symbol(supabase_by_limit[lid]["instrument"], config) == mt5_sym
+                                    1
+                                    for lid in new_limit_ids
+                                    if map_symbol(supabase_by_limit[lid]["instrument"], config)
+                                    == mt5_sym
                                 )
                                 logger.warning(
                                     "Symbol not in terminal: %s — skipping %d limit(s) (retrying in %.0fs)",
-                                    mt5_sym, count, _UNAVAILABLE_COOLDOWN,
+                                    mt5_sym,
+                                    count,
+                                    _UNAVAILABLE_COOLDOWN,
                                 )
                                 result.errors += count
 
                     # Pre-check offset staleness per instrument (log once, not once per limit)
                     stale_instruments: set[str] = set()
-                    now_utc = datetime.now(timezone.utc)
+                    now_utc = datetime.now(UTC)
                     for instrument in offset_needed:
                         live_row = live_prices.get(instrument)
                         if live_row is None:
@@ -345,13 +366,16 @@ class SyncCycle:
                         age = (now_utc - live_row["updated_at"]).total_seconds()
                         if age > config.feed_max_staleness_seconds:
                             count = sum(
-                                1 for lid in new_limit_ids
+                                1
+                                for lid in new_limit_ids
                                 if supabase_by_limit[lid]["instrument"] == instrument
                             )
                             if count:
                                 logger.warning(
                                     "Live price stale for %s (%.0fs) — skipping %d limit(s)",
-                                    instrument, age, count,
+                                    instrument,
+                                    age,
+                                    count,
                                 )
                                 result.errors += count
                             stale_instruments.add(instrument)
@@ -379,7 +403,10 @@ class SyncCycle:
                             result.skipped += len(lids)
                             logger.info(
                                 "Signal %d (%s): feed=%s is stale — skipping %d limit(s)",
-                                sig_id, db_sym, feed, len(lids),
+                                sig_id,
+                                db_sym,
+                                feed,
+                                len(lids),
                             )
                             continue
                         tick = sym_ticks.get(mt5_sym)
@@ -389,12 +416,21 @@ class SyncCycle:
                             result.errors += len(lids)
                             logger.warning(
                                 "Signal %d (%s): tick/info unavailable — skipping %d limit(s)",
-                                sig_id, db_sym, len(lids),
+                                sig_id,
+                                db_sym,
+                                len(lids),
                             )
                             continue
                         mid = (tick.bid + tick.ask) / 2
                         new_prices = [float(supabase_by_limit[lid]["price_level"]) for lid in lids]
-                        if _within_proximity(new_prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym):
+                        if _within_proximity(
+                            new_prices,
+                            mid,
+                            detect_asset_class(db_sym),
+                            info,
+                            config.proximity,
+                            db_sym,
+                        ):
                             approved_signals.add(sig_id)
                             self._logged_proximity.discard(sig_id)
                         else:
@@ -403,7 +439,9 @@ class SyncCycle:
                             if sig_id not in self._logged_proximity:
                                 logger.info(
                                     "Signal %d (%s): all limits outside proximity — skipping %d order(s)",
-                                    sig_id, db_sym, len(lids),
+                                    sig_id,
+                                    db_sym,
+                                    len(lids),
                                 )
                                 self._logged_proximity.add(sig_id)
 
@@ -433,7 +471,9 @@ class SyncCycle:
                         if needs_offset(db_sym, config):
                             live_row = live_prices.get(db_sym)
                             if live_row is None:
-                                logger.warning("No live price for %s, skipping limit=%d", db_sym, lid)
+                                logger.warning(
+                                    "No live price for %s, skipping limit=%d", db_sym, lid
+                                )
                                 result.errors += 1
                                 continue
                             offset = self._offset_calc.get_offset(
@@ -487,7 +527,8 @@ class SyncCycle:
                     ):
                         logger.info(
                             "Offset drift: %s ticket=%d, cancelling for re-placement",
-                            instrument, row["mt5_ticket"],
+                            instrument,
+                            row["mt5_ticket"],
                         )
                         ok = await self._canceller.cancel_order(
                             row["mt5_ticket"], mt5_client, sqlite, spread=False
@@ -508,9 +549,11 @@ class SyncCycle:
             result.filled += 1
             logger.info("Fill: order=%d pos=%d", fill.mt5_ticket, fill.position_ticket)
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
-        new_tickets = await self._fill_detector.detect_partial_close_tickets(mt5_client, sqlite, mt5_positions)
+        new_tickets = await self._fill_detector.detect_partial_close_tickets(
+            mt5_client, sqlite, mt5_positions
+        )
         for evt in new_tickets:
             await sqlite.mark_closed(evt.original_ticket)
             remainder_pos = pos_by_ticket.get(evt.new_ticket)
@@ -528,7 +571,12 @@ class SyncCycle:
             await sqlite.mark_filled(evt.new_ticket, now_iso)
             await sqlite.set_trailing(evt.new_ticket)
             result.new_trailing += 1
-            logger.info("Partial close remainder: new_ticket=%d signal=%d (original=%d closed)", evt.new_ticket, evt.signal_id, evt.original_ticket)
+            logger.info(
+                "Partial close remainder: new_ticket=%d signal=%d (original=%d closed)",
+                evt.new_ticket,
+                evt.signal_id,
+                evt.original_ticket,
+            )
 
         # M2: mark positions closed if they disappeared from MT5 externally
         await self._check_external_closes(sqlite, mt5_positions)
@@ -544,9 +592,7 @@ class SyncCycle:
             await self._sync_filled_sls(
                 sqlite, mt5_client, mt5_positions, supabase_by_signal, config, live_prices
             )
-            await self._check_forced_exits(
-                supabase, sqlite, mt5_client, mt5_positions
-            )
+            await self._check_forced_exits(supabase, sqlite, mt5_client, mt5_positions)
 
             # Snapshot for the dashboard's "Closest Signals" view. Re-query pending
             # so newly-placed orders from this cycle appear as placed=True.
@@ -610,7 +656,11 @@ class SyncCycle:
                     current_offset = self._offset_calc.get_offset(
                         mt5_sym, live_row, mt5_client, config.feed_max_staleness_seconds
                     )
-                    offset = current_offset if current_offset is not None else (row["offset_at_placement"] or 0.0)
+                    offset = (
+                        current_offset
+                        if current_offset is not None
+                        else (row["offset_at_placement"] or 0.0)
+                    )
                 else:
                     offset = row["offset_at_placement"] or 0.0
 
@@ -632,7 +682,11 @@ class SyncCycle:
                 self._sl_fail_target.pop(ticket, None)
                 logger.info(
                     "SL sync ticket=%d signal=%d: db_sl %.5f -> %.5f, mt5_sl=%.5f",
-                    ticket, signal_id, stored_db_sl, current_db_sl, mt5_sl,
+                    ticket,
+                    signal_id,
+                    stored_db_sl,
+                    current_db_sl,
+                    mt5_sl,
                 )
             else:
                 retcode = res.retcode if res else "None"
@@ -645,7 +699,9 @@ class SyncCycle:
                 if count == _SL_FAIL_MAX:
                     logger.error(
                         "Persistent SL sync failure: ticket=%d target_sl=%.5f retcode=%s",
-                        ticket, mt5_sl, retcode,
+                        ticket,
+                        mt5_sl,
+                        retcode,
                     )
 
     async def _check_forced_exits(
@@ -689,7 +745,10 @@ class SyncCycle:
 
             logger.warning(
                 "Forced exit: signal %d status %r -> %r closed_reason=%r — closing all positions",
-                signal_id, previous, current, closed_reason,
+                signal_id,
+                previous,
+                current,
+                closed_reason,
             )
 
             signal_rows = [r for r in all_filled_rows if r["signal_id"] == signal_id]
@@ -734,7 +793,9 @@ class SyncCycle:
                     if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
                         logger.error(
                             "Forced exit abandoned: ticket=%d signal=%d after %d attempts — manual intervention required",
-                            ticket, signal_id, new_count,
+                            ticket,
+                            signal_id,
+                            new_count,
                         )
                     all_handled = False
 
@@ -743,13 +804,10 @@ class SyncCycle:
             # else: leave previous status so next cycle retries
 
         self._last_signal_status = {
-            sid: st for sid, st in self._last_signal_status.items()
-            if sid in filled_sids
+            sid: st for sid, st in self._last_signal_status.items() if sid in filled_sids
         }
 
-    async def _check_external_closes(
-        self, sqlite: SQLiteDB, mt5_positions: list
-    ) -> None:
+    async def _check_external_closes(self, sqlite: SQLiteDB, mt5_positions: list) -> None:
         """M2: detect positions no longer in MT5 and mark them closed."""
         filled = await sqlite.get_filled_positions()
         if not filled:
@@ -764,9 +822,9 @@ class SyncCycle:
                 if row["is_trailing"]:
                     logger.info(
                         "Trailing stop hit: ticket=%d signal=%d symbol=%s",
-                        ticket, row["signal_id"], row["symbol"] or "?",
+                        ticket,
+                        row["signal_id"],
+                        row["symbol"] or "?",
                     )
                 else:
-                    logger.info(
-                        "External close: ticket=%d signal=%d", ticket, row["signal_id"]
-                    )
+                    logger.info("External close: ticket=%d signal=%d", ticket, row["signal_id"])

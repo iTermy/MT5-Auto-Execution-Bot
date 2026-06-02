@@ -1,0 +1,120 @@
+{
+  "license_key": "",
+  "lot_sizing": {
+    "mode": "fixed",
+    "risk_percent": 1.0,
+    "fixed_lot": {
+      "default": 0.01,
+      "XAUUSD": 0.02
+    },
+    "max_lot_per_order": 5.0,
+    "exceptions": {}
+  },
+  "polling": {
+    "supabase_interval_seconds": 30,
+    "tp_active_interval_seconds": 1,
+    "tp_trailing_interval_seconds": 2,
+    "license_heartbeat_seconds": 900
+  },
+  "magic_number": 20250001,
+  "symbol_map": {
+    "SPX500USD": "US500",
+    "NAS100USD": "USTEC",
+    "BTCUSDT": "BTCUSD",
+    "ETHUSDT": "ETHUSD",
+    "USOILSPOT": "XTIUSD",
+    "US30USD": "US30"
+  },
+  "stock_suffix": "-24",
+  "stock_no_suffix": [],
+  "excluded_symbols": [],
+  "offset_instruments": [
+    "SPX500USD",
+    "NAS100USD",
+    "BTCUSDT",
+    "ETHUSDT",
+    "USOILSPOT",
+    "US30USD",
+    "JP225"
+  ],
+  "offset_drift_threshold_pips": 5.0,
+  "feed_max_staleness_seconds": 30,
+  "spread_hour": {
+    "daily_start": "16:45",
+    "daily_end": "18:00",
+    "timezone": "US/Eastern",
+    "weekend_start_day": "Friday",
+    "weekend_end_day": "Sunday"
+  },
+  "proximity": {
+    "forex_pips": 10.0,
+    "forex_jpy_pips": 10.0,
+    "metals": 15.0,
+    "crypto": 1000.0,
+    "stocks": 5.0,
+    "indices": {
+      "SPX": 20.0,
+      "US500": 20.0,
+      "NAS": 50.0,
+      "USTEC": 50.0,
+      "DAX": 50.0,
+      "DE30": 50.0,
+      "JP225": 100.0
+    },
+    "stock_overrides": {}
+  },
+  "tp_config": {
+    "partial_close_percent": 50,
+    "forex": {
+      "profit_threshold": 7.0,
+      "threshold_unit": "pips",
+      "trailing_distance": 3.0
+    },
+    "forex_jpy": {
+      "profit_threshold": 7.0,
+      "threshold_unit": "pips",
+      "trailing_distance": 3.0
+    },
+    "metals": {
+      "profit_threshold": 4.0,
+      "threshold_unit": "dollars",
+      "trailing_distance": 2.0
+    },
+    "indices": {
+      "profit_threshold": 20.0,
+      "threshold_unit": "dollars",
+      "trailing_distance": 5.0
+    },
+    "stocks": {
+      "profit_threshold": 1.0,
+      "threshold_unit": "dollars",
+      "trailing_distance": 0.5
+    },
+    "crypto": {
+      "profit_threshold": 300.0,
+      "threshold_unit": "dollars",
+      "trailing_distance": 50.0
+    },
+    "oil": {
+      "profit_threshold": 0.5,
+      "threshold_unit": "dollars",
+      "trailing_distance": 0.2
+    },
+    "scalp_overrides": {
+      "forex": { "profit_threshold": 5.0, "trailing_distance": 2.0 },
+      "forex_jpy": { "profit_threshold": 5.0, "trailing_distance": 3.0 },
+      "metals": { "profit_threshold": 2.0, "trailing_distance": 1.0 },
+      "indices": { "profit_threshold": 10.0, "trailing_distance": 3.0 },
+      "stocks": { "profit_threshold": 0.5, "trailing_distance": 0.25 },
+      "crypto": { "profit_threshold": 150.0, "trailing_distance": 25.0 }
+    },
+    "toll_overrides": {},
+    "swing_overrides": {},
+    "pa_overrides": {},
+    "one_to_one": {
+      "profit_threshold": 10.0,
+      "overrides": {}
+    },
+    "instrument_overrides": {}
+  }
+}

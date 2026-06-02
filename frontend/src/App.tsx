@@ -21,18 +21,24 @@ export default function App() {
   const engineRunning = status?.trading_active ?? false
 
   useEffect(() => {
-    fetchConfig().then(setConfig).catch(() => {})
+    fetchConfig()
+      .then(setConfig)
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
-    fetchHistory().then(setHistory).catch(() => {})
+    fetchHistory()
+      .then(setHistory)
+      .catch(() => {})
   }, [])
 
   async function handleEngineToggle() {
     try {
       if (engineRunning) await stopEngine()
       else await startEngine()
-    } catch { /* status SSE will update */ }
+    } catch {
+      /* status SSE will update */
+    }
   }
 
   return (

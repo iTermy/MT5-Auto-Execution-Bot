@@ -49,7 +49,7 @@ class SSEBroadcaster:
                     try:
                         msg = await asyncio.wait_for(client_q.get(), timeout=15)
                         yield {"event": event_type, "data": json.dumps(msg)}
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         yield {"event": "heartbeat", "data": ""}
             finally:
                 self.remove_client(client_q)

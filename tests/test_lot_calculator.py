@@ -7,9 +7,14 @@ from tests.conftest import make_account_info, make_settings, make_symbol_info
 def _make_eurusd_info(**overrides):
     # EURUSD 5-digit: pip_sz=0.0001, pip_val=10 (tick_value=1, tick_size=0.00001)
     defaults = dict(
-        name="EURUSD", digits=5, point=0.00001,
-        volume_min=0.01, volume_max=100.0, volume_step=0.01,
-        trade_tick_value=1.0, trade_tick_size=0.00001,
+        name="EURUSD",
+        digits=5,
+        point=0.00001,
+        volume_min=0.01,
+        volume_max=100.0,
+        volume_step=0.01,
+        trade_tick_value=1.0,
+        trade_tick_size=0.00001,
         trade_contract_size=100000.0,
     )
     defaults.update(overrides)
@@ -19,6 +24,7 @@ def _make_eurusd_info(**overrides):
 # ---------------------------------------------------------------------------
 # Risk % mode
 # ---------------------------------------------------------------------------
+
 
 def test_risk_percent_basic(mock_mt5, sample_config) -> None:
     # balance=10000, risk=1% → risk_capital=100
@@ -49,8 +55,13 @@ def test_risk_percent_multiple_limits(mock_mt5, sample_config) -> None:
 # Fixed lot mode
 # ---------------------------------------------------------------------------
 
+
 def test_fixed_lot_mode(mock_mt5) -> None:
-    cfg = make_settings(lot_sizing=make_settings().lot_sizing.model_copy(update={"mode": "fixed", "fixed_lot": 0.05}))
+    cfg = make_settings(
+        lot_sizing=make_settings().lot_sizing.model_copy(
+            update={"mode": "fixed", "fixed_lot": 0.05}
+        )
+    )
     mock_mt5.symbol_info.return_value = _make_eurusd_info()
 
     calc = LotCalculator(mock_mt5, cfg)
@@ -61,7 +72,11 @@ def test_fixed_lot_mode(mock_mt5) -> None:
 
 def test_fixed_lot_clamped_to_volume_step(mock_mt5) -> None:
     # fixed_lot=0.037, volume_step=0.01 → floor(0.037/0.01)*0.01 = 0.03
-    cfg = make_settings(lot_sizing=make_settings().lot_sizing.model_copy(update={"mode": "fixed", "fixed_lot": 0.037}))
+    cfg = make_settings(
+        lot_sizing=make_settings().lot_sizing.model_copy(
+            update={"mode": "fixed", "fixed_lot": 0.037}
+        )
+    )
     mock_mt5.symbol_info.return_value = _make_eurusd_info(volume_step=0.01)
 
     calc = LotCalculator(mock_mt5, cfg)
@@ -74,6 +89,7 @@ def test_fixed_lot_clamped_to_volume_step(mock_mt5) -> None:
 # Volume step flooring (not rounding)
 # ---------------------------------------------------------------------------
 
+
 def test_volume_step_floor_not_round(mock_mt5, sample_config) -> None:
     # Construct scenario where raw lot ≈ 0.059 with step=0.01
     # floor → 0.05, round → 0.06 — test that we get 0.05
@@ -81,7 +97,9 @@ def test_volume_step_floor_not_round(mock_mt5, sample_config) -> None:
     mock_mt5.symbol_info.return_value = _make_eurusd_info(volume_step=0.01)
     mock_mt5.account_info.return_value = make_account_info(balance=1000.0)
 
-    cfg = make_settings(lot_sizing=make_settings().lot_sizing.model_copy(update={"risk_percent": 1.0}))
+    cfg = make_settings(
+        lot_sizing=make_settings().lot_sizing.model_copy(update={"risk_percent": 1.0})
+    )
     calc = LotCalculator(mock_mt5, cfg)
     # stop_loss=1.09000, limit_price=1.09170 → sl_dist=0.0017 → sl_pips=17
     lot = calc.calculate(stop_loss=1.09000, limit_prices=[1.09170], mt5_symbol="EURUSD")
@@ -92,6 +110,7 @@ def test_volume_step_floor_not_round(mock_mt5, sample_config) -> None:
 # ---------------------------------------------------------------------------
 # Clamp to volume_min and volume_max
 # ---------------------------------------------------------------------------
+
 
 def test_clamp_to_volume_min(mock_mt5, sample_config) -> None:
     # Very wide SL → raw lot tiny → clamped up to volume_min
@@ -108,7 +127,9 @@ def test_clamp_to_volume_min(mock_mt5, sample_config) -> None:
 def test_clamp_to_max_lot_per_order(mock_mt5) -> None:
     # Tiny SL → huge raw lot → capped by max_lot_per_order=5.0, then volume_max
     cfg = make_settings(
-        lot_sizing=make_settings().lot_sizing.model_copy(update={"risk_percent": 10.0, "max_lot_per_order": 2.0})
+        lot_sizing=make_settings().lot_sizing.model_copy(
+            update={"risk_percent": 10.0, "max_lot_per_order": 2.0}
+        )
     )
     mock_mt5.symbol_info.return_value = _make_eurusd_info(volume_max=100.0, volume_step=0.01)
     mock_mt5.account_info.return_value = make_account_info(balance=100000.0)
@@ -123,6 +144,7 @@ def test_clamp_to_max_lot_per_order(mock_mt5) -> None:
 # ---------------------------------------------------------------------------
 # Fallback when symbol_info unavailable
 # ---------------------------------------------------------------------------
+
 
 def test_fallback_when_symbol_info_none(mock_mt5, sample_config) -> None:
     mock_mt5.symbol_info.return_value = None

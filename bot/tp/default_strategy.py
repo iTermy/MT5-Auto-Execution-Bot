@@ -64,8 +64,14 @@ class DefaultTPStrategy:
         ref_price = tick.bid if newest.type == 0 else tick.ask
         logger.info(
             "TP triggered: ticket=%d %s entry=%.5f price=%.5f move=%.5f threshold=%.5f unit=%s others_pnl=%.2f",
-            newest.ticket, side, newest.price_open, ref_price, move,
-            asset_config.profit_threshold, asset_config.threshold_unit, others_profit,
+            newest.ticket,
+            side,
+            newest.price_open,
+            ref_price,
+            move,
+            asset_config.profit_threshold,
+            asset_config.threshold_unit,
+            others_profit,
         )
         return True
 
@@ -95,7 +101,10 @@ class DefaultTPStrategy:
                 result.closed_tickets.append(pos.ticket)
                 logger.info(
                     "TP closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
-                    pos.ticket, signal_id, pos.volume, pos.profit,
+                    pos.ticket,
+                    signal_id,
+                    pos.volume,
+                    pos.profit,
                 )
             else:
                 retcode = res.retcode if res else "None"
@@ -122,7 +131,10 @@ class DefaultTPStrategy:
                 result.closed_tickets.append(newest.ticket)
                 logger.info(
                     "TP fully closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
-                    newest.ticket, signal_id, newest.volume, newest.profit,
+                    newest.ticket,
+                    signal_id,
+                    newest.volume,
+                    newest.profit,
                 )
             else:
                 retcode = res.retcode if res else "None"
@@ -147,7 +159,11 @@ class DefaultTPStrategy:
             if close_vol <= 0:
                 await sqlite.set_trailing(newest.ticket)
                 result.trailed_tickets.append(newest.ticket)
-                logger.info("TP trailing full position (vol floor=0) ticket=%d signal=%d", newest.ticket, signal_id)
+                logger.info(
+                    "TP trailing full position (vol floor=0) ticket=%d signal=%d",
+                    newest.ticket,
+                    signal_id,
+                )
             else:
                 res = mt5_client.close_position(
                     ticket=newest.ticket,
@@ -162,7 +178,10 @@ class DefaultTPStrategy:
                     result.trailed_tickets.append(newest.ticket)
                     logger.info(
                         "TP partial close %d%% ticket=%d signal=%d vol=%.2f",
-                        pct, newest.ticket, signal_id, close_vol,
+                        pct,
+                        newest.ticket,
+                        signal_id,
+                        close_vol,
                     )
                 else:
                     retcode = res.retcode if res else "None"

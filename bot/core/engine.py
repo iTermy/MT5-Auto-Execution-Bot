@@ -1,10 +1,8 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-
-_RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
 
 from bot.config.settings import Settings, load_config
 from bot.core.dashboard_cache import DashboardCache
@@ -15,6 +13,8 @@ from bot.db.supabase import SupabaseDB
 from bot.mt5.client import MT5Client
 from bot.tp.engine import TPEngine
 from bot.utils.time_utils import MarketScheduler
+
+_RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class Engine:
                 api_task = asyncio.create_task(self._serve_api(), name="api_server")
                 try:
                     await asyncio.wait_for(self.api_ready.wait(), timeout=15.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     if api_task.done() and api_task.exception():
                         logger.critical("API server failed to start: %s", api_task.exception())
                     else:
@@ -126,12 +126,14 @@ class Engine:
                 asyncio.create_task(self._reconcile_loop(), name="reconcile_loop"),
             ]
             if self._license is not None:
-                tasks.append(asyncio.create_task(
-                    self._license.heartbeat_loop(
-                        self._config.polling.license_heartbeat_seconds
-                    ),
-                    name="license_heartbeat",
-                ))
+                tasks.append(
+                    asyncio.create_task(
+                        self._license.heartbeat_loop(
+                            self._config.polling.license_heartbeat_seconds
+                        ),
+                        name="license_heartbeat",
+                    )
+                )
             if api_task is not None:
                 tasks.append(api_task)
             self._tasks = tasks
@@ -164,8 +166,7 @@ class Engine:
                     self._scheduler = MarketScheduler(new_config.spread_hour)
 
                 placement_active = self._trading_active and (
-                    self._license is None
-                    or getattr(self._license, "license_valid", True)
+                    self._license is None or getattr(self._license, "license_valid", True)
                 )
 
                 result = await self._sync_cycle.run(
@@ -176,11 +177,21 @@ class Engine:
                     self._scheduler,
                     placement_active=placement_active,
                 )
-                if result.placed or result.cancelled or result.filled or result.new_trailing or result.errors:
+                if (
+                    result.placed
+                    or result.cancelled
+                    or result.filled
+                    or result.new_trailing
+                    or result.errors
+                ):
                     logger.info(
                         "Sync: placed=%d cancelled=%d filled=%d trailing=%d errors=%d skipped=%d",
-                        result.placed, result.cancelled, result.filled,
-                        result.new_trailing, result.errors, result.skipped,
+                        result.placed,
+                        result.cancelled,
+                        result.filled,
+                        result.new_trailing,
+                        result.errors,
+                        result.skipped,
                     )
                 await self._broadcast_status()
                 await self._update_dashboard()
@@ -205,6 +216,7 @@ class Engine:
     async def _serve_api(self) -> None:
         try:
             import uvicorn
+
             cfg = uvicorn.Config(
                 self.app,
                 host="127.0.0.1",
@@ -248,7 +260,7 @@ class Engine:
         logger.error("License expired — cancelling all pending orders and closing all positions")
 
         try:
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(UTC).isoformat()
 
             pending = await self._sqlite.get_pending_orders()
             for row in pending:
@@ -295,7 +307,11 @@ class Engine:
             orders = self._mt5.orders_get()
             active = await self._sqlite.get_all_active()
             self.dashboard_cache.update(
-                acct, positions, orders, active, self._mt5,
+                acct,
+                positions,
+                orders,
+                active,
+                self._mt5,
                 supabase_rows=self._sync_cycle.last_supabase_rows,
                 live_prices=self._sync_cycle.last_live_prices,
                 pending_limit_ids=self._sync_cycle.last_sqlite_pending_limit_ids,
@@ -330,9 +346,7 @@ class Engine:
         active = await self._sqlite.get_all_active()
         pending_count = sum(1 for r in active if r["status"] == "pending")
         open_count = sum(1 for r in active if r["status"] == "filled")
-        trailing_count = sum(
-            1 for r in active if r["status"] == "filled" and r["is_trailing"]
-        )
+        trailing_count = sum(1 for r in active if r["status"] == "filled" and r["is_trailing"])
         status = {
             "engine_running": self._running,
             "trading_active": self._trading_active,

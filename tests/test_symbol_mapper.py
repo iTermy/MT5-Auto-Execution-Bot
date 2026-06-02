@@ -1,48 +1,54 @@
 import pytest
 
 from bot.config.constants import AssetClass
-from bot.trading.symbol_mapper import detect_asset_class, map_symbol, db_symbol_from_mt5
+from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class, map_symbol
 from tests.conftest import make_settings
-
 
 # ---------------------------------------------------------------------------
 # detect_asset_class
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("symbol,expected", [
-    # Metals
-    ("XAUUSD",  AssetClass.METALS),
-    ("XAGUSD",  AssetClass.METALS),
-    ("GOLD",    AssetClass.METALS),
-    ("SILVER",  AssetClass.METALS),
-    # Gold futures contracts (e.g. MGCQ6, GCZ6) — also metals
-    ("MGCQ6",   AssetClass.METALS),
-    ("MGCZ6",   AssetClass.METALS),
-    ("GCG7",    AssetClass.METALS),
-    # Oil
-    ("WTI",     AssetClass.OIL),
-    ("BRENTUSD", AssetClass.OIL),
-    ("USOIL",   AssetClass.OIL),
-    # Stocks — must beat indices (AMD.NAS contains "NAS")
-    ("AMD.NAS",   AssetClass.STOCKS),
-    ("MSFT.NYSE", AssetClass.STOCKS),
-    # Indices
-    ("US500",   AssetClass.INDICES),
-    ("USTEC",   AssetClass.INDICES),
-    ("NAS100USD", AssetClass.INDICES),  # contains NAS keyword; NOT crypto (len>6 check comes after)
-    ("DAX40",   AssetClass.INDICES),
-    ("JP225",   AssetClass.INDICES),
-    # Crypto — ends USD/USDT and len > 6
-    ("BTCUSDT", AssetClass.CRYPTO),   # len 7
-    ("ETHUSDT", AssetClass.CRYPTO),   # len 7
-    ("BTCUSD",  AssetClass.FOREX),    # len 6 — falls through to FOREX
-    # Forex JPY
-    ("USDJPY",  AssetClass.FOREX_JPY),
-    ("EURJPY",  AssetClass.FOREX_JPY),
-    # Forex default
-    ("EURUSD",  AssetClass.FOREX),
-    ("GBPUSD",  AssetClass.FOREX),
-])
+
+@pytest.mark.parametrize(
+    "symbol,expected",
+    [
+        # Metals
+        ("XAUUSD", AssetClass.METALS),
+        ("XAGUSD", AssetClass.METALS),
+        ("GOLD", AssetClass.METALS),
+        ("SILVER", AssetClass.METALS),
+        # Gold futures contracts (e.g. MGCQ6, GCZ6) — also metals
+        ("MGCQ6", AssetClass.METALS),
+        ("MGCZ6", AssetClass.METALS),
+        ("GCG7", AssetClass.METALS),
+        # Oil
+        ("WTI", AssetClass.OIL),
+        ("BRENTUSD", AssetClass.OIL),
+        ("USOIL", AssetClass.OIL),
+        # Stocks — must beat indices (AMD.NAS contains "NAS")
+        ("AMD.NAS", AssetClass.STOCKS),
+        ("MSFT.NYSE", AssetClass.STOCKS),
+        # Indices
+        ("US500", AssetClass.INDICES),
+        ("USTEC", AssetClass.INDICES),
+        (
+            "NAS100USD",
+            AssetClass.INDICES,
+        ),  # contains NAS keyword; NOT crypto (len>6 check comes after)
+        ("DAX40", AssetClass.INDICES),
+        ("JP225", AssetClass.INDICES),
+        # Crypto — ends USD/USDT and len > 6
+        ("BTCUSDT", AssetClass.CRYPTO),  # len 7
+        ("ETHUSDT", AssetClass.CRYPTO),  # len 7
+        ("BTCUSD", AssetClass.FOREX),  # len 6 — falls through to FOREX
+        # Forex JPY
+        ("USDJPY", AssetClass.FOREX_JPY),
+        ("EURJPY", AssetClass.FOREX_JPY),
+        # Forex default
+        ("EURUSD", AssetClass.FOREX),
+        ("GBPUSD", AssetClass.FOREX),
+    ],
+)
 def test_detect_asset_class(symbol: str, expected: AssetClass) -> None:
     assert detect_asset_class(symbol) == expected
 
@@ -61,6 +67,7 @@ def test_btcusd_is_forex_not_crypto() -> None:
 # ---------------------------------------------------------------------------
 # map_symbol
 # ---------------------------------------------------------------------------
+
 
 def test_map_symbol_uses_symbol_map() -> None:
     cfg = make_settings()
@@ -83,6 +90,7 @@ def test_map_symbol_passthrough() -> None:
 # ---------------------------------------------------------------------------
 # db_symbol_from_mt5 (reverse mapping)
 # ---------------------------------------------------------------------------
+
 
 def test_db_symbol_from_mt5_reverses_symbol_map() -> None:
     cfg = make_settings()

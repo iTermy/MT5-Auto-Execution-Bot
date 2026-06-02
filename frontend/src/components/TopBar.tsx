@@ -42,13 +42,21 @@ export function TopBar({ dashboard, status, connected, engineRunning, onEngineTo
       </div>
       <div className="tb-right">
         <div className="conns">
-          <div className={`conn ${mt5Ok ? 'live' : 'off'}`}><span className="d" /> MT5</div>
-          <div className={`conn ${supaOk ? 'live' : 'off'}`}><span className="d" /> Database</div>
-          <div className={`conn ${licenseOk && connected ? 'live' : 'off'}`}><span className="d" /> License</div>
+          <div className={`conn ${mt5Ok ? 'live' : 'off'}`}>
+            <span className="d" /> MT5
+          </div>
+          <div className={`conn ${supaOk ? 'live' : 'off'}`}>
+            <span className="d" /> Database
+          </div>
+          <div className={`conn ${licenseOk && connected ? 'live' : 'off'}`}>
+            <span className="d" /> License
+          </div>
         </div>
         <div className="divider-v" />
         <div className={'engine' + (engineRunning ? '' : ' stopped')}>
-          <span className="stat"><span className="d" /> {engineRunning ? 'Running' : 'Stopped'}</span>
+          <span className="stat">
+            <span className="d" /> {engineRunning ? 'Running' : 'Stopped'}
+          </span>
           <button className="toggle" onClick={onEngineToggle}>
             <Icon name="power" size={13} strokeWidth={2.4} /> {engineRunning ? 'Stop' : 'Start'}
           </button>

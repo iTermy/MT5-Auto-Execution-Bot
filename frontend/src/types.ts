@@ -26,11 +26,13 @@ export interface AssetTPConfig {
   profit_threshold: number
   threshold_unit: string
   trailing_distance: number
+  partial_close_percent?: number
 }
 
 export interface ScalpOverrideConfig {
   profit_threshold: number
   trailing_distance: number
+  partial_close_percent?: number | null
 }
 
 export interface OneToOneConfig {
@@ -133,10 +135,25 @@ export interface DashboardSummary {
   trailing_count: number
 }
 
+export interface NearbySignalData {
+  signal_id: number
+  symbol: string
+  mt5_symbol: string
+  direction: string
+  channel_id: string | null
+  signal_type: SignalType
+  limit_count: number
+  closest_price: number
+  current_price: number
+  distance: number
+  placed: boolean
+}
+
 export interface DashboardData {
   account: AccountData
   positions: PositionData[]
   pending_orders: PendingOrderData[]
+  nearby_signals: NearbySignalData[]
   summary: DashboardSummary
   updated_at: string
 }

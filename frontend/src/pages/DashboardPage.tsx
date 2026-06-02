@@ -23,16 +23,18 @@ interface Props {
   history: HistoryData | null
 }
 
-function proximityPct(order: { price_level: number; current_price: number; distance: number }): number {
-  const maxDist = Math.abs(order.price_level - order.current_price)
-  if (maxDist === 0) return 100
-  const closeness = 1 - (Math.abs(order.distance) / (maxDist * 2))
+function proximityPctFromPrice(closestPrice: number, currentPrice: number): number {
+  // Use distance-as-fraction-of-price as a rough proximity heuristic. 0% when far,
+  // 100% when current price equals the limit price. Capped so 1% off price → 0%.
+  if (closestPrice === 0) return 0
+  const frac = Math.abs(currentPrice - closestPrice) / Math.abs(closestPrice)
+  const closeness = 1 - Math.min(frac / 0.01, 1)
   return Math.max(0, Math.min(100, Math.round(closeness * 100)))
 }
 
 function formatDist(d: number): string {
   const abs = Math.abs(d)
-  if (abs >= 1) return abs.toFixed(1) + ' pts'
+  if (abs >= 1) return abs.toFixed(2) + ' pts'
   return (abs * 10000).toFixed(1) + ' pips'
 }
 
@@ -46,7 +48,7 @@ export function DashboardPage({ dashboard, history }: Props) {
   const [showAll, setShowAll] = useState(false)
 
   const positions = dashboard?.positions ?? []
-  const pendingOrders = dashboard?.pending_orders ?? []
+  const nearbySignals = dashboard?.nearby_signals ?? []
   const totalPnl = positions.reduce((s, p) => s + p.profit, 0)
 
   const trades: TradeData[] = history?.trades ?? []
@@ -82,29 +84,21 @@ export function DashboardPage({ dashboard, history }: Props) {
 
   const pos = useSort(posRows, 'pnl')
 
-  // Closest Signals: grouped by signal_id, sorted by distance of closest limit
+  // Closest Signals: every active Supabase signal (placed or watching), sorted
+  // by absolute distance from the current price.
   const signalGroups = useMemo(() => {
-    const grouped = groupBySignalId(pendingOrders)
-    return [...grouped.values()]
-      .map(orders => {
-        const closest = orders.reduce((a, b) =>
-          Math.abs(a.distance) < Math.abs(b.distance) ? a : b
-        )
-        const channelId = orders[0].channel_id
-        return {
-          signal_id: orders[0].signal_id,
-          sym: orders[0].symbol,
-          side: orders[0].direction as 'long' | 'short',
-          limitCount: orders.length,
-          closest,
-          pct: proximityPct(closest),
-          dist: formatDist(closest.distance),
-          channelName: getChannelName(channelId),
-          signalType: formatSignalType(orders[0].signal_type),
-        }
-      })
-      .sort((a, b) => Math.abs(a.closest.distance) - Math.abs(b.closest.distance))
-  }, [pendingOrders])
+    return nearbySignals.map(s => ({
+      signal_id: s.signal_id,
+      sym: s.symbol,
+      side: s.direction as 'long' | 'short',
+      limitCount: s.limit_count,
+      pct: proximityPctFromPrice(s.closest_price, s.current_price),
+      dist: formatDist(s.distance),
+      channelName: getChannelName(s.channel_id),
+      signalType: formatSignalType(s.signal_type),
+      placed: s.placed,
+    }))
+  }, [nearbySignals])
 
   const visibleGroups = showAll ? signalGroups : signalGroups.slice(0, 3)
 
@@ -244,6 +238,9 @@ export function DashboardPage({ dashboard, history }: Props) {
                 <div className="top">
                   <span className="sym">{g.sym}</span>
                   <span className={'tag ' + g.side}>{g.side}</span>
+                  <span className={'tag ' + (g.placed ? 'long' : 'ghost')} style={{ marginLeft: 'auto' }}>
+                    {g.placed ? 'placed' : 'watching'}
+                  </span>
                 </div>
                 <ProxMeter pct={g.pct} label={g.dist} />
                 <div className="fill-kv">

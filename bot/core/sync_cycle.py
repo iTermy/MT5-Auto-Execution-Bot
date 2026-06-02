@@ -122,6 +122,11 @@ class SyncCycle:
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         self._last_force_exit_status: dict[int, str] = {}  # signal_id -> force-exit status at first detection
         self._feed_health_failed: bool = False
+        # Snapshots read by DashboardCache to render unplaced "watching" signals.
+        # Preserved across Supabase outages so the UI doesn't blank out.
+        self.last_supabase_rows: list | None = None
+        self.last_live_prices: dict = {}
+        self.last_sqlite_pending_limit_ids: set[int] = set()
 
     async def run(
         self,
@@ -192,7 +197,20 @@ class SyncCycle:
                     placement_active = False
                     logger.info("Placement blocked: reason=news_mode")
 
+            # Always fetch live_prices for every offset symbol in the active signal
+            # set — used for placement, drift checks, SL sync, and the dashboard's
+            # "Closest Signals" view (which needs feed_mid for offset symbols).
+            offset_needed: set[str] = {
+                r["instrument"] for r in supabase_rows
+                if needs_offset(r["instrument"], config)
+            }
             live_prices: dict = {}
+            if offset_needed:
+                try:
+                    live_prices = await supabase.fetch_live_prices(list(offset_needed))
+                except Exception:
+                    logger.error("Live prices fetch failed", exc_info=True)
+
             if placement_active:
                 # Cancel stale pending (limit gone from Supabase)
                 for row in sqlite_pending:
@@ -229,18 +247,6 @@ class SyncCycle:
                         result.errors += not ok
 
                 new_limit_ids = supabase_limit_ids - sqlite_limit_ids
-
-                # Collect offset instruments needed for new limits + drift checks
-                offset_needed: set[str] = set()
-                for lid in new_limit_ids:
-                    if needs_offset(supabase_by_limit[lid]["instrument"], config):
-                        offset_needed.add(supabase_by_limit[lid]["instrument"])
-                for row in sqlite_pending:
-                    if row["offset_at_placement"] is not None and row["limit_id"] in supabase_by_limit:
-                        offset_needed.add(supabase_by_limit[row["limit_id"]]["instrument"])
-
-                if offset_needed:
-                    live_prices = await supabase.fetch_live_prices(list(offset_needed))
 
                 stale_feeds: set[str] = set()
                 if not self._feed_health_failed:
@@ -542,6 +548,13 @@ class SyncCycle:
                 supabase, sqlite, mt5_client, mt5_positions
             )
 
+            # Snapshot for the dashboard's "Closest Signals" view. Re-query pending
+            # so newly-placed orders from this cycle appear as placed=True.
+            sqlite_pending_now = await sqlite.get_pending_orders()
+            self.last_supabase_rows = list(supabase_rows)
+            self.last_live_prices = live_prices
+            self.last_sqlite_pending_limit_ids = {r["limit_id"] for r in sqlite_pending_now}
+
         return result
 
     async def _sync_filled_sls(
@@ -742,6 +755,12 @@ class SyncCycle:
             ticket = row["mt5_ticket"]
             if ticket not in pos_by_ticket:
                 await sqlite.mark_closed(ticket)
-                logger.info(
-                    "External close: ticket=%d signal=%d", ticket, row["signal_id"]
-                )
+                if row["is_trailing"]:
+                    logger.info(
+                        "Trailing stop hit: ticket=%d signal=%d symbol=%s",
+                        ticket, row["signal_id"], row["symbol"] or "?",
+                    )
+                else:
+                    logger.info(
+                        "External close: ticket=%d signal=%d", ticket, row["signal_id"]
+                    )

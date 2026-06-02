@@ -55,11 +55,13 @@ class AssetTPConfig(BaseModel):
     profit_threshold: float
     threshold_unit: str
     trailing_distance: float
+    partial_close_percent: int = 50
 
 
 class ScalpOverrideConfig(BaseModel):
     profit_threshold: float
     trailing_distance: float
+    partial_close_percent: int | None = None
 
 
 class OneToOneConfig(BaseModel):

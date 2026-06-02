@@ -1,6 +1,10 @@
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from bot.config.settings import Settings
+from bot.trading.symbol_mapper import map_symbol, needs_offset
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +14,7 @@ class DashboardData:
     account: dict = field(default_factory=dict)
     positions: list[dict] = field(default_factory=list)
     pending_orders: list[dict] = field(default_factory=list)
+    nearby_signals: list[dict] = field(default_factory=list)
     summary: dict = field(default_factory=lambda: {
         "total_profit": 0.0,
         "open_count": 0,
@@ -27,7 +32,18 @@ class DashboardCache:
     def data(self) -> DashboardData:
         return self._data
 
-    def update(self, account_info, mt5_positions, mt5_orders, sqlite_active, mt5_client) -> None:
+    def update(
+        self,
+        account_info,
+        mt5_positions,
+        mt5_orders,
+        sqlite_active,
+        mt5_client,
+        supabase_rows: list | None = None,
+        live_prices: dict | None = None,
+        pending_limit_ids: set[int] | None = None,
+        config: Settings | None = None,
+    ) -> None:
         now_iso = datetime.now(timezone.utc).isoformat()
 
         sqlite_by_ticket = {r["mt5_ticket"]: r for r in sqlite_active}
@@ -45,6 +61,12 @@ class DashboardCache:
             }
 
         all_symbols = {p.symbol for p in mt5_positions} | {o.symbol for o in mt5_orders}
+        # Also fetch ticks for non-offset symbols that only appear in supabase_rows,
+        # so we can compute distance for unplaced "watching" signals.
+        if supabase_rows and config is not None:
+            for r in supabase_rows:
+                if not needs_offset(r["instrument"], config):
+                    all_symbols.add(map_symbol(r["instrument"], config))
         tick_cache = {}
         for sym in all_symbols:
             tick = mt5_client.symbol_info_tick(sym)
@@ -99,6 +121,14 @@ class DashboardCache:
                 "signal_type": (row["signal_type"] if row else None) or "standard",
             })
 
+        nearby = _build_nearby_signals(
+            supabase_rows or [],
+            live_prices or {},
+            pending_limit_ids or set(),
+            tick_cache,
+            config,
+        )
+
         total_profit = sum(p["profit"] for p in positions)
         trailing_count = sum(1 for p in positions if p["is_trailing"])
 
@@ -106,6 +136,7 @@ class DashboardCache:
             account=acct,
             positions=positions,
             pending_orders=pending,
+            nearby_signals=nearby,
             summary={
                 "total_profit": round(total_profit, 2),
                 "open_count": len(positions),
@@ -114,3 +145,58 @@ class DashboardCache:
             },
             updated_at=now_iso,
         )
+
+
+def _build_nearby_signals(
+    supabase_rows: list,
+    live_prices: dict,
+    pending_limit_ids: set[int],
+    tick_cache: dict,
+    config: Settings | None,
+) -> list[dict]:
+    if not supabase_rows or config is None:
+        return []
+
+    by_signal: dict[int, list] = defaultdict(list)
+    for r in supabase_rows:
+        by_signal[r["signal_id"]].append(r)
+
+    result: list[dict] = []
+    for sig_id, rows in by_signal.items():
+        first = rows[0]
+        db_sym = first["instrument"]
+        mt5_sym = map_symbol(db_sym, config)
+
+        if needs_offset(db_sym, config):
+            lp = live_prices.get(db_sym)
+            if lp is None:
+                continue  # can't compute distance without feed price
+            current_price = (float(lp["bid"]) + float(lp["ask"])) / 2
+        else:
+            tick = tick_cache.get(mt5_sym)
+            if tick is None:
+                continue
+            current_price = (tick.bid + tick.ask) / 2
+
+        prices = [float(r["price_level"]) for r in rows]
+        closest_price = min(prices, key=lambda p: abs(p - current_price))
+        distance = current_price - closest_price
+        placed = any(r["limit_id"] in pending_limit_ids for r in rows)
+        ch = first["channel_id"]
+
+        result.append({
+            "signal_id": sig_id,
+            "symbol": db_sym,
+            "mt5_symbol": mt5_sym,
+            "direction": first["direction"],
+            "channel_id": str(ch) if ch is not None else None,
+            "signal_type": first["signal_type"] or "standard",
+            "limit_count": len(rows),
+            "closest_price": closest_price,
+            "current_price": round(current_price, 5),
+            "distance": round(distance, 5),
+            "placed": placed,
+        })
+
+    result.sort(key=lambda x: abs(x["distance"]))
+    return result

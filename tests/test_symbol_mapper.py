@@ -15,6 +15,10 @@ from tests.conftest import make_settings
     ("XAGUSD",  AssetClass.METALS),
     ("GOLD",    AssetClass.METALS),
     ("SILVER",  AssetClass.METALS),
+    # Gold futures contracts (e.g. MGCQ6, GCZ6) — also metals
+    ("MGCQ6",   AssetClass.METALS),
+    ("MGCZ6",   AssetClass.METALS),
+    ("GCG7",    AssetClass.METALS),
     # Oil
     ("WTI",     AssetClass.OIL),
     ("BRENTUSD", AssetClass.OIL),

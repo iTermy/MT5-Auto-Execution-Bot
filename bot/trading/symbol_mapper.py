@@ -16,6 +16,9 @@ def detect_asset_class(db_symbol: str) -> AssetClass:
     # Stocks MUST be checked before indices (e.g. "AMD.NAS" contains "NAS")
     if s.endswith(".NAS") or s.endswith(".NYSE"):
         return AssetClass.STOCKS
+    # Gold and micro-gold futures (e.g. MGCQ6, GCZ6) — must precede the index check
+    if s.startswith("MGC") or s.startswith("GC"):
+        return AssetClass.METALS
     if any(k in s for k in _INDEX_KEYWORDS):
         return AssetClass.INDICES
     if (s.endswith("USD") or s.endswith("USDT")) and len(s) > 6:

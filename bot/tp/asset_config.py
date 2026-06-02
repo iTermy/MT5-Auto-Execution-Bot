@@ -25,7 +25,10 @@ def get_config(
     profit_threshold = base.profit_threshold
     trailing_distance = base.trailing_distance
     threshold_unit = base.threshold_unit
-    partial_close_percent = tp.partial_close_percent
+    # Per-asset partial close, falling back to legacy global default
+    partial_close_percent = getattr(base, "partial_close_percent", None)
+    if partial_close_percent is None:
+        partial_close_percent = tp.partial_close_percent
 
     if signal_type == "1-1":
         # Fixed dollar TP, full close, no trailing
@@ -44,6 +47,8 @@ def get_config(
             ov = override_map[key]
             profit_threshold = ov.profit_threshold
             trailing_distance = ov.trailing_distance
+            if ov.partial_close_percent is not None:
+                partial_close_percent = ov.partial_close_percent
         elif signal_type == "swing":
             # No swing override configured — default to 3× the standard threshold
             profit_threshold = base.profit_threshold * 3

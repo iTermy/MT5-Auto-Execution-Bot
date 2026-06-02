@@ -56,8 +56,17 @@ class DefaultTPStrategy:
         if move < asset_config.profit_threshold:
             return False
 
-        if others:
-            return sum(p.profit for p in others) >= 0
+        others_profit = sum(p.profit for p in others) if others else 0.0
+        if others and others_profit < 0:
+            return False
+
+        side = "long" if newest.type == 0 else "short"
+        ref_price = tick.bid if newest.type == 0 else tick.ask
+        logger.info(
+            "TP triggered: ticket=%d %s entry=%.5f price=%.5f move=%.5f threshold=%.5f unit=%s others_pnl=%.2f",
+            newest.ticket, side, newest.price_open, ref_price, move,
+            asset_config.profit_threshold, asset_config.threshold_unit, others_profit,
+        )
         return True
 
     async def execute(
@@ -84,7 +93,10 @@ class DefaultTPStrategy:
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 await sqlite.mark_closed(pos.ticket, pos.profit)
                 result.closed_tickets.append(pos.ticket)
-                logger.info("TP closed ticket=%d signal=%d", pos.ticket, signal_id)
+                logger.info(
+                    "TP closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
+                    pos.ticket, signal_id, pos.volume, pos.profit,
+                )
             else:
                 retcode = res.retcode if res else "None"
                 msg = f"close failed ticket={pos.ticket} retcode={retcode}"
@@ -108,7 +120,10 @@ class DefaultTPStrategy:
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 await sqlite.mark_closed(newest.ticket, newest.profit)
                 result.closed_tickets.append(newest.ticket)
-                logger.info("TP fully closed ticket=%d signal=%d", newest.ticket, signal_id)
+                logger.info(
+                    "TP fully closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
+                    newest.ticket, signal_id, newest.volume, newest.profit,
+                )
             else:
                 retcode = res.retcode if res else "None"
                 msg = f"full close failed ticket={newest.ticket} retcode={retcode}"

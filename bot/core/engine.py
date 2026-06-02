@@ -294,7 +294,13 @@ class Engine:
             positions = self._mt5.positions_get()
             orders = self._mt5.orders_get()
             active = await self._sqlite.get_all_active()
-            self.dashboard_cache.update(acct, positions, orders, active, self._mt5)
+            self.dashboard_cache.update(
+                acct, positions, orders, active, self._mt5,
+                supabase_rows=self._sync_cycle.last_supabase_rows,
+                live_prices=self._sync_cycle.last_live_prices,
+                pending_limit_ids=self._sync_cycle.last_sqlite_pending_limit_ids,
+                config=self._config,
+            )
         except Exception:
             logger.error("Dashboard cache update failed", exc_info=True)
 

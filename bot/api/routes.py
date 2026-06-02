@@ -69,6 +69,7 @@ async def get_dashboard(request: Request) -> dict:
         "account": data.account,
         "positions": data.positions,
         "pending_orders": data.pending_orders,
+        "nearby_signals": data.nearby_signals,
         "summary": data.summary,
         "updated_at": data.updated_at,
     }

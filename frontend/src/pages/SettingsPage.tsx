@@ -13,6 +13,7 @@ const OVERRIDE_TYPES: OverrideType[] = ['scalp', 'toll', 'swing', 'pa']
 interface OverridePair {
   thr: string
   trail: string
+  partial: string  // empty string means "inherit from standard"
 }
 
 interface TpRow {
@@ -20,6 +21,7 @@ interface TpRow {
   thr: string
   unit: string
   trail: string
+  partial: string  // per-asset standard partial close % (default 50)
   overrides: Record<OverrideType, OverridePair>
 }
 
@@ -51,7 +53,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [maxLot, setMaxLot] = useState('5.0')
   const [fixedLotRows, setFixedLotRows] = useState<FixedLotRow[]>([{ instrument: 'default', lot: '0.01' }])
   const [licenseKey, setLicenseKey] = useState('')
-  const [partial, setPartial] = useState(50)
   const [tpRows, setTpRows] = useState<TpRow[]>([])
   const [tpTab, setTpTab] = useState<'standard' | OverrideType>('standard')
   const [oneToOneDefault, setOneToOneDefault] = useState('10')
@@ -87,7 +88,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
     const tp = cfg.tp_config
     if (tp) {
-      setPartial(tp.partial_close_percent ?? 50)
+      const globalPartialFallback = tp.partial_close_percent ?? 50
       const overrideSources: Record<OverrideType, Record<string, ScalpOverrideConfig> | undefined> = {
         scalp: tp.scalp_overrides,
         toll:  tp.toll_overrides,
@@ -102,6 +103,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           overrides[t] = {
             thr: ov ? String(ov.profit_threshold) : '',
             trail: ov ? String(ov.trailing_distance) : '',
+            partial: ov && ov.partial_close_percent != null ? String(ov.partial_close_percent) : '',
           }
         }
         return {
@@ -109,6 +111,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           thr: String(acfg?.profit_threshold ?? ''),
           unit: acfg?.threshold_unit ?? '',
           trail: String(acfg?.trailing_distance ?? ''),
+          partial: String(acfg?.partial_close_percent ?? globalPartialFallback),
           overrides,
         }
       }))
@@ -130,12 +133,12 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     if (config) initFromConfig(config)
   }, [config, initFromConfig])
 
-  function updateTpStandard(i: number, field: 'thr' | 'unit' | 'trail', value: string) {
+  function updateTpStandard(i: number, field: 'thr' | 'unit' | 'trail' | 'partial', value: string) {
     setTpRows(prev => prev.map((r, j) => j === i ? { ...r, [field]: value } : r))
     touch()
   }
 
-  function updateTpOverride(i: number, type: OverrideType, field: 'thr' | 'trail', value: string) {
+  function updateTpOverride(i: number, type: OverrideType, field: 'thr' | 'trail' | 'partial', value: string) {
     setTpRows(prev => prev.map((r, j) => {
       if (j !== i) return r
       const pair = { ...r.overrides[type], [field]: value }
@@ -206,17 +209,24 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         profit_threshold: parseFloat(row.thr) || 0,
         threshold_unit: row.unit,
         trailing_distance: parseFloat(row.trail) || 0,
+        partial_close_percent: parseInt(row.partial, 10) || 50,
       }])
     )
     const overrideMaps = {} as Record<`${OverrideType}_overrides`, Record<string, ScalpOverrideConfig>>
     for (const t of OVERRIDE_TYPES) {
       overrideMaps[`${t}_overrides`] = Object.fromEntries(
         tpRows
-          .filter(row => row.overrides[t].thr !== '' || row.overrides[t].trail !== '')
-          .map(row => [row.asset, {
-            profit_threshold: parseFloat(row.overrides[t].thr) || 0,
-            trailing_distance: parseFloat(row.overrides[t].trail) || 0,
-          }])
+          .filter(row => row.overrides[t].thr !== '' || row.overrides[t].trail !== '' || row.overrides[t].partial !== '')
+          .map(row => {
+            const entry: ScalpOverrideConfig = {
+              profit_threshold: parseFloat(row.overrides[t].thr) || 0,
+              trailing_distance: parseFloat(row.overrides[t].trail) || 0,
+            }
+            if (row.overrides[t].partial !== '') {
+              entry.partial_close_percent = parseInt(row.overrides[t].partial, 10) || 50
+            }
+            return [row.asset, entry]
+          })
       )
     }
     const oneToOne = {
@@ -229,7 +239,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     }
     return {
       ...config!.tp_config,
-      partial_close_percent: partial,
       ...assetEntries,
       ...overrideMaps,
       one_to_one: oneToOne,
@@ -442,17 +451,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             <h3>Take-profit &amp; trailing</h3>
             <span className="sub">per asset class · per signal type</span>
           </div>
-          <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
-            <label style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 500 }}>Partial close on trigger</label>
-            <span className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--accent)', width: 52 }}>{partial}%</span>
-            <input
-              type="range"
-              min={0} max={100} step={5}
-              value={partial}
-              onChange={e => { setPartial(+e.target.value); touch() }}
-              style={{ flex: 1, maxWidth: 320, accentColor: 'var(--accent)' }}
-            />
-          </div>
           <div style={{ marginBottom: 16 }}>
             <Seg
               accent
@@ -475,6 +473,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                   <th className="num">Threshold</th>
                   <th>Unit</th>
                   <th className="num">Trail dist.</th>
+                  <th>Partial close</th>
                 </tr>
               </thead>
               <tbody>
@@ -490,6 +489,17 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                       <input className="inp num mono" value={t.trail} style={{ width: 76 }}
                         onChange={e => updateTpStandard(i, 'trail', e.target.value)} />
                     </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <input
+                          type="range" min={0} max={100} step={5}
+                          value={parseInt(t.partial, 10) || 50}
+                          onChange={e => updateTpStandard(i, 'partial', e.target.value)}
+                          style={{ width: 140, accentColor: 'var(--accent)' }}
+                        />
+                        <span className="mono" style={{ width: 40, fontWeight: 600 }}>{parseInt(t.partial, 10) || 50}%</span>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -498,7 +508,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             <>
               <p className="faint" style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5 }}>
                 {tpTab === 'swing'
-                  ? 'Leave blank to fall back to 3× the standard threshold.'
+                  ? 'Leave blank to fall back to 3× the standard threshold. Partial close left blank inherits from Standard.'
                   : 'Leave blank to fall back to the standard asset-class settings.'}
               </p>
               <table className="tbl">
@@ -508,23 +518,44 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     <th className="num">Threshold</th>
                     <th>Unit</th>
                     <th className="num">Trail dist.</th>
+                    <th>Partial close</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {tpRows.map((t, i) => (
-                    <tr key={t.asset}>
-                      <td><span className="sym">{t.asset}</span></td>
-                      <td className="num">
-                        <input className="inp num mono" value={t.overrides[tpTab].thr} style={{ width: 76 }}
-                          onChange={e => updateTpOverride(i, tpTab, 'thr', e.target.value)} />
-                      </td>
-                      <td className="dim">{t.unit}</td>
-                      <td className="num">
-                        <input className="inp num mono" value={t.overrides[tpTab].trail} style={{ width: 76 }}
-                          onChange={e => updateTpOverride(i, tpTab, 'trail', e.target.value)} />
-                      </td>
-                    </tr>
-                  ))}
+                  {tpRows.map((t, i) => {
+                    const partialSet = t.overrides[tpTab].partial !== ''
+                    const partialNum = parseInt(t.overrides[tpTab].partial, 10) || 50
+                    return (
+                      <tr key={t.asset}>
+                        <td><span className="sym">{t.asset}</span></td>
+                        <td className="num">
+                          <input className="inp num mono" value={t.overrides[tpTab].thr} style={{ width: 76 }}
+                            onChange={e => updateTpOverride(i, tpTab, 'thr', e.target.value)} />
+                        </td>
+                        <td className="dim">{t.unit}</td>
+                        <td className="num">
+                          <input className="inp num mono" value={t.overrides[tpTab].trail} style={{ width: 76 }}
+                            onChange={e => updateTpOverride(i, tpTab, 'trail', e.target.value)} />
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <input
+                              type="range" min={0} max={100} step={5}
+                              value={partialNum}
+                              onChange={e => updateTpOverride(i, tpTab, 'partial', e.target.value)}
+                              style={{ width: 140, accentColor: 'var(--accent)' }}
+                            />
+                            <span className="mono" style={{ width: 56, fontWeight: 600 }}>
+                              {partialSet ? `${partialNum}%` : <span className="faint">inherit</span>}
+                            </span>
+                            {partialSet && (
+                              <button className="btn sm ghost" onClick={() => updateTpOverride(i, tpTab, 'partial', '')}>×</button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </>

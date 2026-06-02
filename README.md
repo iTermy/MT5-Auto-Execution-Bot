@@ -8,7 +8,7 @@ Windows desktop app that reads trading signals from Supabase Postgres and places
 
 - Polls Supabase for active signals and pending limits every 30 seconds.
 - Places, modifies, and cancels MT5 pending orders idempotently.
-- Detects fills, applies a take-profit strategy per asset class, and ratchets trailing stops on the remainder.
+- Detects fills, applies a take-profit strategy per asset class, and places trailing stops on the remainder.
 - Adjusts every order for current spread and feed offset (OANDA / Binance prices vs. ICMarkets).
 - Pauses around the daily 16:45–18:00 ET spread hour and across the weekend.
 - Surfaces live status, positions, history, and configuration in a local web dashboard.

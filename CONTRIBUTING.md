@@ -1,6 +1,6 @@
 # Contributing
 
-This repo is open to read. Active development happens with a small trusted group who have the Supabase DSN. If that's you, you'll work from a fork and open pull requests against this repo. The owner reviews and merges.
+This repo is open to read. Active development happens with a small trusted group who have the Supabase DSN. It's best to work from a fork and open pull requests against this repo. The owner reviews and merges.
 
 ## Prerequisites
 
@@ -90,7 +90,7 @@ git fetch upstream
 git rebase upstream/main
 ```
 
-Commit messages: imperative mood (`Add foo`, not `Added foo`), with a body explaining the *why* if it isn't obvious from the diff.
+Commit messages: Clear action with a body explaining the why if it isn't obvious from the diff.
 
 ### Before you push
 
@@ -113,13 +113,13 @@ Push your branch to your fork and open the PR against `iTermy/MT5-Auto-Execution
 git push origin fix/short-description
 ```
 
-The PR description should cover what changed, why, and how you tested it — short is fine. If the change touches the sync loop, TP engine, or order placer, call that out so it gets a closer look.
+The PR description should cover generally what changed, why, and how.
 
 For non-trivial work, give the group a heads-up on the server before you start so two people aren't building the same thing.
 
 ### Issues
 
-Use GitHub Issues for tracking bugs and feature ideas. Bug reports are most useful with: MT5 broker, signal type, what you expected vs. what happened, and the relevant lines from `bot.log`. Quick questions are better off in the group chat than as issues.
+Use GitHub Issues for tracking bugs and feature ideas. Quick questions are better off in the group chat than as issues.
 
 ---
 

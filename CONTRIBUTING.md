@@ -1,25 +1,32 @@
 # Contributing
 
+This repo is open to read, but active development happens with a small trusted group who have direct access to the Supabase DSN. If that's you, you'll either have push access on the main repo or you'll work from a fork — either is fine.
+
 ## Prerequisites
 
 - Python 3.13 (Windows only — MetaTrader5 package requires Windows)
 - Node.js 20+
 - MetaTrader5 terminal installed and logged in
-- Access to the contributor Supabase DSN (ask the owner)
+- The contributor Supabase DSN (the owner will have shared this in the group)
 
 ---
 
 ## Local Development Setup
 
-### 1. Fork and clone
+### 1. Clone
 
-Fork the repo on GitHub, then clone your fork:
+If you have push access:
 
 ```bash
-git clone https://github.com/<your-username>/MT5-Auto-Execution-Bot
+git clone https://github.com/iTermy/MT5-Auto-Execution-Bot
 cd MT5-Auto-Execution-Bot
-git remote add upstream https://github.com/iTermy/MT5-Auto-Execution-Bot
 pip install -r requirements.txt
+```
+
+Otherwise fork on GitHub first, clone your fork, and add `upstream`:
+
+```bash
+git remote add upstream https://github.com/iTermy/MT5-Auto-Execution-Bot
 ```
 
 ### 2. Create your `.env` file
@@ -62,54 +69,38 @@ Vite runs on `:5173` and proxies `/api/*` to FastAPI at `:8501`.
 
 ## Contribution Workflow
 
-### Branches
+### Branches and commits
 
-Work on a topic branch off `main`:
+Topic branch off `main`, one logical change per branch:
 
 ```bash
 git checkout -b fix/short-description
 ```
 
-Keep branches focused — one logical change per PR. Rebase on `upstream/main` before opening a PR rather than merging it in.
+If you forked, rebase on `upstream/main` rather than merging it in. Commit messages: imperative mood (`Add foo`, not `Added foo`), with a body that explains the *why* if it isn't obvious from the diff.
 
 ### Before you push
 
-Run the full check locally — CI is not yet wired up, so the PR review is the first place these get caught:
+Run the full check locally — there is no CI yet, so anything you don't catch lands in review:
 
 ```bash
-ruff check bot tests main.py        # lint
-ruff format bot tests main.py       # format
-pytest                              # backend tests
+ruff check bot tests main.py
+ruff format bot tests main.py
+pytest
 cd frontend && npx tsc --noEmit && npm run format:check && npm run build
 ```
 
-All four must pass. New behaviour needs a test in `tests/` mirroring the source path (e.g. `bot/trading/foo.py` → `tests/test_foo.py`).
+New behaviour needs a test in `tests/` mirroring the source path (e.g. `bot/trading/foo.py` → `tests/test_foo.py`).
 
 ### Pull requests
 
-Open the PR against `iTermy/MT5-Auto-Execution-Bot:main`. The description should answer:
+Open the PR against `iTermy/MT5-Auto-Execution-Bot:main`. The description should cover what changed, why, and how you tested it — short is fine. If the change touches the sync loop, TP engine, or order placer, call that out so it gets a closer look.
 
-1. **What** changed (one or two sentences).
-2. **Why** — the bug, missing feature, or constraint that drove it.
-3. **How it was tested** — which tests cover it, any manual MT5 smoke-testing you did.
-
-Small, well-scoped PRs get merged fastest. If a change touches the trading loop, the TP engine, or the order placer, flag it explicitly in the PR description so it gets extra review.
+For non-trivial work, give the group a heads-up on the server before you start so two people aren't building the same thing.
 
 ### Issues
 
-Use GitHub Issues for:
-
-- **Bugs** — include MT5 broker, signal type, what you expected, what happened, and relevant lines from `bot.log`.
-- **Feature requests** — describe the problem first, then a proposed solution. Avoid solution-first issues unless the design is trivial.
-- **Questions about behaviour** — fine to ask, but check `ARCHITECTURE.md` and `CLAUDE.md` first.
-
-Don't open a PR for a non-trivial change without an issue or prior discussion — alignment first saves rework.
-
-### Commits
-
-- Imperative mood: `Add foo`, not `Added foo`.
-- One logical change per commit.
-- Body explains the *why* if it's not obvious from the diff.
+Use GitHub Issues for tracking bugs and feature ideas. Bug reports are most useful with: MT5 broker, signal type, what you expected vs. what happened, and the relevant lines from `bot.log`. Quick questions are better off in the group chat than as issues.
 
 ---
 

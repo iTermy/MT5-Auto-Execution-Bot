@@ -29,9 +29,34 @@ cd frontend && npm run format       # prettier
 cd frontend && npx tsc --noEmit     # type-check
 ```
 
-### Production exe
+### Production exe (owner only)
 
-See **CONTRIBUTING.md → Production Build Workflow**. Briefly: fill `_PRODUCTION_DSN` and `_PRODUCTION_LICENSE_URL` in `bot/config/constants.py`, `cd frontend && npm run build`, then `pyinstaller bot.spec`. Output: `dist/MT5Bot.exe`. **Revert the constants before committing.**
+1. Edit `bot/config/constants.py` and set the real values for `_PRODUCTION_DSN` and `_PRODUCTION_LICENSE_URL`.
+2. Build the frontend: `cd frontend && npm install && npm run build && cd ..` — produces `frontend/dist/`.
+3. Build the binary: `pyinstaller bot.spec` — output is `dist/MT5Bot.exe` (single-file Windows executable, frontend bundled).
+4. Revert constants before committing: `git checkout bot/config/constants.py`. **Never commit the filled DSN or license URL.**
+
+### Edge Function deploy (owner only)
+
+```bash
+npm install -g supabase
+supabase login
+supabase link --project-ref <your-project-ref>
+supabase functions deploy validate-license
+```
+
+The Edge Function reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the project environment automatically. `licenses` table schema:
+
+```sql
+CREATE TABLE licenses (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    license_key TEXT NOT NULL UNIQUE,
+    mt5_account BIGINT NOT NULL,
+    active      BOOLEAN NOT NULL DEFAULT true,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
 
 ## Key Constraints (Non-Negotiable)
 

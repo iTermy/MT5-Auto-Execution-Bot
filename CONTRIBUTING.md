@@ -11,11 +11,14 @@
 
 ## Local Development Setup
 
-### 1. Clone and install Python dependencies
+### 1. Fork and clone
+
+Fork the repo on GitHub, then clone your fork:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/<your-username>/MT5-Auto-Execution-Bot
 cd MT5-Auto-Execution-Bot
+git remote add upstream https://github.com/iTermy/MT5-Auto-Execution-Bot
 pip install -r requirements.txt
 ```
 
@@ -25,7 +28,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Then fill in `SUPABASE_DSN` (ask the owner for the contributor DSN). `LICENSE_API_URL` can be left empty — the bot runs in dev-bypass mode and skips license validation when the URL is absent.
+Then fill in `SUPABASE_DSN` (ask the owner). `LICENSE_API_URL` can be left empty — the bot runs in dev-bypass mode and skips license validation when the URL is absent.
 
 ### 3. Create `config.json`
 
@@ -57,110 +60,63 @@ Vite runs on `:5173` and proxies `/api/*` to FastAPI at `:8501`.
 
 ---
 
-## Supabase Contributor Role
+## Contribution Workflow
 
-The contributor role mirrors the production `execution_bot_ro` role: SELECT on the tables the bot reads, plus INSERT on `tp_outcomes` for TP result logging. Run this SQL in the Supabase SQL editor to create it:
+### Branches
 
-```sql
-CREATE ROLE contributor_bot WITH LOGIN PASSWORD 'initial_password';
-GRANT USAGE ON SCHEMA public TO contributor_bot;
-GRANT SELECT ON signals, limits, live_prices, licenses, bot_mode_status, feed_health TO contributor_bot;
-GRANT INSERT ON tp_outcomes TO contributor_bot;
-```
-
-### Monthly password rotation
-
-```sql
-ALTER ROLE contributor_bot WITH PASSWORD 'new_password_here';
-```
-
-Generate the password with `python -c "import secrets; print(secrets.token_urlsafe(24))"` and share the updated `.env` over a private channel (DM, not a PR or public chat). To revoke a contributor's access immediately without rotating everyone, set the password to `NULL`:
-
-```sql
-ALTER ROLE contributor_bot WITH PASSWORD NULL;
-```
-
----
-
-## Production Build Workflow
-
-This workflow is for the owner only. Do **not** commit the filled constants.
-
-### 1. Fill production secrets
-
-Edit `bot/config/constants.py` and set the real values:
-
-```python
-_PRODUCTION_DSN = "postgresql://..."
-_PRODUCTION_LICENSE_URL = "https://xxxxx.supabase.co/functions/v1/validate-license"
-```
-
-### 2. Build the frontend
+Work on a topic branch off `main`:
 
 ```bash
-cd frontend
-npm install
-npm run build
-cd ..
+git checkout -b fix/short-description
 ```
 
-This produces `frontend/dist/`.
+Keep branches focused — one logical change per PR. Rebase on `upstream/main` before opening a PR rather than merging it in.
 
-### 3. Build the executable
+### Before you push
+
+Run the full check locally — CI is not yet wired up, so the PR review is the first place these get caught:
 
 ```bash
-pyinstaller bot.spec
+ruff check bot tests main.py        # lint
+ruff format bot tests main.py       # format
+pytest                              # backend tests
+cd frontend && npx tsc --noEmit && npm run format:check && npm run build
 ```
 
-The output is `dist/MT5Bot.exe` — a single-file Windows executable with the frontend bundled.
+All four must pass. New behaviour needs a test in `tests/` mirroring the source path (e.g. `bot/trading/foo.py` → `tests/test_foo.py`).
 
-### 4. Revert constants before pushing
+### Pull requests
 
-```bash
-git checkout bot/config/constants.py
-```
+Open the PR against `iTermy/MT5-Auto-Execution-Bot:main`. The description should answer:
 
-Never commit the filled DSN or license URL.
+1. **What** changed (one or two sentences).
+2. **Why** — the bug, missing feature, or constraint that drove it.
+3. **How it was tested** — which tests cover it, any manual MT5 smoke-testing you did.
 
----
+Small, well-scoped PRs get merged fastest. If a change touches the trading loop, the TP engine, or the order placer, flag it explicitly in the PR description so it gets extra review.
 
-## Deploying the Edge Function
+### Issues
 
-Install the Supabase CLI and log in:
+Use GitHub Issues for:
 
-```bash
-npm install -g supabase
-supabase login
-supabase link --project-ref <your-project-ref>
-```
+- **Bugs** — include MT5 broker, signal type, what you expected, what happened, and relevant lines from `bot.log`.
+- **Feature requests** — describe the problem first, then a proposed solution. Avoid solution-first issues unless the design is trivial.
+- **Questions about behaviour** — fine to ask, but check `ARCHITECTURE.md` and `CLAUDE.md` first.
 
-Deploy:
+Don't open a PR for a non-trivial change without an issue or prior discussion — alignment first saves rework.
 
-```bash
-supabase functions deploy validate-license
-```
+### Commits
 
-The Edge Function reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the project environment automatically.
-
-### licenses table schema
-
-```sql
-CREATE TABLE licenses (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    license_key TEXT NOT NULL UNIQUE,
-    mt5_account BIGINT NOT NULL,
-    active      BOOLEAN NOT NULL DEFAULT true,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+- Imperative mood: `Add foo`, not `Added foo`.
+- One logical change per commit.
+- Body explains the *why* if it's not obvious from the diff.
 
 ---
 
 ## Key Constraints (Read Before Coding)
 
-- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`) are **read-only** from the bot.
-- All mutable state lives in local SQLite (`orders.db`).
+- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`, `bot_mode_status`, `feed_health`) are **read-only** from the bot. The only Supabase write the bot performs is `INSERT` on `tp_outcomes`.
+- All other mutable state lives in local SQLite (`orders.db`).
 - MT5 calls are synchronous and bound to the engine thread. Never call MT5 from a FastAPI handler.
 - Magic number `20250001` identifies all bot orders in MT5.
-- See `ARCHITECTURE.md` for the full system design and `STATE.md` for all implementation decisions.
+- See `ARCHITECTURE.md` for the full system design and `CLAUDE.md` for code conventions.

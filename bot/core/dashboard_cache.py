@@ -3,8 +3,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from bot.config.constants import AssetClass
 from bot.config.settings import Settings
-from bot.trading.symbol_mapper import map_symbol, needs_offset
+from bot.trading.symbol_mapper import detect_asset_class, map_symbol, needs_offset
 
 logger = logging.getLogger(__name__)
 
@@ -183,9 +184,14 @@ def _build_nearby_signals(
         distance = current_price - closest_price
         placed = any(r["limit_id"] in pending_limit_ids for r in rows)
         ch = first["channel_id"]
+        asset_class = detect_asset_class(db_sym)
+        distance_display = _format_distance(distance, asset_class)
+        price_display = _format_price(closest_price, asset_class)
 
         result.append({
             "signal_id": sig_id,
+            "distance_display": distance_display,
+            "closest_price_display": price_display,
             "symbol": db_sym,
             "mt5_symbol": mt5_sym,
             "direction": first["direction"],
@@ -200,3 +206,28 @@ def _build_nearby_signals(
 
     result.sort(key=lambda x: abs(x["distance"]))
     return result
+
+
+def _format_distance(distance: float, asset_class: AssetClass) -> str:
+    abs_d = abs(distance)
+    if asset_class == AssetClass.FOREX:
+        return f"{abs_d * 10000:.1f} pips"
+    if asset_class == AssetClass.FOREX_JPY:
+        return f"{abs_d * 100:.1f} pips"
+    # metals/indices/stocks/crypto/oil — quoted in dollars per unit price
+    if abs_d >= 100:
+        return f"${abs_d:,.2f}"
+    return f"${abs_d:.2f}"
+
+
+def _format_price(price: float, asset_class: AssetClass) -> str:
+    abs_p = abs(price)
+    if asset_class == AssetClass.FOREX_JPY:
+        return f"{price:.3f}"
+    if asset_class == AssetClass.FOREX:
+        return f"{price:.5f}"
+    if abs_p >= 1000:
+        return f"{price:,.2f}"
+    if abs_p >= 10:
+        return f"{price:.2f}"
+    return f"{price:.4f}"

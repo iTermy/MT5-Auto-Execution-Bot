@@ -32,12 +32,6 @@ function proximityPctFromPrice(closestPrice: number, currentPrice: number): numb
   return Math.max(0, Math.min(100, Math.round(closeness * 100)))
 }
 
-function formatDist(d: number): string {
-  const abs = Math.abs(d)
-  if (abs >= 1) return abs.toFixed(2) + ' pts'
-  return (abs * 10000).toFixed(1) + ' pips'
-}
-
 function directionFromOrderType(dir: string): 'long' | 'short' {
   return dir.includes('buy') || dir.includes('long') ? 'long' : 'short'
 }
@@ -91,9 +85,9 @@ export function DashboardPage({ dashboard, history }: Props) {
       signal_id: s.signal_id,
       sym: s.symbol,
       side: s.direction as 'long' | 'short',
-      limitCount: s.limit_count,
+      closestPrice: s.closest_price_display,
       pct: proximityPctFromPrice(s.closest_price, s.current_price),
-      dist: formatDist(s.distance),
+      dist: s.distance_display,
       channelName: getChannelName(s.channel_id),
       signalType: formatSignalType(s.signal_type),
       placed: s.placed,
@@ -244,7 +238,7 @@ export function DashboardPage({ dashboard, history }: Props) {
                 </div>
                 <ProxMeter pct={g.pct} label={g.dist} />
                 <div className="fill-kv">
-                  <div className="r"><span className="k">Limits</span><span className="val mono">{g.limitCount}</span></div>
+                  <div className="r"><span className="k">Closest</span><span className="val mono">{g.closestPrice}</span></div>
                   <div className="r"><span className="k">Channel</span><span className="val">{g.channelName}</span></div>
                   <div className="r"><span className="k">Type</span><span className="val">{g.signalType}</span></div>
                 </div>

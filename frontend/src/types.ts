@@ -144,8 +144,10 @@ export interface NearbySignalData {
   signal_type: SignalType
   limit_count: number
   closest_price: number
+  closest_price_display: string
   current_price: number
   distance: number
+  distance_display: string
   placed: boolean
 }
 

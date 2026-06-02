@@ -15,11 +15,15 @@ Windows desktop app that reads trading signals from Supabase Postgres and places
 
 ## Quick start
 
+For contributing, read CONTRIBUTING.md
+
 Requirements: **Windows**, **Python 3.13**, **Node.js 20+**, **MetaTrader 5** installed and logged in.
 
 ```bash
-git clone https://github.com/iTermy/MT5-Auto-Execution-Bot
+# Fork the repository first on github, then:
+git clone https://github.com/<your-username>/MT5-Auto-Execution-Bot
 cd MT5-Auto-Execution-Bot
+git remote add upstream https://github.com/iTermy/MT5-Auto-Execution-Bot
 
 # Backend
 pip install -r requirements.txt

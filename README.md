@@ -39,7 +39,6 @@ The bot opens `http://localhost:8501` automatically and lives in the system tray
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — tech stack, concurrency model, core loops, TP engine, schemas, FastAPI endpoints.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — full setup, Supabase contributor role, production `.exe` build, license Edge Function.
-- **[CLAUDE.md](CLAUDE.md)** — code conventions and constraints (also read by Claude Code when used in this repo).
 
 ## Project layout
 

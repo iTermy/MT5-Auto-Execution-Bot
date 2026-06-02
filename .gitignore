@@ -33,3 +33,4 @@ Thumbs.db
 
 # Claude Code workspace state
 .claude/settings.local.json
+CLAUDE.md

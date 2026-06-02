@@ -59,12 +59,13 @@ Vite runs on `:5173` and proxies `/api/*` to FastAPI at `:8501`.
 
 ## Supabase Contributor Role
 
-The contributor role has SELECT-only access to the required tables. Run this SQL in the Supabase SQL editor to create it:
+The contributor role mirrors the production `execution_bot_ro` role: SELECT on the tables the bot reads, plus INSERT on `tp_outcomes` for TP result logging. Run this SQL in the Supabase SQL editor to create it:
 
 ```sql
 CREATE ROLE contributor_bot WITH LOGIN PASSWORD 'initial_password';
 GRANT USAGE ON SCHEMA public TO contributor_bot;
-GRANT SELECT ON signals, limits, live_prices TO contributor_bot;
+GRANT SELECT ON signals, limits, live_prices, licenses, bot_mode_status, feed_health TO contributor_bot;
+GRANT INSERT ON tp_outcomes TO contributor_bot;
 ```
 
 ### Monthly password rotation
@@ -73,7 +74,11 @@ GRANT SELECT ON signals, limits, live_prices TO contributor_bot;
 ALTER ROLE contributor_bot WITH PASSWORD 'new_password_here';
 ```
 
-After rotating, share an updated `.env` with all active contributors.
+Generate the password with `python -c "import secrets; print(secrets.token_urlsafe(24))"` and share the updated `.env` over a private channel (DM, not a PR or public chat). To revoke a contributor's access immediately without rotating everyone, set the password to `NULL`:
+
+```sql
+ALTER ROLE contributor_bot WITH PASSWORD NULL;
+```
 
 ---
 

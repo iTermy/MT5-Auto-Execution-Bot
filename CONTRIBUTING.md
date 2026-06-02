@@ -1,32 +1,27 @@
 # Contributing
 
-This repo is open to read, but active development happens with a small trusted group who have direct access to the Supabase DSN. If that's you, you'll either have push access on the main repo or you'll work from a fork — either is fine.
+This repo is open to read. Active development happens with a small trusted group who have the Supabase DSN. If that's you, you'll work from a fork and open pull requests against this repo. The owner reviews and merges.
 
 ## Prerequisites
 
 - Python 3.13 (Windows only — MetaTrader5 package requires Windows)
 - Node.js 20+
 - MetaTrader5 terminal installed and logged in
-- The contributor Supabase DSN (the owner will have shared this in the group)
+- The contributor Supabase DSN (shared in the group)
 
 ---
 
 ## Local Development Setup
 
-### 1. Clone
+### 1. Fork and clone
 
-If you have push access:
+Fork the repo on GitHub, then clone your fork and wire up `upstream`:
 
 ```bash
-git clone https://github.com/iTermy/MT5-Auto-Execution-Bot
+git clone https://github.com/<your-username>/MT5-Auto-Execution-Bot
 cd MT5-Auto-Execution-Bot
-pip install -r requirements.txt
-```
-
-Otherwise fork on GitHub first, clone your fork, and add `upstream`:
-
-```bash
 git remote add upstream https://github.com/iTermy/MT5-Auto-Execution-Bot
+pip install -r requirements.txt
 ```
 
 ### 2. Create your `.env` file
@@ -35,7 +30,7 @@ git remote add upstream https://github.com/iTermy/MT5-Auto-Execution-Bot
 copy .env.example .env
 ```
 
-Then fill in `SUPABASE_DSN` (ask the owner). `LICENSE_API_URL` can be left empty — the bot runs in dev-bypass mode and skips license validation when the URL is absent.
+Fill in `SUPABASE_DSN` (from the group). `LICENSE_API_URL` can be left empty — the bot runs in dev-bypass mode and skips license validation when the URL is absent.
 
 ### 3. Create `config.json`
 
@@ -69,15 +64,33 @@ Vite runs on `:5173` and proxies `/api/*` to FastAPI at `:8501`.
 
 ## Contribution Workflow
 
+### Stay in sync
+
+Before starting a new branch, pull the latest `main` from upstream into your fork:
+
+```bash
+git fetch upstream
+git checkout main
+git merge --ff-only upstream/main
+git push origin main
+```
+
 ### Branches and commits
 
-Topic branch off `main`, one logical change per branch:
+Topic branch off `main` on your fork, one logical change per branch:
 
 ```bash
 git checkout -b fix/short-description
 ```
 
-If you forked, rebase on `upstream/main` rather than merging it in. Commit messages: imperative mood (`Add foo`, not `Added foo`), with a body that explains the *why* if it isn't obvious from the diff.
+If `upstream/main` moves while you're working, rebase rather than merging it in:
+
+```bash
+git fetch upstream
+git rebase upstream/main
+```
+
+Commit messages: imperative mood (`Add foo`, not `Added foo`), with a body explaining the *why* if it isn't obvious from the diff.
 
 ### Before you push
 
@@ -94,7 +107,13 @@ New behaviour needs a test in `tests/` mirroring the source path (e.g. `bot/trad
 
 ### Pull requests
 
-Open the PR against `iTermy/MT5-Auto-Execution-Bot:main`. The description should cover what changed, why, and how you tested it — short is fine. If the change touches the sync loop, TP engine, or order placer, call that out so it gets a closer look.
+Push your branch to your fork and open the PR against `iTermy/MT5-Auto-Execution-Bot:main`:
+
+```bash
+git push origin fix/short-description
+```
+
+The PR description should cover what changed, why, and how you tested it — short is fine. If the change touches the sync loop, TP engine, or order placer, call that out so it gets a closer look.
 
 For non-trivial work, give the group a heads-up on the server before you start so two people aren't building the same thing.
 

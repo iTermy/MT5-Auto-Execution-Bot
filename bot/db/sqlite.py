@@ -22,7 +22,9 @@ from bot.db.queries import (
     MARK_FILLED,
     PROMOTE_CLAIMED_TO_PENDING,
     SET_TRAILING,
+    SIGNAL_SUMMARY,
     UPDATE_DB_STOP_LOSS,
+    UPDATE_LAST_OFFSET_CHECK,
     UPDATE_SL,
     UPDATE_TICKET,
 )
@@ -271,3 +273,20 @@ class SQLiteDB:
     ) -> None:
         await self._db.execute(UPDATE_DB_STOP_LOSS, (new_db_sl, new_mt5_sl, mt5_ticket))
         await self._db.commit()
+
+    async def update_last_offset_check(self, mt5_ticket: int, checked_at: str) -> None:
+        await self._db.execute(UPDATE_LAST_OFFSET_CHECK, (checked_at, mt5_ticket))
+        await self._db.commit()
+
+    async def get_signal_summary(self, signal_id: int) -> dict[str, int]:
+        async with self._db.execute(SIGNAL_SUMMARY, (signal_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return {"total": 0, "filled": 0, "pending": 0, "cancelled": 0, "closed": 0}
+        return {
+            "total": row["total"] or 0,
+            "filled": row["filled"] or 0,
+            "pending": row["pending"] or 0,
+            "cancelled": row["cancelled"] or 0,
+            "closed": row["closed"] or 0,
+        }

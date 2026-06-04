@@ -7,12 +7,7 @@ import { Donut } from '../charts/Donut'
 import { Bars } from '../charts/Bars'
 import { useSort } from '../hooks/useSort'
 import { money } from '../utils/money'
-import {
-  computeCumulativePnl,
-  computeDailyBars,
-  filterTradesByPeriod,
-  groupBySignalId,
-} from '../utils/stats'
+import { computeCumulativePnl, computeDailyBars, filterTradesByPeriod } from '../utils/stats'
 import type { Period } from '../utils/stats'
 import { getChannelName } from '../utils/channels'
 import { directionFromOrderType } from '../utils/orderType'
@@ -62,8 +57,8 @@ export function DashboardPage({ dashboard, history }: Props) {
         : 'Cumulative P&L · all time'
 
   const wlClosed = useMemo(() => filteredForWL.filter(t => t.status === 'closed'), [filteredForWL])
-  const wins = wlClosed.filter(t => t.realized_pnl > 0).length
-  const losses = wlClosed.filter(t => t.realized_pnl < 0).length
+  const wins = wlClosed.filter(t => t.total_pnl > 0).length
+  const losses = wlClosed.filter(t => t.total_pnl < 0).length
   const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0
 
   // Positions table
@@ -102,25 +97,18 @@ export function DashboardPage({ dashboard, history }: Props) {
 
   const visibleGroups = showAll ? signalGroups : signalGroups.slice(0, 3)
 
-  // Recent Trades: grouped by signal_id, sorted by most recent close
+  // Recent Trades: backend already returns one row per signal_id
   const recentTradeGroups = useMemo(() => {
-    const closed = trades.filter(t => t.status === 'closed')
-    const grouped = groupBySignalId(closed)
-    return [...grouped.values()]
-      .map(group => {
-        const timestamps = group.map(t => t.closed_at || t.filled_at || t.placed_at).filter(Boolean)
-        const closedAt = [...timestamps].sort().reverse()[0] ?? ''
-        const totalPnl = group.reduce((s, t) => s + t.realized_pnl, 0)
-        const sideOrder = group.find(t => t.direction !== 'remainder') ?? group[0]
-        return {
-          signal_id: group[0].signal_id,
-          symbol: group[0].symbol,
-          side: directionFromOrderType(sideOrder.direction),
-          limitCount: group.length,
-          totalPnl,
-          closedAt,
-        }
-      })
+    return trades
+      .filter(t => t.status === 'closed')
+      .map(t => ({
+        signal_id: t.signal_id,
+        symbol: t.symbol,
+        side: directionFromOrderType(t.direction),
+        limitCount: t.fills_count,
+        totalPnl: t.total_pnl,
+        closedAt: t.closed_at || t.filled_at || t.placed_at,
+      }))
       .sort((a, b) => b.closedAt.localeCompare(a.closedAt))
       .slice(0, 5)
   }, [trades])

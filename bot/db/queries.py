@@ -154,14 +154,71 @@ UPDATE_DB_STOP_LOSS = """
 UPDATE order_mappings SET db_stop_loss = ?, last_known_mt5_sl = ? WHERE mt5_ticket = ?
 """
 
+UPDATE_LAST_OFFSET_CHECK = """
+UPDATE order_mappings SET last_offset_check = ? WHERE mt5_ticket = ?
+"""
+
 GET_ORDER_HISTORY = """
-SELECT * FROM order_mappings
+SELECT
+    signal_id,
+    MIN(symbol)        AS symbol,
+    MIN(order_type)    AS direction,
+    SUM(lot_size)      AS total_lots,
+    MIN(placed_at)     AS placed_at,
+    MIN(filled_at)     AS first_filled_at,
+    MAX(cancelled_at)  AS last_closed_at,
+    SUM(COALESCE(realized_pnl, 0)) AS total_pnl,
+    MIN(signal_type)   AS signal_type,
+    MIN(channel_id)    AS channel_id,
+    COUNT(*)           AS fills_count,
+    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_count,
+    SUM(CASE WHEN status IN ('cancelled', 'spread_cancelled') THEN 1 ELSE 0 END) AS cancelled_count
+FROM order_mappings
 WHERE status IN ('closed', 'cancelled', 'spread_cancelled')
   AND placed_at >= ? AND placed_at <= ?
-ORDER BY placed_at DESC
+GROUP BY signal_id
+ORDER BY MAX(cancelled_at) DESC
 """
 
 # Supabase — fetch signal statuses by IDs
 FETCH_SIGNAL_STATUSES = """
 SELECT id, status, closed_reason FROM signals WHERE id = ANY($1)
+"""
+
+# Supabase — append a TP outcome record (write-only)
+INSERT_TP_OUTCOME = """
+INSERT INTO tp_outcomes (
+    signal_id, mt5_account, channel_id, signal_type, asset_class,
+    symbol, direction,
+    total_limits, limits_filled, limits_pending, limits_cancelled,
+    avg_entry_price, tp_trigger_price, stop_loss,
+    threshold_value, threshold_unit,
+    move_at_trigger, realized_pnl, others_pnl, total_volume,
+    partial_close_pct, trailing_started,
+    risk_per_limit, r_multiple, risk_percent_cfg,
+    bot_version, tp_strategy, notes
+)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7,
+    $8, $9, $10, $11,
+    $12, $13, $14,
+    $15, $16,
+    $17, $18, $19, $20,
+    $21, $22,
+    $23, $24, $25,
+    $26, $27, $28
+)
+"""
+
+# SQLite — aggregate counts of a signal's limits (filled / pending / cancelled / closed)
+SIGNAL_SUMMARY = """
+SELECT
+    COUNT(*) AS total,
+    SUM(CASE WHEN status = 'filled' THEN 1 ELSE 0 END) AS filled,
+    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+    SUM(CASE WHEN status IN ('cancelled', 'spread_cancelled') THEN 1 ELSE 0 END) AS cancelled,
+    SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed
+FROM order_mappings
+WHERE signal_id = ? AND order_type != 'remainder'
 """

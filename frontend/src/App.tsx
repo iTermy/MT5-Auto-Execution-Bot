@@ -1,34 +1,29 @@
 import { useState, useEffect } from 'react'
-import { fetchConfig, fetchHistory, startEngine, stopEngine } from './api'
+import { fetchConfig, startEngine, stopEngine } from './api'
 import { useSSE } from './hooks/useSSE'
 import { useDashboard } from './hooks/useDashboard'
+import { useHistory } from './hooks/useHistory'
 import { NavSidebar } from './components/NavSidebar'
 import { TopBar } from './components/TopBar'
 import { LogDrawer } from './components/LogDrawer'
 import { DashboardPage } from './pages/DashboardPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
-import type { Config, HistoryData, Page } from './types'
+import type { Config, Page } from './types'
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [logOpen, setLogOpen] = useState(false)
   const [config, setConfig] = useState<Config | null>(null)
-  const [history, setHistory] = useState<HistoryData | null>(null)
   const { logs, status, connected } = useSSE()
   const dashboard = useDashboard()
+  const history = useHistory(5000)
 
   const engineRunning = status?.trading_active ?? false
 
   useEffect(() => {
     fetchConfig()
       .then(setConfig)
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    fetchHistory()
-      .then(setHistory)
       .catch(() => {})
   }, [])
 

@@ -117,6 +117,7 @@ class Settings(BaseModel):
         "JP225",
     ]
     offset_drift_threshold_pips: float = 5.0
+    offset_drift_check_interval_seconds: int = 1800
     feed_max_staleness_seconds: int = 30
     spread_hour: SpreadHourConfig = SpreadHourConfig()
     proximity: ProximityConfig = ProximityConfig()

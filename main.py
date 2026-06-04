@@ -14,6 +14,7 @@ from bot.config.settings import load_config, load_dsn, load_license_url
 from bot.core.engine import Engine
 from bot.db.sqlite import SQLiteDB
 from bot.db.supabase import SupabaseDB
+from bot.db.tp_outcomes_writer import TPOutcomesWriter
 from bot.license.validator import LicenseValidator
 from bot.mt5.client import MT5Client
 from bot.mt5.connection import MT5Connection
@@ -66,7 +67,8 @@ def main() -> None:
     mt5_client = MT5Client(conn)
     supabase = SupabaseDB(dsn)
     sqlite = SQLiteDB()
-    tp_engine = TPEngine()
+    tp_outcomes_writer = TPOutcomesWriter(supabase)
+    tp_engine = TPEngine(outcomes_writer=tp_outcomes_writer)
     license_validator = LicenseValidator(license_url)
 
     engine = Engine(

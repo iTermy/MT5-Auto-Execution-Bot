@@ -18,7 +18,12 @@ from bot.trading.lot_calculator import LotCalculator
 from bot.trading.offset_calculator import OffsetCalculator
 from bot.trading.order_canceller import OrderCanceller
 from bot.trading.order_placer import OrderPlacer
-from bot.trading.symbol_mapper import detect_asset_class, map_symbol, needs_offset
+from bot.trading.symbol_mapper import (
+    db_symbol_from_mt5,
+    detect_asset_class,
+    map_symbol,
+    needs_offset,
+)
 from bot.utils.time_utils import MarketScheduler
 
 logger = logging.getLogger(__name__)
@@ -177,19 +182,34 @@ class SyncCycle:
             supabase_limit_ids = set(supabase_by_limit)
             sqlite_limit_ids = {r["limit_id"] for r in sqlite_active}
 
-            # Spread hour gate: cancel all pending orders and skip placement
+            # Crypto is exempt from spread-hour and news-mode gates: these are
+            # forex/index liquidity events that don't apply to 24/7 crypto markets.
+            def _row_is_crypto(row) -> bool:
+                lid = row["limit_id"]
+                if lid in supabase_by_limit:
+                    instr = supabase_by_limit[lid]["instrument"]
+                else:
+                    instr = db_symbol_from_mt5(row["symbol"] or "", config)
+                return detect_asset_class(instr) == AssetClass.CRYPTO
+
+            non_crypto_blocked = False
+
+            # Spread hour gate: cancel non-crypto pending orders and block non-crypto placement
             if placement_active and scheduler.should_cancel_pending():
                 for row in sqlite_pending:
+                    if _row_is_crypto(row):
+                        continue
                     ok = await self._canceller.cancel_order(
                         row["mt5_ticket"], mt5_client, sqlite, spread=True
                     )
                     result.cancelled += ok
                     result.errors += not ok
-                placement_active = False
-                logger.info("Placement blocked: reason=spread_hour")
+                non_crypto_blocked = True
+                logger.info("Placement blocked: reason=spread_hour (non-crypto only)")
 
-            # News mode gate: same behavior as spread hour
-            if placement_active:
+            # News mode gate: same behavior as spread hour, also crypto-exempt.
+            # Skip if the spread-hour gate already fired (don't double-cancel).
+            if placement_active and not non_crypto_blocked:
                 news_mode_active = False
                 try:
                     news_mode_active = await supabase.fetch_news_mode()
@@ -197,13 +217,23 @@ class SyncCycle:
                     logger.error("Failed to fetch news_mode", exc_info=True)
                 if news_mode_active:
                     for row in sqlite_pending:
+                        if _row_is_crypto(row):
+                            continue
                         ok = await self._canceller.cancel_order(
                             row["mt5_ticket"], mt5_client, sqlite, spread=True
                         )
                         result.cancelled += ok
                         result.errors += not ok
-                    placement_active = False
-                    logger.info("Placement blocked: reason=news_mode")
+                    non_crypto_blocked = True
+                    logger.info("Placement blocked: reason=news_mode (non-crypto only)")
+
+            # When a gate fired, the non-crypto rows in sqlite_pending have been cancelled
+            # but the snapshot was captured pre-gate. Filter them out so downstream loops
+            # (stale-pending, SL change, offset drift) only consider crypto rows.
+            # sqlite_limit_ids is intentionally NOT refreshed: the cancelled limits should
+            # still be treated as 'known' (not as new placement candidates).
+            if non_crypto_blocked:
+                sqlite_pending = [r for r in sqlite_pending if _row_is_crypto(r)]
 
             # Always fetch live_prices for every offset symbol in the active signal
             # set — used for placement, drift checks, SL sync, and the dashboard's
@@ -464,6 +494,8 @@ class SyncCycle:
                             continue
 
                         db_sym = row["instrument"]
+                        if non_crypto_blocked and detect_asset_class(db_sym) != AssetClass.CRYPTO:
+                            continue
                         mt5_sym = map_symbol(db_sym, config)
                         lot = signal_lots[sig_id]
 
@@ -501,12 +533,24 @@ class SyncCycle:
                         result.placed += ok
                         result.errors += not ok
 
-                # Offset drift check: cancel drifted pending orders so they re-place next cycle
+                # Offset drift check: cancel drifted pending orders so they re-place next cycle.
+                # Throttled per-order via last_offset_check to prevent feed-mid jitter from
+                # churning orders every sync cycle.
+                now_drift = datetime.now(UTC)
+                drift_interval = config.offset_drift_check_interval_seconds
                 for row in sqlite_pending:
                     if row["offset_at_placement"] is None:
                         continue
                     if row["limit_id"] not in supabase_by_limit:
                         continue
+                    last_check = row["last_offset_check"]
+                    if last_check:
+                        try:
+                            prev = datetime.fromisoformat(last_check)
+                            if (now_drift - prev).total_seconds() < drift_interval:
+                                continue
+                        except ValueError:
+                            pass
                     instrument = supabase_by_limit[row["limit_id"]]["instrument"]
                     mt5_symbol = map_symbol(instrument, config)
                     live_row = live_prices.get(instrument)
@@ -520,6 +564,7 @@ class SyncCycle:
                     sym = mt5_client.symbol_info(mt5_symbol)
                     if sym is None:
                         continue
+                    await sqlite.update_last_offset_check(row["mt5_ticket"], now_drift.isoformat())
                     pip_sz = sym.point * (10 if sym.digits in (3, 5) else 1)
                     threshold = config.offset_drift_threshold_pips * pip_sz
                     if self._offset_calc.check_drift(
@@ -592,7 +637,9 @@ class SyncCycle:
             await self._sync_filled_sls(
                 sqlite, mt5_client, mt5_positions, supabase_by_signal, config, live_prices
             )
-            await self._check_forced_exits(supabase, sqlite, mt5_client, mt5_positions)
+            await self._check_forced_exits(
+                supabase, sqlite, mt5_client, mt5_positions, scheduler, config
+            )
 
             # Snapshot for the dashboard's "Closest Signals" view. Re-query pending
             # so newly-placed orders from this cycle appear as placed=True.
@@ -710,6 +757,8 @@ class SyncCycle:
         sqlite: SQLiteDB,
         mt5_client: MT5Client,
         mt5_positions: list,
+        scheduler: MarketScheduler,
+        config: Settings,
     ) -> None:
         filled_sids = await sqlite.get_filled_signal_ids()
         if not filled_sids:
@@ -743,15 +792,47 @@ class SyncCycle:
             if previous == current:
                 continue
 
+            signal_rows = [r for r in all_filled_rows if r["signal_id"] == signal_id]
+
+            # Cancelled status: only force-close if the cancellation is happening within
+            # the forex weekend window (Fri >=16:45 EST through Sun <18:00 EST), because
+            # weekday cancellations on a hit signal are expected (TM extends expiry to the
+            # next day) and positions should stay open. Crypto stays tradable through the
+            # weekend, but a 'cancelled' TM status is the only directive we have for it,
+            # so crypto positions always close on cancellation regardless of day/time.
+            # 'breakeven' status closes unconditionally (unchanged behavior).
+            gate_reason = current
+            if current == "cancelled":
+                is_weekend = scheduler.is_weekend_window()
+                if not is_weekend:
+                    crypto_rows = [
+                        r
+                        for r in signal_rows
+                        if detect_asset_class(db_symbol_from_mt5(r["symbol"] or "", config))
+                        == AssetClass.CRYPTO
+                    ]
+                    if not crypto_rows:
+                        self._last_signal_status[signal_id] = current
+                        self._last_force_exit_status.pop(signal_id, None)
+                        logger.info(
+                            "Signal %d cancelled on weekday — keeping non-crypto positions open",
+                            signal_id,
+                        )
+                        continue
+                    signal_rows = crypto_rows
+                    gate_reason = "cancelled_crypto"
+                else:
+                    gate_reason = "cancelled_weekend"
+
             logger.warning(
-                "Forced exit: signal %d status %r -> %r closed_reason=%r — closing all positions",
+                "Forced exit: signal %d status %r -> %r closed_reason=%r reason=%s — closing %d position(s)",
                 signal_id,
                 previous,
                 current,
                 closed_reason,
+                gate_reason,
+                len(signal_rows),
             )
-
-            signal_rows = [r for r in all_filled_rows if r["signal_id"] == signal_id]
 
             # Clear per-ticket fail counts on a new or resumed force-exit trigger
             if self._last_force_exit_status.get(signal_id) != current:

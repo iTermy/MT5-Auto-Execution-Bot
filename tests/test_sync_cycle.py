@@ -17,11 +17,13 @@ def _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD") -> dict:
     }
 
 
-def _mock_supabase(signals=None, live_prices=None):
+def _mock_supabase(signals=None, live_prices=None, news_mode=False):
     sb = AsyncMock()
     sb.fetch_active_signals.return_value = signals or []
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
+    sb.fetch_news_mode.return_value = news_mode
+    sb.fetch_feed_health.return_value = {}
     return sb
 
 
@@ -172,3 +174,100 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
 
     rows = await sqlite_db.get_pending_orders()
     assert len(rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# Crypto exemption from spread-hour and news-mode gates
+# ---------------------------------------------------------------------------
+
+
+async def test_spread_hour_skips_crypto_cancellation(sqlite_db, mock_mt5, sample_config) -> None:
+    # Two pendings: one BTCUSDT (crypto) and one EURUSD. Spread hour fires.
+    # Only the EURUSD order should be cancelled; BTCUSDT survives.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=4001,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=2,
+        mt5_ticket=4002,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=60000.0,
+        signal_type="standard",
+        symbol="BTCUSD",  # MT5 symbol; maps from BTCUSDT
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=4001)
+
+    eur_row = _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD")
+    btc_row = _make_supabase_row(limit_id=2, signal_id=2, instrument="BTCUSDT")
+    btc_row["stop_loss"] = 60000.0  # match SQLite to avoid the SL-change cancel path
+    supabase = _mock_supabase(signals=[eur_row, btc_row])
+    scheduler = _mock_scheduler(cancel_pending=True)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(4001)
+    pending = await sqlite_db.get_pending_orders()
+    assert {r["mt5_ticket"] for r in pending} == {4002}
+
+
+# ---------------------------------------------------------------------------
+# Offset drift interval throttle: skip re-evaluation within 30 min window
+# ---------------------------------------------------------------------------
+
+
+async def test_drift_check_skipped_within_interval(sqlite_db, mock_mt5, sample_config) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    await sqlite_db.insert_order(
+        limit_id=10,
+        signal_id=1,
+        mt5_ticket=5001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+        feed_price=4500.0,
+        mt5_price=4510.0,
+        offset=10.0,
+    )
+    # Mark a recent offset check (5 minutes ago), within the default 30-min throttle
+    recent = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    await sqlite_db.update_last_offset_check(5001, recent)
+
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=5001)
+    mock_mt5.symbol_info.return_value = make_symbol_info(name="US500", digits=1, point=0.1)
+
+    row = _make_supabase_row(limit_id=10, instrument="SPX500USD")
+    row["stop_loss"] = 4000.0
+    row["price_level"] = 4510.0
+    supabase = _mock_supabase(
+        signals=[row],
+        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+    )
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    # Even with large drift configured, the throttle should prevent cancellation
+    cycle._offset_calc.get_offset = MagicMock(return_value=90.0)
+    cycle._offset_calc.check_drift = MagicMock(return_value=True)
+
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    cycle._offset_calc.get_offset.assert_not_called()
+    rows = await sqlite_db.get_pending_orders()
+    assert len(rows) == 1

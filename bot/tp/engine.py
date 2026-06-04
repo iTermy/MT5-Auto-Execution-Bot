@@ -4,22 +4,41 @@ from datetime import UTC, datetime
 
 import MetaTrader5 as mt5
 
-from bot.config.constants import AssetClass
+from bot.config.constants import BOT_VERSION, AssetClass
 from bot.config.settings import Settings
 from bot.db.sqlite import SQLiteDB
+from bot.db.tp_outcomes_writer import TPOutcomesWriter
 from bot.mt5.client import MT5Client
 from bot.mt5.types import PositionInfo
 from bot.tp.asset_config import get_config
 from bot.tp.default_strategy import DefaultTPStrategy
-from bot.tp.strategy import TPStrategy
+from bot.tp.outcome import TPOutcome
+from bot.tp.strategy import TPResult, TPStrategy
 from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class
 
 logger = logging.getLogger(__name__)
 
 
+def _resolve_risk_percent(config: Settings, mt5_symbol: str) -> float | None:
+    rp = config.lot_sizing.risk_percent
+    if isinstance(rp, (int, float)):
+        return float(rp)
+    if isinstance(rp, dict):
+        if mt5_symbol in rp:
+            return float(rp[mt5_symbol])
+        if "default" in rp:
+            return float(rp["default"])
+    return None
+
+
 class TPEngine:
-    def __init__(self, strategy: TPStrategy | None = None) -> None:
+    def __init__(
+        self,
+        strategy: TPStrategy | None = None,
+        outcomes_writer: TPOutcomesWriter | None = None,
+    ) -> None:
         self._strategy: TPStrategy = strategy or DefaultTPStrategy()
+        self._outcomes_writer = outcomes_writer
 
     async def run_cycle(
         self,
@@ -42,9 +61,17 @@ class TPEngine:
                     continue
             by_signal[row["signal_id"]].append(row)
 
+        mt5_account_login: int | None = None
+        if by_signal and self._outcomes_writer is not None:
+            acct = mt5_client.account_info()
+            if acct is not None:
+                mt5_account_login = acct.login
+
         for signal_id, rows in by_signal.items():
             try:
-                await self._process_group(signal_id, rows, mt5_pos_map, mt5_client, sqlite, config)
+                await self._process_group(
+                    signal_id, rows, mt5_pos_map, mt5_client, sqlite, config, mt5_account_login
+                )
             except Exception:
                 logger.error("TPEngine: unhandled error signal=%d", signal_id, exc_info=True)
 
@@ -56,6 +83,7 @@ class TPEngine:
         mt5_client: MT5Client,
         sqlite: SQLiteDB,
         config: Settings,
+        mt5_account_login: int | None = None,
     ) -> None:
         trailing_rows = [r for r in rows if r["is_trailing"]]
         non_trailing_rows = [r for r in rows if not r["is_trailing"]]
@@ -87,6 +115,79 @@ class TPEngine:
                     logger.error("TPEngine execute signal=%d: %s", signal_id, err)
                 if result.closed_tickets or result.trailed_tickets:
                     await self._cancel_pending_for_signal(signal_id, mt5_client, sqlite)
+                if self._outcomes_writer is not None and result.snapshot is not None:
+                    await self._record_outcome(
+                        signal_id,
+                        rows,
+                        non_trailing_rows,
+                        first_pos,
+                        db_sym,
+                        asset_class,
+                        signal_type,
+                        asset_cfg,
+                        result,
+                        sqlite,
+                        config,
+                        mt5_account_login,
+                    )
+
+    async def _record_outcome(
+        self,
+        signal_id: int,
+        all_rows: list,
+        non_trailing_rows: list,
+        first_pos: PositionInfo,
+        db_sym: str,
+        asset_class: AssetClass,
+        signal_type: str,
+        asset_cfg,
+        result: TPResult,
+        sqlite: SQLiteDB,
+        config: Settings,
+        mt5_account_login: int | None,
+    ) -> None:
+        snapshot = result.snapshot
+        if snapshot is None:
+            return
+        try:
+            summary = await sqlite.get_signal_summary(signal_id)
+            row0 = all_rows[0]
+            stop_loss = row0["db_stop_loss"]
+            direction = "long" if first_pos.type == 0 else "short"
+            risk_per_limit = (
+                abs(snapshot.avg_entry_price - float(stop_loss)) if stop_loss is not None else None
+            )
+            outcome = TPOutcome(
+                signal_id=signal_id,
+                mt5_account=mt5_account_login or 0,
+                channel_id=row0["channel_id"],
+                signal_type=signal_type,
+                asset_class=asset_class.value,
+                symbol=first_pos.symbol,
+                direction=direction,
+                total_limits=summary["total"],
+                limits_filled=summary["filled"] + summary["closed"],
+                limits_pending=summary["pending"],
+                limits_cancelled=summary["cancelled"],
+                avg_entry_price=snapshot.avg_entry_price,
+                tp_trigger_price=snapshot.tp_trigger_price,
+                stop_loss=float(stop_loss) if stop_loss is not None else None,
+                threshold_value=float(asset_cfg.profit_threshold),
+                threshold_unit=asset_cfg.threshold_unit,
+                move_at_trigger=snapshot.move_at_trigger,
+                realized_pnl=snapshot.realized_pnl,
+                others_pnl=snapshot.others_pnl,
+                total_volume=snapshot.total_volume,
+                partial_close_pct=int(snapshot.partial_close_pct),
+                trailing_started=snapshot.trailing_started,
+                risk_per_limit=risk_per_limit,
+                risk_percent_cfg=_resolve_risk_percent(config, first_pos.symbol),
+                bot_version=BOT_VERSION,
+                notes={"non_trailing_count": len(non_trailing_rows)},
+            )
+            await self._outcomes_writer.record(outcome)
+        except Exception:
+            logger.error("TP outcome assembly failed signal=%d", signal_id, exc_info=True)
 
     async def _cancel_pending_for_signal(
         self, signal_id: int, mt5_client: MT5Client, sqlite: SQLiteDB

@@ -20,19 +20,19 @@ export interface DetailedStats {
 
 export function computeDetailedStats(trades: TradeData[]): DetailedStats {
   const closed = trades.filter(t => t.status === 'closed')
-  const wins = closed.filter(t => t.realized_pnl > 0)
-  const losses = closed.filter(t => t.realized_pnl < 0)
+  const wins = closed.filter(t => t.total_pnl > 0)
+  const losses = closed.filter(t => t.total_pnl < 0)
 
-  const grossWin = wins.reduce((s, t) => s + t.realized_pnl, 0)
-  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.realized_pnl, 0))
-  const netPnl = closed.reduce((s, t) => s + t.realized_pnl, 0)
+  const grossWin = wins.reduce((s, t) => s + t.total_pnl, 0)
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.total_pnl, 0))
+  const netPnl = closed.reduce((s, t) => s + t.total_pnl, 0)
 
   const best = closed.reduce(
-    (b, t) => (t.realized_pnl > b.pnl ? { pnl: t.realized_pnl, symbol: t.symbol } : b),
+    (b, t) => (t.total_pnl > b.pnl ? { pnl: t.total_pnl, symbol: t.symbol } : b),
     { pnl: -Infinity, symbol: '' }
   )
   const worst = closed.reduce(
-    (w, t) => (t.realized_pnl < w.pnl ? { pnl: t.realized_pnl, symbol: t.symbol } : w),
+    (w, t) => (t.total_pnl < w.pnl ? { pnl: t.total_pnl, symbol: t.symbol } : w),
     { pnl: Infinity, symbol: '' }
   )
 
@@ -41,10 +41,10 @@ export function computeDetailedStats(trades: TradeData[]): DetailedStats {
     curWin = 0,
     curLoss = 0
   for (const t of closed) {
-    if (t.realized_pnl > 0) {
+    if (t.total_pnl > 0) {
       curWin++
       curLoss = 0
-    } else if (t.realized_pnl < 0) {
+    } else if (t.total_pnl < 0) {
       curLoss++
       curWin = 0
     }
@@ -99,7 +99,7 @@ export function computeDailyBars(trades: TradeData[]): DailyBar[] {
     const ts = t.closed_at || t.filled_at || t.placed_at
     if (!ts) continue
     const day = ts.slice(0, 10)
-    byDay.set(day, (byDay.get(day) ?? 0) + t.realized_pnl)
+    byDay.set(day, (byDay.get(day) ?? 0) + t.total_pnl)
   }
   const sorted = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b))
   return sorted.slice(-14).map(([date, value]) => {
@@ -129,7 +129,7 @@ export function computeCumulativePnl(trades: TradeData[]): CurvePoint[] {
   const points: CurvePoint[] = [{ label: 'Start', value: 0 }]
   let cum = 0
   for (const t of closed) {
-    cum += t.realized_pnl
+    cum += t.total_pnl
     const ts = t.closed_at || t.filled_at || t.placed_at
     const d = new Date(ts)
     const label = d.toLocaleDateString('en', { month: 'short', day: 'numeric' })

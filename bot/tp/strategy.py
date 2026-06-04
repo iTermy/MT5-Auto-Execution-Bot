@@ -5,6 +5,7 @@ from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
 from bot.mt5.types import PositionInfo
 from bot.tp.asset_config import AssetClassConfig
+from bot.tp.outcome import TriggerSnapshot
 
 
 @dataclass
@@ -12,6 +13,7 @@ class TPResult:
     closed_tickets: list[int] = field(default_factory=list)
     trailed_tickets: list[int] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    snapshot: TriggerSnapshot | None = None
 
 
 class TPStrategy(Protocol):

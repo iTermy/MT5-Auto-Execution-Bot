@@ -167,17 +167,18 @@ export interface DashboardData {
 }
 
 export interface TradeData {
-  id: number
   signal_id: number
   symbol: string
   direction: string
-  lot_size: number
+  total_lots: number
   placed_at: string
   filled_at: string
   closed_at: string
   status: string
   signal_type: SignalType
-  realized_pnl: number
+  total_pnl: number
+  fills_count: number
+  cancelled_count: number
   channel_id: string | null
 }
 

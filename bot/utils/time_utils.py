@@ -59,3 +59,22 @@ class MarketScheduler:
 
     def should_block_placement(self, now: datetime | None = None) -> bool:
         return self.is_spread_hour(now)
+
+    def is_weekend_window(self, now: datetime | None = None) -> bool:
+        """Forex weekend window: Friday >=16:45 EST through Sunday <18:00 EST.
+
+        Independent of is_spread_hour because the spread-hour daily window
+        (e.g. Mon-Thu 16:45-18:00) is not a 'weekend' for signal-expiry purposes.
+        """
+        now_local = (now or datetime.now(UTC)).astimezone(self._tz)
+        t = now_local.time()
+        day = now_local.weekday()
+        fri_cutoff = time(16, 45)
+        sun_open = time(18, 0)
+        if day == 4 and t >= fri_cutoff:
+            return True
+        if day == 5:
+            return True
+        if day == 6 and t < sun_open:
+            return True
+        return False

@@ -60,15 +60,18 @@ CREATE TABLE licenses (
 
 ## Key Constraints (Non-Negotiable)
 
-- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`) are **read-only** from the bot.
-- All mutable state lives in local SQLite (`orders.db`).
+- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`) are **read-only** from the bot. `tp_outcomes` is write-only (append-only analytics log; INSERT granted to `execution_bot_ro`/`contribution_bot_ro` via DDL run in the Supabase SQL editor).
+- All mutable transactional state lives in local SQLite (`orders.db`).
 - No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments.
 - All MT5 orders use magic number `20250001`.
 - `signal_type` (`standard`, `scalp`, `swing`, `toll`, `pa`, `1-1`) is captured at placement time from Supabase `signals.type` and stored in SQLite; never re-read from Supabase.
 - Idempotent sync — running a cycle twice must have no additional effect.
-- TP engine must never crash the main loop — log errors and continue.
+- TP engine must never crash the main loop — log errors and continue. TP outcome writes are also non-fatal (Supabase failure is logged, sync continues).
 - Spread adjustment applied to every order placement (see ARCHITECTURE.md).
 - `lot_sizing.risk_percent` and `lot_sizing.fixed_lot` accept either a flat `float` or a per-instrument dict (`{"XAUUSD": 0.3, "default": 1.0}`). Resolution order: exact MT5 symbol → `"default"` key → `1.0`.
+- **Crypto symbols (BTCUSDT, ETHUSDT, anything `detect_asset_class()` classifies as `CRYPTO`) are exempt from spread-hour and news-mode gates** — they keep placing and stay live through those windows because the 24/7 crypto market doesn't have the same liquidity events.
+- **Weekend force-close window**: when a signal's status flips to `cancelled`, the bot only force-closes filled positions if `MarketScheduler.is_weekend_window()` is True (Fri ≥16:45 EST through Sun <18:00 EST) **or** the position is on BTCUSD/crypto. Weekday cancellations on signals with fills are expected (Supabase extends expiry) so positions stay open. `breakeven` status closes unconditionally.
+- **Offset-drift throttle**: drift checks are gated per-order by `last_offset_check` and `config.offset_drift_check_interval_seconds` (default 1800s = 30 min). Prevents feed-mid jitter from churning the same order every sync cycle.
 
 ## Concurrency (Critical)
 

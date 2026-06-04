@@ -7,6 +7,7 @@ from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
 from bot.mt5.types import PositionInfo
 from bot.tp.asset_config import AssetClassConfig
+from bot.tp.outcome import TriggerSnapshot
 from bot.tp.strategy import TPResult
 from bot.tp.trailing import TrailingStopManager
 
@@ -87,6 +88,31 @@ class DefaultTPStrategy:
         sorted_pos = sorted(positions, key=lambda p: p.ticket)
         newest = sorted_pos[-1]
         earlier = sorted_pos[:-1]
+
+        # Capture pre-close state for the TPOutcome snapshot. realized_pnl below is
+        # the cumulative profit across positions about to be closed (matches what
+        # gets logged per mark_closed); we use it for analytics, not for execution.
+        tick_pre = mt5_client.symbol_info_tick(newest.symbol)
+        tp_trigger_price = 0.0
+        move_at_trigger = 0.0
+        if tick_pre is not None:
+            tp_trigger_price = tick_pre.bid if newest.type == 0 else tick_pre.ask
+            move = _price_movement(newest, tick_pre.bid, tick_pre.ask)
+            if asset_config.threshold_unit == "pips":
+                sym_pre = mt5_client.symbol_info(newest.symbol)
+                if sym_pre is not None:
+                    pip_sz_pre = _pip_size(sym_pre.point, sym_pre.digits)
+                    if pip_sz_pre > 0:
+                        move = move / pip_sz_pre
+            move_at_trigger = move
+        others_pnl_pre = sum(p.profit for p in earlier) if earlier else 0.0
+        all_pos = earlier + [newest]
+        total_volume = sum(p.volume for p in all_pos)
+        avg_entry = (
+            sum(p.price_open * p.volume for p in all_pos) / total_volume
+            if total_volume > 0
+            else newest.price_open
+        )
 
         for pos in earlier:
             res = mt5_client.close_position(
@@ -189,6 +215,19 @@ class DefaultTPStrategy:
                     result.errors.append(msg)
                     logger.error("TP: %s signal=%d", msg, signal_id)
 
+        realized_pnl_total = sum(
+            p.profit for p in all_pos if p.ticket in set(result.closed_tickets)
+        )
+        result.snapshot = TriggerSnapshot(
+            tp_trigger_price=tp_trigger_price,
+            move_at_trigger=move_at_trigger,
+            realized_pnl=realized_pnl_total,
+            others_pnl=others_pnl_pre,
+            total_volume=total_volume,
+            avg_entry_price=avg_entry,
+            partial_close_pct=pct,
+            trailing_started=newest.ticket in result.trailed_tickets,
+        )
         return result
 
     async def update_trailing(

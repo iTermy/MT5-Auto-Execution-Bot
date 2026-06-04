@@ -90,29 +90,36 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
     losses = 0
 
     for row in rows:
-        pnl = row["realized_pnl"] or 0.0
+        signal_id = row["signal_id"]
+        signal_pnl = row["total_pnl"] or 0.0
+        closed_count = row["closed_count"] or 0
+        cancelled_count = row["cancelled_count"] or 0
         ch = row["channel_id"]
+        # Signal status: "closed" if any limit was filled-then-closed; otherwise
+        # "cancelled" (the whole signal was rejected/expired before any fill).
+        status = "closed" if closed_count > 0 else "cancelled"
         trades.append(
             {
-                "id": row["id"],
-                "signal_id": row["signal_id"],
+                "signal_id": signal_id,
                 "symbol": row["symbol"] or "",
-                "direction": row["order_type"],
-                "lot_size": row["lot_size"],
+                "direction": row["direction"],
+                "total_lots": row["total_lots"] or 0.0,
                 "placed_at": row["placed_at"],
-                "filled_at": row["filled_at"] or "",
-                "closed_at": row["cancelled_at"] or "",
-                "status": row["status"],
+                "filled_at": row["first_filled_at"] or "",
+                "closed_at": row["last_closed_at"] or "",
+                "status": status,
                 "signal_type": row["signal_type"],
-                "realized_pnl": pnl,
+                "total_pnl": signal_pnl,
+                "fills_count": closed_count,
+                "cancelled_count": cancelled_count,
                 "channel_id": str(ch) if ch is not None else None,
             }
         )
-        if row["status"] == "closed" and pnl != 0:
-            total_pnl += pnl
-            if pnl > 0:
+        if status == "closed":
+            total_pnl += signal_pnl
+            if signal_pnl > 0:
                 wins += 1
-            else:
+            elif signal_pnl < 0:
                 losses += 1
 
     total_trades = wins + losses

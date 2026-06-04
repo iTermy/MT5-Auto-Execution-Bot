@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { fetchHistory } from '../api'
 import { Seg } from '../components/Seg'
 import { money } from '../utils/money'
-import { computeDetailedStats, formatHoldTime, groupBySignalId } from '../utils/stats'
+import { computeDetailedStats, formatHoldTime } from '../utils/stats'
 import { directionFromOrderType } from '../utils/orderType'
 import { badgeClassFor, formatSignalType } from '../utils/signalType'
 import type { HistoryData, SignalType, TradeData } from '../types'
@@ -40,33 +40,19 @@ interface SignalGroup {
   signalType: SignalType
 }
 
-function buildGroups(trades: TradeData[]): SignalGroup[] {
-  const grouped = groupBySignalId(trades)
-  return [...grouped.values()].map(group => {
-    const timestamps = group.map(t => t.closed_at || t.filled_at || t.placed_at).filter(Boolean)
-    const closedAt = [...timestamps].sort().reverse()[0] ?? ''
-    const totalPnl = group.reduce((s, t) => s + t.realized_pnl, 0)
-    const totalLots = group.reduce((s, t) => s + (t.lot_size ?? 0), 0)
-    const sideOrder = group.find(t => t.direction !== 'remainder') ?? group[0]
-    const status = group.some(t => t.status === 'closed')
-      ? 'closed'
-      : group.every(t => t.status === 'cancelled')
-        ? 'cancelled'
-        : group[0].status
-    const channelId = group[0].channel_id
-    return {
-      signalId: group[0].signal_id,
-      symbol: group[0].symbol,
-      direction: directionFromOrderType(sideOrder.direction),
-      totalLots,
-      totalPnl,
-      tradeCount: group.length,
-      closedAt,
-      status,
-      channelId,
-      signalType: (group[0].signal_type ?? 'standard') as SignalType,
-    }
-  })
+function tradeToGroup(t: TradeData): SignalGroup {
+  return {
+    signalId: t.signal_id,
+    symbol: t.symbol,
+    direction: directionFromOrderType(t.direction),
+    totalLots: t.total_lots,
+    totalPnl: t.total_pnl,
+    tradeCount: t.fills_count + t.cancelled_count,
+    closedAt: t.closed_at || t.filled_at || t.placed_at,
+    status: t.status,
+    channelId: t.channel_id,
+    signalType: (t.signal_type ?? 'standard') as SignalType,
+  }
 }
 
 type SortKey = 'newest' | 'oldest' | 'pnl_high' | 'pnl_low' | 'symbol'
@@ -106,7 +92,7 @@ export function HistoryPage() {
 
   const trades: TradeData[] = data?.trades ?? []
 
-  const allGroups = useMemo(() => buildGroups(trades), [trades])
+  const allGroups = useMemo(() => trades.map(tradeToGroup), [trades])
 
   const uniqueSymbols = useMemo(() => {
     const syms = [...new Set(allGroups.map(g => g.symbol).filter(Boolean))]

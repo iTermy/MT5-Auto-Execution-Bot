@@ -3,6 +3,7 @@ export interface StatusData {
   trading_active: boolean
   license_valid: boolean
   mt5_connected: boolean
+  mt5_error?: string | null
   supabase_connected: boolean
   pending_count: number
   open_count: number

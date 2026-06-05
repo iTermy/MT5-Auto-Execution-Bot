@@ -9,6 +9,7 @@ class MT5Connection:
     def __init__(self, terminal_path: str = "") -> None:
         self._terminal_path = terminal_path
         self._initialized = False
+        self.last_error: str | None = None
 
     def set_terminal_path(self, path: str) -> None:
         self._terminal_path = path
@@ -22,9 +23,14 @@ class MT5Connection:
         if self._terminal_path:
             kwargs["path"] = self._terminal_path
         if not mt5.initialize(**kwargs):
-            logger.error("MT5 initialize failed: %s", mt5.last_error())
+            err = mt5.last_error()
+            self.last_error = (
+                f"{err[0]}: {err[1]}" if isinstance(err, tuple) and len(err) >= 2 else str(err)
+            )
+            logger.error("MT5 initialize failed: %s", err)
             self._initialized = False
             return False
+        self.last_error = None
         info = mt5.account_info()
         logger.info("MT5 initialized: account %s", info.login if info else "unknown")
         self._initialized = True

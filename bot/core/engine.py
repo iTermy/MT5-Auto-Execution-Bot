@@ -115,9 +115,7 @@ class Engine:
             # fetched without an active license.
             await self._wait_for_license_config()
 
-            self._mt5_conn.set_terminal_path(self._config.mt5_terminal_path)
-            if not self._mt5_conn.initialize():
-                logger.critical("MT5 initialization failed — engine cannot start")
+            if not await self._wait_for_mt5_init():
                 return
 
             try:
@@ -171,6 +169,32 @@ class Engine:
                 self._mt5_conn.shutdown()
             except Exception:
                 pass
+
+    async def _wait_for_mt5_init(self) -> bool:
+        """Initialize MT5 with retry. On failure (e.g. wrong terminal path),
+        keep retrying while reloading config so the user can fix the path via
+        Settings without restarting the bot. Returns True once initialized,
+        False if the engine is shut down before MT5 comes up."""
+        logged_failure = False
+        while self._running:
+            self._mt5_conn.set_terminal_path(self._config.mt5_terminal_path)
+            if self._mt5_conn.initialize():
+                return True
+            if not logged_failure:
+                logger.warning(
+                    "MT5 initialization failed (path=%r, error=%s) — will retry; "
+                    "fix the path in Settings → MT5 terminal path",
+                    self._config.mt5_terminal_path or "<auto-detect>",
+                    self._mt5_conn.last_error,
+                )
+                logged_failure = True
+            await self._broadcast_status()
+            await asyncio.sleep(3.0)
+            new_config = load_config()
+            if new_config is not None:
+                self._config = new_config
+                self._scheduler = MarketScheduler(new_config.spread_hour)
+        return False
 
     async def _wait_for_license_config(self) -> None:
         """Poll config.json until license_key is set. Broadcasts status so the UI
@@ -403,11 +427,13 @@ class Engine:
         pending_count = sum(1 for r in active if r["status"] == "pending")
         open_count = sum(1 for r in active if r["status"] == "filled")
         trailing_count = sum(1 for r in active if r["status"] == "filled" and r["is_trailing"])
+        mt5_connected = self._mt5.ensure_connected()
         status = {
             "engine_running": self._running,
             "trading_active": self._trading_active,
             "license_valid": getattr(self._license, "license_valid", True),
-            "mt5_connected": self._mt5.ensure_connected(),
+            "mt5_connected": mt5_connected,
+            "mt5_error": None if mt5_connected else self._mt5_conn.last_error,
             "supabase_connected": self._supabase._pool is not None,
             "pending_count": pending_count,
             "open_count": open_count,

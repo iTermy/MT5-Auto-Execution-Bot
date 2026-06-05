@@ -89,6 +89,7 @@ interface Props {
   status: {
     trading_active?: boolean
     mt5_connected?: boolean
+    mt5_error?: string | null
     supabase_connected?: boolean
     license_valid?: boolean
   } | null
@@ -606,6 +607,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
   const isActive = status?.trading_active ?? false
   const mt5Ok = status?.mt5_connected ?? false
+  const mt5Error = status?.mt5_error ?? null
   const supaOk = status?.supabase_connected ?? false
   const licenseOk = status?.license_valid ?? false
 
@@ -649,8 +651,13 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           <h3>Engine &amp; connection</h3>
         </div>
         <div style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className={`conn ${mt5Ok ? 'live' : 'off'}`}>
+          <div className={`conn ${mt5Ok ? 'live' : 'off'}`} title={mt5Error ?? ''}>
             <span className="d" /> MT5 {mt5Ok ? 'connected' : 'disconnected'}
+            {!mt5Ok && mt5Error && (
+              <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>
+                · {mt5Error}
+              </span>
+            )}
           </div>
           <div className={`conn ${supaOk ? 'live' : 'off'}`}>
             <span className="d" /> Database {supaOk ? 'connected' : 'disconnected'}

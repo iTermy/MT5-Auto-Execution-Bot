@@ -63,10 +63,26 @@ interface LotExceptionRow {
 
 interface InstrumentOverrideRow {
   symbol: string
+  // Standard fields — empty string means "inherit asset-class value".
   thr: string
   trail: string
   partial: string // stored as partial_close_percent in config; UI displays trailing
+  // Per-signal-type overrides — empty strings mean "inherit".
+  overrides: Record<OverrideType, OverridePair>
 }
+
+const FLAT_OVERRIDE_FIELDS = [
+  'profit_threshold',
+  'trailing_distance',
+  'threshold_unit',
+  'partial_close_percent',
+] as const
+
+const emptyOverridePairs = (): Record<OverrideType, OverridePair> =>
+  Object.fromEntries(OVERRIDE_TYPES.map(t => [t, { thr: '', trail: '', partial: '' }])) as Record<
+    OverrideType,
+    OverridePair
+  >
 
 interface Props {
   config: Config | null
@@ -214,11 +230,29 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       for (const [sym, inst] of Object.entries(tp.instrument_overrides ?? {})) {
         const ac = detectAssetClass(sym) as AssetKey
         const i = inst as Record<string, unknown>
+        const isFlat = FLAT_OVERRIDE_FIELDS.some(f => f in i)
+        const std = (isFlat ? i : ((i.standard as Record<string, unknown>) ?? {})) as Record<
+          string,
+          unknown
+        >
+        const overrides = emptyOverridePairs()
+        if (!isFlat) {
+          for (const t of OVERRIDE_TYPES) {
+            const ov = i[t] as Record<string, unknown> | undefined
+            if (!ov) continue
+            overrides[t] = {
+              thr: ov.profit_threshold != null ? String(ov.profit_threshold) : '',
+              trail: ov.trailing_distance != null ? String(ov.trailing_distance) : '',
+              partial: ov.partial_close_percent != null ? String(ov.partial_close_percent) : '',
+            }
+          }
+        }
         grouped[ac].push({
           symbol: sym,
-          thr: i.profit_threshold != null ? String(i.profit_threshold) : '',
-          trail: i.trailing_distance != null ? String(i.trailing_distance) : '',
-          partial: i.partial_close_percent != null ? String(i.partial_close_percent) : '',
+          thr: std.profit_threshold != null ? String(std.profit_threshold) : '',
+          trail: std.trailing_distance != null ? String(std.trailing_distance) : '',
+          partial: std.partial_close_percent != null ? String(std.partial_close_percent) : '',
+          overrides,
         })
       }
       setInstrumentOverrides(grouped)
@@ -335,7 +369,28 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   function addInstrumentOverride(asset: AssetKey) {
     setInstrumentOverrides(prev => ({
       ...prev,
-      [asset]: [...prev[asset], { symbol: '', thr: '', trail: '', partial: '' }],
+      [asset]: [
+        ...prev[asset],
+        { symbol: '', thr: '', trail: '', partial: '', overrides: emptyOverridePairs() },
+      ],
+    }))
+    touch()
+  }
+
+  function updateInstrumentOverrideTyped(
+    asset: AssetKey,
+    i: number,
+    type: OverrideType,
+    field: 'thr' | 'trail' | 'partial',
+    value: string
+  ) {
+    setInstrumentOverrides(prev => ({
+      ...prev,
+      [asset]: prev[asset].map((r, j) => {
+        if (j !== i) return r
+        const pair = { ...r.overrides[type], [field]: value }
+        return { ...r, overrides: { ...r.overrides, [type]: pair } }
+      }),
     }))
     touch()
   }
@@ -354,12 +409,33 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       for (const row of instrumentOverrides[asset]) {
         const sym = row.symbol.trim()
         if (!sym) continue
-        const entry: Record<string, unknown> = {}
-        if (row.thr !== '') entry.profit_threshold = parseFloat(row.thr) || 0
-        if (row.trail !== '') entry.trailing_distance = parseFloat(row.trail) || 0
-        if (row.partial !== '') entry.partial_close_percent = parseInt(row.partial, 10) || 0
-        if (Object.keys(entry).length === 0) continue
-        out[sym] = entry
+
+        const std: Record<string, unknown> = {}
+        if (row.thr !== '') std.profit_threshold = parseFloat(row.thr) || 0
+        if (row.trail !== '') std.trailing_distance = parseFloat(row.trail) || 0
+        if (row.partial !== '') std.partial_close_percent = parseInt(row.partial, 10) || 0
+
+        const perType: Record<string, Record<string, unknown>> = {}
+        for (const t of OVERRIDE_TYPES) {
+          const ov = row.overrides[t]
+          const block: Record<string, unknown> = {}
+          if (ov.thr !== '') block.profit_threshold = parseFloat(ov.thr) || 0
+          if (ov.trail !== '') block.trailing_distance = parseFloat(ov.trail) || 0
+          if (ov.partial !== '') block.partial_close_percent = parseInt(ov.partial, 10) || 0
+          if (Object.keys(block).length > 0) perType[t] = block
+        }
+
+        const hasStd = Object.keys(std).length > 0
+        const hasOverrides = Object.keys(perType).length > 0
+        if (!hasStd && !hasOverrides) continue
+
+        if (hasOverrides) {
+          const entry: Record<string, unknown> = { ...perType }
+          if (hasStd) entry.standard = std
+          out[sym] = entry
+        } else {
+          out[sym] = std
+        }
       }
     }
     return out
@@ -924,11 +1000,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                               onClick={() =>
                                 setExpandedAsset(isExpanded ? null : (t.asset as AssetKey))
                               }
-                              title={
-                                isExpanded
-                                  ? 'Hide per-symbol overrides'
-                                  : 'Add per-symbol overrides'
-                              }
+                              title={isExpanded ? 'Click to collapse' : 'Click to expand'}
                             >
                               {isExpanded ? '−' : '+'}
                               {overrides.length > 0 && !isExpanded && (
@@ -949,8 +1021,8 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                               }}
                             >
                               <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>
-                                Per-symbol overrides for <b>{t.asset}</b> · blank = inherit
-                                asset-class value · applies to all signal types
+                                Per-symbol <b>standard</b> overrides for <b>{t.asset}</b> · blank =
+                                inherit asset-class value · switch tabs to edit scalp/toll/swing/pa
                               </div>
                               {overrides.length > 0 && (
                                 <table className="tbl" style={{ marginBottom: 8 }}>
@@ -1117,6 +1189,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     <th>Unit</th>
                     <th className="num">Trail dist.</th>
                     <th>Trailing %</th>
+                    <th style={{ width: 32 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1124,64 +1197,246 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     const partialSet = t.overrides[tpTab].partial !== ''
                     const partialNum = parseInt(t.overrides[tpTab].partial, 10) || 50
                     const trailingNum = partialToTrailing(partialNum)
+                    const overrides = instrumentOverrides[t.asset as AssetKey]
+                    const isExpanded = expandedAsset === t.asset
                     return (
-                      <tr key={t.asset}>
-                        <td>
-                          <span className="sym">{t.asset}</span>
-                        </td>
-                        <td className="num">
-                          <input
-                            className="inp num mono"
-                            value={t.overrides[tpTab].thr}
-                            style={{ width: 76 }}
-                            onChange={e => updateTpOverride(i, tpTab, 'thr', e.target.value)}
-                          />
-                        </td>
-                        <td className="dim">{t.unit}</td>
-                        <td className="num">
-                          <input
-                            className="inp num mono"
-                            value={t.overrides[tpTab].trail}
-                            style={{ width: 76 }}
-                            onChange={e => updateTpOverride(i, tpTab, 'trail', e.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Fragment key={t.asset}>
+                        <tr>
+                          <td>
+                            <span className="sym">{t.asset}</span>
+                          </td>
+                          <td className="num">
                             <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              step={5}
-                              value={trailingNum}
-                              onChange={e =>
-                                updateTpOverride(
-                                  i,
-                                  tpTab,
-                                  'partial',
-                                  String(trailingToPartial(parseInt(e.target.value, 10)))
-                                )
-                              }
-                              style={{ width: 140, accentColor: 'var(--accent)' }}
+                              className="inp num mono"
+                              value={t.overrides[tpTab].thr}
+                              style={{ width: 76 }}
+                              onChange={e => updateTpOverride(i, tpTab, 'thr', e.target.value)}
                             />
-                            <span className="mono" style={{ width: 56, fontWeight: 600 }}>
-                              {partialSet ? (
-                                `${trailingNum}%`
-                              ) : (
-                                <span className="faint">inherit</span>
+                          </td>
+                          <td className="dim">{t.unit}</td>
+                          <td className="num">
+                            <input
+                              className="inp num mono"
+                              value={t.overrides[tpTab].trail}
+                              style={{ width: 76 }}
+                              onChange={e => updateTpOverride(i, tpTab, 'trail', e.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={trailingNum}
+                                onChange={e =>
+                                  updateTpOverride(
+                                    i,
+                                    tpTab,
+                                    'partial',
+                                    String(trailingToPartial(parseInt(e.target.value, 10)))
+                                  )
+                                }
+                                style={{ width: 140, accentColor: 'var(--accent)' }}
+                              />
+                              <span className="mono" style={{ width: 56, fontWeight: 600 }}>
+                                {partialSet ? (
+                                  `${trailingNum}%`
+                                ) : (
+                                  <span className="faint">inherit</span>
+                                )}
+                              </span>
+                              {partialSet && (
+                                <button
+                                  className="btn sm ghost"
+                                  onClick={() => updateTpOverride(i, tpTab, 'partial', '')}
+                                >
+                                  ×
+                                </button>
                               )}
-                            </span>
-                            {partialSet && (
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              className="btn sm ghost"
+                              onClick={() =>
+                                setExpandedAsset(isExpanded ? null : (t.asset as AssetKey))
+                              }
+                              title={isExpanded ? 'Click to collapse' : 'Click to expand'}
+                            >
+                              {isExpanded ? '−' : '+'}
+                              {overrides.length > 0 && !isExpanded && (
+                                <span className="faint" style={{ marginLeft: 4 }}>
+                                  {overrides.length}
+                                </span>
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td
+                              colSpan={6}
+                              style={{
+                                background: 'var(--panel-soft, transparent)',
+                                padding: '10px 14px',
+                              }}
+                            >
+                              <div className="faint" style={{ fontSize: 12, marginBottom: 8 }}>
+                                Per-symbol <b>{tpTab}</b> overrides for <b>{t.asset}</b> · blank =
+                                inherit asset-class {tpTab} value
+                              </div>
+                              {overrides.length > 0 && (
+                                <table className="tbl" style={{ marginBottom: 8 }}>
+                                  <thead>
+                                    <tr>
+                                      <th>Symbol</th>
+                                      <th className="num">Threshold</th>
+                                      <th className="num">Trail dist.</th>
+                                      <th>Trailing %</th>
+                                      <th />
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {overrides.map((r, j) => {
+                                      const ovPair = r.overrides[tpTab]
+                                      const ovPartialSet = ovPair.partial !== ''
+                                      const ovPartial = parseInt(ovPair.partial, 10) || 50
+                                      const ovTrailing = partialToTrailing(ovPartial)
+                                      return (
+                                        <tr key={j}>
+                                          <td>
+                                            <input
+                                              className="inp mono"
+                                              value={r.symbol}
+                                              onChange={e =>
+                                                updateInstrumentOverride(
+                                                  t.asset as AssetKey,
+                                                  j,
+                                                  'symbol',
+                                                  e.target.value
+                                                )
+                                              }
+                                              placeholder="SPX500USD, AMD.NAS, …"
+                                              style={{ width: 160 }}
+                                            />
+                                          </td>
+                                          <td className="num">
+                                            <input
+                                              className="inp num mono"
+                                              value={ovPair.thr}
+                                              style={{ width: 76 }}
+                                              onChange={e =>
+                                                updateInstrumentOverrideTyped(
+                                                  t.asset as AssetKey,
+                                                  j,
+                                                  tpTab,
+                                                  'thr',
+                                                  e.target.value
+                                                )
+                                              }
+                                            />
+                                          </td>
+                                          <td className="num">
+                                            <input
+                                              className="inp num mono"
+                                              value={ovPair.trail}
+                                              style={{ width: 76 }}
+                                              onChange={e =>
+                                                updateInstrumentOverrideTyped(
+                                                  t.asset as AssetKey,
+                                                  j,
+                                                  tpTab,
+                                                  'trail',
+                                                  e.target.value
+                                                )
+                                              }
+                                            />
+                                          </td>
+                                          <td>
+                                            <div
+                                              style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 10,
+                                              }}
+                                            >
+                                              <input
+                                                type="range"
+                                                min={0}
+                                                max={100}
+                                                step={5}
+                                                value={ovTrailing}
+                                                onChange={e =>
+                                                  updateInstrumentOverrideTyped(
+                                                    t.asset as AssetKey,
+                                                    j,
+                                                    tpTab,
+                                                    'partial',
+                                                    String(
+                                                      trailingToPartial(
+                                                        parseInt(e.target.value, 10)
+                                                      )
+                                                    )
+                                                  )
+                                                }
+                                                style={{ width: 140, accentColor: 'var(--accent)' }}
+                                              />
+                                              <span
+                                                className="mono"
+                                                style={{ width: 56, fontWeight: 600 }}
+                                              >
+                                                {ovPartialSet ? (
+                                                  `${ovTrailing}%`
+                                                ) : (
+                                                  <span className="faint">inherit</span>
+                                                )}
+                                              </span>
+                                              {ovPartialSet && (
+                                                <button
+                                                  className="btn sm ghost"
+                                                  onClick={() =>
+                                                    updateInstrumentOverrideTyped(
+                                                      t.asset as AssetKey,
+                                                      j,
+                                                      tpTab,
+                                                      'partial',
+                                                      ''
+                                                    )
+                                                  }
+                                                >
+                                                  ×
+                                                </button>
+                                              )}
+                                            </div>
+                                          </td>
+                                          <td style={{ width: 40 }}>
+                                            <button
+                                              className="btn sm ghost"
+                                              onClick={() =>
+                                                removeInstrumentOverride(t.asset as AssetKey, j)
+                                              }
+                                            >
+                                              ×
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
                               <button
                                 className="btn sm ghost"
-                                onClick={() => updateTpOverride(i, tpTab, 'partial', '')}
+                                onClick={() => addInstrumentOverride(t.asset as AssetKey)}
                               >
-                                ×
+                                + Add symbol
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     )
                   })}
                 </tbody>

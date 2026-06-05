@@ -940,7 +940,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     <th>Unit</th>
                     <th className="num">Trail dist.</th>
                     <th>Trailing %</th>
-                    <th style={{ width: 32 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -952,8 +951,26 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     return (
                       <Fragment key={t.asset}>
                         <tr>
-                          <td>
+                          <td
+                            onClick={() =>
+                              setExpandedAsset(isExpanded ? null : (t.asset as AssetKey))
+                            }
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                            title={isExpanded ? 'Click to collapse' : 'Click to expand'}
+                          >
                             <span className="sym">{t.asset}</span>
+                            <Icon
+                              name="chevDown"
+                              size={14}
+                              strokeWidth={2}
+                              style={{
+                                marginLeft: 6,
+                                verticalAlign: 'middle',
+                                opacity: 0.55,
+                                transform: isExpanded ? 'rotate(180deg)' : 'none',
+                                transition: 'transform 120ms ease',
+                              }}
+                            />
                           </td>
                           <td className="num">
                             <input
@@ -994,27 +1011,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                               </span>
                             </div>
                           </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              className="btn sm ghost"
-                              onClick={() =>
-                                setExpandedAsset(isExpanded ? null : (t.asset as AssetKey))
-                              }
-                              title={isExpanded ? 'Click to collapse' : 'Click to expand'}
-                            >
-                              {isExpanded ? '−' : '+'}
-                              {overrides.length > 0 && !isExpanded && (
-                                <span className="faint" style={{ marginLeft: 4 }}>
-                                  {overrides.length}
-                                </span>
-                              )}
-                            </button>
-                          </td>
                         </tr>
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan={6}
+                              colSpan={5}
                               style={{
                                 background: 'var(--panel-soft, transparent)',
                                 padding: '10px 14px',
@@ -1189,7 +1190,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     <th>Unit</th>
                     <th className="num">Trail dist.</th>
                     <th>Trailing %</th>
-                    <th style={{ width: 32 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1202,8 +1202,26 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                     return (
                       <Fragment key={t.asset}>
                         <tr>
-                          <td>
+                          <td
+                            onClick={() =>
+                              setExpandedAsset(isExpanded ? null : (t.asset as AssetKey))
+                            }
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                            title={isExpanded ? 'Click to collapse' : 'Click to expand'}
+                          >
                             <span className="sym">{t.asset}</span>
+                            <Icon
+                              name="chevDown"
+                              size={14}
+                              strokeWidth={2}
+                              style={{
+                                marginLeft: 6,
+                                verticalAlign: 'middle',
+                                opacity: 0.55,
+                                transform: isExpanded ? 'rotate(180deg)' : 'none',
+                                transition: 'transform 120ms ease',
+                              }}
+                            />
                           </td>
                           <td className="num">
                             <input
@@ -1257,27 +1275,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                               )}
                             </div>
                           </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              className="btn sm ghost"
-                              onClick={() =>
-                                setExpandedAsset(isExpanded ? null : (t.asset as AssetKey))
-                              }
-                              title={isExpanded ? 'Click to collapse' : 'Click to expand'}
-                            >
-                              {isExpanded ? '−' : '+'}
-                              {overrides.length > 0 && !isExpanded && (
-                                <span className="faint" style={{ marginLeft: 4 }}>
-                                  {overrides.length}
-                                </span>
-                              )}
-                            </button>
-                          </td>
                         </tr>
                         {isExpanded && (
                           <tr>
                             <td
-                              colSpan={6}
+                              colSpan={5}
                               style={{
                                 background: 'var(--panel-soft, transparent)',
                                 padding: '10px 14px',

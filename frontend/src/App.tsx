@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { fetchConfig, startEngine, stopEngine } from './api'
+import { fetchConfig, startEngine, stopEngine, shutdownEngine } from './api'
 import { useSSE } from './hooks/useSSE'
 import { useDashboard } from './hooks/useDashboard'
 import { useHistory } from './hooks/useHistory'
@@ -36,6 +36,14 @@ export default function App() {
     }
   }
 
+  async function handleShutdown() {
+    try {
+      await shutdownEngine()
+    } catch {
+      /* connection will drop */
+    }
+  }
+
   return (
     <div className="app">
       <TopBar
@@ -44,6 +52,7 @@ export default function App() {
         connected={connected}
         engineRunning={engineRunning}
         onEngineToggle={handleEngineToggle}
+        onShutdown={handleShutdown}
       />
       <div className="app-body">
         <NavSidebar

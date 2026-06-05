@@ -2,13 +2,13 @@
   "license_key": "",
   "mt5_terminal_path": "",
   "lot_sizing": {
-    "mode": "fixed",
-    "risk_percent": 1.0,
-    "fixed_lot": {
-      "default": 0.01,
-      "XAUUSD": 0.02
-    },
-    "max_lot_per_order": 5.0
+    "mode": "risk_percent",
+    "risk_percent": 5.0,
+    "fixed_lot": 0.01,
+    "max_lot_per_order": 999.0,
+    "exceptions": {
+      "XAUUSD": { "mode": "risk_percent", "value": 5.0 }
+    }
   },
   "polling": {
     "supabase_interval_seconds": 30,

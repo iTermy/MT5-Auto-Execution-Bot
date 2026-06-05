@@ -8,9 +8,17 @@ interface Props {
   connected: boolean
   engineRunning: boolean
   onEngineToggle: () => void
+  onShutdown: () => void
 }
 
-export function TopBar({ dashboard, status, connected, engineRunning, onEngineToggle }: Props) {
+export function TopBar({
+  dashboard,
+  status,
+  connected,
+  engineRunning,
+  onEngineToggle,
+  onShutdown,
+}: Props) {
   const acct = dashboard?.account
   const totalProfit = dashboard?.summary?.total_profit ?? 0
   const mt5Ok = status?.mt5_connected ?? false
@@ -61,6 +69,13 @@ export function TopBar({ dashboard, status, connected, engineRunning, onEngineTo
             <Icon name="power" size={13} strokeWidth={2.4} /> {engineRunning ? 'Stop' : 'Start'}
           </button>
         </div>
+        <button
+          className="tb-shutdown"
+          onClick={onShutdown}
+          title="Full shutdown — stop all loops and exit the bot process"
+        >
+          <Icon name="power" size={13} strokeWidth={2.4} /> Shutdown
+        </button>
       </div>
     </header>
   )

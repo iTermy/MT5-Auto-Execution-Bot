@@ -110,6 +110,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [stopMenuOpen, setStopMenuOpen] = useState(false)
   const stopMenuRef = useRef<HTMLDivElement | null>(null)
+  const [validateMsg, setValidateMsg] = useState<{
+    kind: 'info' | 'success' | 'error'
+    text: string
+  } | null>(null)
 
   const touch = () => setDirty(true)
 
@@ -462,6 +466,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
   async function handleValidate() {
     if (!config) return
+    setValidateMsg({ kind: 'info', text: 'Saving — waiting for license check…' })
     try {
       const updated: Config = {
         ...config,
@@ -470,8 +475,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       }
       await updateConfig(updated)
       onConfigSaved(updated)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setValidateMsg({
+        kind: 'error',
+        text: 'Save failed: ' + (e instanceof Error ? e.message : 'unknown'),
+      })
     }
   }
 
@@ -524,6 +532,31 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const mt5Ok = status?.mt5_connected ?? false
   const supaOk = status?.supabase_connected ?? false
   const licenseOk = status?.license_valid ?? false
+
+  // Once a Save & validate is pending, watch the status feed for the engine's
+  // verdict. The engine flips license_valid asynchronously after its next
+  // sync cycle; reflect that back to the user instead of leaving the toast
+  // stuck on "waiting" or silently disappearing.
+  useEffect(() => {
+    if (!validateMsg || validateMsg.kind !== 'info') return
+    if (licenseOk) {
+      setValidateMsg({ kind: 'success', text: 'License valid — engine starting.' })
+      return
+    }
+    const t = setTimeout(() => {
+      setValidateMsg({
+        kind: 'error',
+        text: 'License not validated. Check the key and try again.',
+      })
+    }, 30000)
+    return () => clearTimeout(t)
+  }, [licenseOk, validateMsg])
+
+  useEffect(() => {
+    if (!validateMsg || validateMsg.kind === 'info') return
+    const t = setTimeout(() => setValidateMsg(null), 5000)
+    return () => clearTimeout(t)
+  }, [validateMsg])
 
   return (
     <div className="page">
@@ -640,6 +673,37 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           <button className="btn" onClick={handleValidate}>
             Save &amp; validate
           </button>
+          {validateMsg && (
+            <div
+              style={{
+                fontSize: 13,
+                padding: '6px 12px',
+                borderRadius: 6,
+                color:
+                  validateMsg.kind === 'success'
+                    ? '#1f7a1f'
+                    : validateMsg.kind === 'error'
+                      ? '#a32020'
+                      : 'var(--ink-muted, #666)',
+                background:
+                  validateMsg.kind === 'success'
+                    ? 'rgba(31,122,31,0.08)'
+                    : validateMsg.kind === 'error'
+                      ? 'rgba(163,32,32,0.08)'
+                      : 'rgba(0,0,0,0.04)',
+                border:
+                  '1px solid ' +
+                  (validateMsg.kind === 'success'
+                    ? 'rgba(31,122,31,0.25)'
+                    : validateMsg.kind === 'error'
+                      ? 'rgba(163,32,32,0.25)'
+                      : 'rgba(0,0,0,0.08)'),
+                alignSelf: 'center',
+              }}
+            >
+              {validateMsg.text}
+            </div>
+          )}
         </div>
       </div>
 

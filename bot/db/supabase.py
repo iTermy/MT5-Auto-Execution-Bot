@@ -38,6 +38,11 @@ class SupabaseDB:
                     max_size=_POOL_MAX_SIZE,
                     command_timeout=10,
                     ssl="require",
+                    # statement_cache_size=0 disables client-side prepared statements
+                    # so the same code works with Supabase's transaction-mode pooler
+                    # (port 6543), which doesn't keep server-side state between calls.
+                    # Cost in session mode is negligible (sub-ms per query).
+                    statement_cache_size=0,
                 )
                 logger.info("Supabase pool created")
                 return

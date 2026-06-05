@@ -228,6 +228,71 @@ async def test_spread_hour_skips_crypto_cancellation(sqlite_db, mock_mt5, sample
 # ---------------------------------------------------------------------------
 
 
+async def test_drift_skipped_when_sibling_already_filled(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    """A pending limit on a signal whose sibling already filled must not be cancelled
+    by offset drift — once a limit has hit, the remaining pendings should hold their
+    placement instead of being yanked further from the existing entry."""
+    # Sibling limit on the same signal — already filled into a position
+    await sqlite_db.insert_order(
+        limit_id=20,
+        signal_id=7,
+        mt5_ticket=6000,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+        feed_price=4500.0,
+        mt5_price=4510.0,
+        offset=10.0,
+    )
+    await sqlite_db.mark_filled(6000, "2026-01-01T00:01:00+00:00")
+
+    # The pending limit we want to keep
+    await sqlite_db.insert_order(
+        limit_id=21,
+        signal_id=7,
+        mt5_ticket=6001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+        feed_price=4500.0,
+        mt5_price=4510.0,
+        offset=10.0,
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=6001)
+    mock_mt5.symbol_info.return_value = make_symbol_info(name="US500", digits=1, point=0.1)
+
+    pending_row = _make_supabase_row(limit_id=21, signal_id=7, instrument="SPX500USD")
+    pending_row["stop_loss"] = 4000.0
+    pending_row["price_level"] = 4510.0
+    filled_row = _make_supabase_row(limit_id=20, signal_id=7, instrument="SPX500USD")
+    filled_row["stop_loss"] = 4000.0
+    filled_row["price_level"] = 4510.0
+    supabase = _mock_supabase(
+        signals=[filled_row, pending_row],
+        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+    )
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    cycle._offset_calc.get_offset = MagicMock(return_value=90.0)
+    cycle._offset_calc.check_drift = MagicMock(return_value=True)
+
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    # Drift check should be skipped entirely — get_offset should not even be invoked
+    # on a signal that has fills, regardless of throttle state.
+    cycle._offset_calc.get_offset.assert_not_called()
+    pending = await sqlite_db.get_pending_orders()
+    assert {r["mt5_ticket"] for r in pending} == {6001}
+
+
 async def test_drift_check_skipped_within_interval(sqlite_db, mock_mt5, sample_config) -> None:
     from datetime import UTC, datetime, timedelta
 

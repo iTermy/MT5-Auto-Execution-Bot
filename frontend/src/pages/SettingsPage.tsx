@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
 import { startEngine, stopEngine, shutdownEngine, updateConfig } from '../api'
@@ -86,6 +86,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [maxLot, setMaxLot] = useState('5.0')
   const [lotExceptions, setLotExceptions] = useState<LotExceptionRow[]>([])
   const [licenseKey, setLicenseKey] = useState('')
+  const [mt5TerminalPath, setMt5TerminalPath] = useState('')
   const [tpRows, setTpRows] = useState<TpRow[]>([])
   const [tpTab, setTpTab] = useState<'standard' | OverrideType>('standard')
   const [instrumentOverrides, setInstrumentOverrides] = useState<
@@ -107,6 +108,8 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [toast, setToast] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [stopMenuOpen, setStopMenuOpen] = useState(false)
+  const stopMenuRef = useRef<HTMLDivElement | null>(null)
 
   const touch = () => setDirty(true)
 
@@ -114,6 +117,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     setLotMode(cfg.lot_sizing.mode)
     setMaxLot(String(cfg.lot_sizing.max_lot_per_order))
     setLicenseKey(cfg.license_key)
+    setMt5TerminalPath(cfg.mt5_terminal_path ?? '')
 
     // Global Risk % default — accept flat number, or "default" key of a dict.
     const rp = cfg.lot_sizing.risk_percent
@@ -425,6 +429,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       const updated: Config = {
         ...config,
         license_key: licenseKey,
+        mt5_terminal_path: mt5TerminalPath,
         lot_sizing: {
           mode: lotMode,
           risk_percent: parseFloat(riskPct) || 1.0,
@@ -458,7 +463,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   async function handleValidate() {
     if (!config) return
     try {
-      const updated: Config = { ...config, license_key: licenseKey }
+      const updated: Config = {
+        ...config,
+        license_key: licenseKey,
+        mt5_terminal_path: mt5TerminalPath,
+      }
       await updateConfig(updated)
       onConfigSaved(updated)
     } catch {
@@ -466,12 +475,24 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     }
   }
 
-  async function handleEngineToggle() {
+  async function handleStart() {
     setBusy(true)
     setError(null)
     try {
-      if (status?.trading_active) await stopEngine()
-      else await startEngine()
+      await startEngine()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handlePauseTrading() {
+    setBusy(true)
+    setError(null)
+    setStopMenuOpen(false)
+    try {
+      await stopEngine()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed')
     } finally {
@@ -480,12 +501,24 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   }
 
   async function handleShutdown() {
+    setStopMenuOpen(false)
     try {
       await shutdownEngine()
     } catch {
       /* connection will drop */
     }
   }
+
+  useEffect(() => {
+    if (!stopMenuOpen) return
+    function onClick(e: MouseEvent) {
+      if (stopMenuRef.current && !stopMenuRef.current.contains(e.target as Node)) {
+        setStopMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [stopMenuOpen])
 
   const isActive = status?.trading_active ?? false
   const mt5Ok = status?.mt5_connected ?? false
@@ -517,13 +550,65 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             <span className="d" /> License {licenseOk ? 'valid' : 'invalid'}
           </div>
           <div style={{ flex: 1 }} />
-          <button className="btn" onClick={handleEngineToggle} disabled={busy}>
-            <Icon name="power" size={14} strokeWidth={2.2} />{' '}
-            {isActive ? 'Stop engine' : 'Start engine'}
-          </button>
-          <button className="btn danger" onClick={handleShutdown}>
-            <Icon name="power" size={14} strokeWidth={2.2} /> Shut down
-          </button>
+          {isActive ? (
+            <div ref={stopMenuRef} style={{ position: 'relative' }}>
+              <button className="btn" onClick={() => setStopMenuOpen(o => !o)} disabled={busy}>
+                <Icon name="power" size={14} strokeWidth={2.2} /> Stop engine ▾
+              </button>
+              {stopMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    minWidth: 200,
+                    background: 'var(--bg-panel, #fff)',
+                    border: '1px solid var(--hairline, rgba(0,0,0,0.12))',
+                    borderRadius: 8,
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+                    padding: 4,
+                    zIndex: 20,
+                  }}
+                >
+                  <button
+                    className="btn"
+                    style={{
+                      width: '100%',
+                      justifyContent: 'flex-start',
+                      background: 'transparent',
+                      border: 'none',
+                    }}
+                    onClick={handlePauseTrading}
+                    title="Freeze new placements but keep TP/trailing running for open positions"
+                  >
+                    Pause trading
+                  </button>
+                  <button
+                    className="btn danger"
+                    style={{
+                      width: '100%',
+                      justifyContent: 'flex-start',
+                      background: 'transparent',
+                      border: 'none',
+                    }}
+                    onClick={handleShutdown}
+                    title="Stop all loops and exit the bot process"
+                  >
+                    Full shutdown
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <button className="btn" onClick={handleStart} disabled={busy}>
+                <Icon name="power" size={14} strokeWidth={2.2} /> Start engine
+              </button>
+              <button className="btn danger" onClick={handleShutdown}>
+                <Icon name="power" size={14} strokeWidth={2.2} /> Full shutdown
+              </button>
+            </>
+          )}
         </div>
         <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -539,8 +624,21 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               style={{ width: 280 }}
             />
           </div>
+          <div className="field">
+            <label>MT5 terminal path (optional)</label>
+            <input
+              className="inp mono"
+              value={mt5TerminalPath}
+              onChange={e => {
+                setMt5TerminalPath(e.target.value)
+                touch()
+              }}
+              placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"
+              style={{ width: 420 }}
+            />
+          </div>
           <button className="btn" onClick={handleValidate}>
-            Validate
+            Save &amp; validate
           </button>
         </div>
       </div>

@@ -8,6 +8,14 @@ logger = logging.getLogger(__name__)
 class MT5Connection:
     def __init__(self, terminal_path: str = "") -> None:
         self._terminal_path = terminal_path
+        self._initialized = False
+
+    def set_terminal_path(self, path: str) -> None:
+        self._terminal_path = path
+
+    @property
+    def is_initialized(self) -> bool:
+        return self._initialized
 
     def initialize(self) -> bool:
         kwargs = {}
@@ -15,16 +23,21 @@ class MT5Connection:
             kwargs["path"] = self._terminal_path
         if not mt5.initialize(**kwargs):
             logger.error("MT5 initialize failed: %s", mt5.last_error())
+            self._initialized = False
             return False
         info = mt5.account_info()
         logger.info("MT5 initialized: account %s", info.login if info else "unknown")
+        self._initialized = True
         return True
 
     def shutdown(self) -> None:
         mt5.shutdown()
+        self._initialized = False
         logger.info("MT5 shutdown")
 
     def ensure_connected(self) -> bool:
+        if not self._initialized:
+            return False
         if mt5.terminal_info() is not None:
             return True
         logger.warning("MT5 connection lost, reconnecting")

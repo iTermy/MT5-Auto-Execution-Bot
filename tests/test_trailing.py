@@ -174,6 +174,38 @@ async def test_short_sl_never_retreats(sqlite_db, mock_mt5) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_retcode_no_changes_treated_as_no_op(sqlite_db, mock_mt5) -> None:
+    """TRADE_RETCODE_NO_CHANGES (10025) means the requested SL is already at the
+    target — must not be logged as an error and must not retry. Return False so
+    the caller knows no update happened, but without surfacing a failure."""
+    import MetaTrader5 as mt5
+
+    pos = make_position(ticket=1003, type=0, sl=0.0)
+    tick = make_tick(bid=1.12000, ask=1.12002)
+    mock_mt5.symbol_info.return_value = make_symbol_info(digits=5, point=0.00001)
+    mock_mt5.modify_position_sl.return_value = make_order_result(
+        retcode=mt5.TRADE_RETCODE_NO_CHANGES, ticket=1003
+    )
+
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=1003,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_filled(1003, "2026-01-01T00:01:00+00:00")
+    await sqlite_db.set_trailing(1003)
+
+    mgr = TrailingStopManager()
+    updated = await mgr.update(pos, tick, _cfg(trail=0.0020), mock_mt5, sqlite_db)
+
+    assert updated is False
+
+
 async def test_trailing_pips_mode_converts_to_price(sqlite_db, mock_mt5) -> None:
     # digits=5, point=0.00001 → pip_sz=0.0001
     # trail_pips=20 → trail_dist=0.0020 (same as dollars test above, but via pips mode)

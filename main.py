@@ -1,10 +1,15 @@
 import asyncio
+import atexit
+import ctypes
 import logging
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 import pystray
 from PIL import Image
@@ -24,6 +29,36 @@ from bot.utils.logging import setup_logging
 logger = logging.getLogger(__name__)
 
 _API_URL = "http://localhost:8501"
+_LOCK_PATH = Path(tempfile.gettempdir()) / "mt5bot.lock"
+
+
+def _acquire_single_instance_lock() -> int | None:
+    """Take an exclusive lock on a temp file to prevent a second MT5Bot.exe
+    from running concurrently. Returns the file descriptor on success or None
+    if another instance already holds the lock."""
+    import msvcrt
+
+    fd = None
+    try:
+        fd = _LOCK_PATH.open("w+")
+        msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        if fd is not None:
+            fd.close()
+        return None
+
+    def _release() -> None:
+        try:
+            msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        try:
+            fd.close()
+        except Exception:
+            pass
+
+    atexit.register(_release)
+    return fd
 
 
 def _make_tray_icon() -> Image.Image:
@@ -42,18 +77,35 @@ def _wait_for_api(timeout: float = 30.0) -> bool:
     return False
 
 
-def _run_engine(conn: MT5Connection, engine: Engine) -> None:
-    if not conn.initialize():
-        logger.critical("MT5 initialization failed — engine thread exiting")
+def _run_engine(engine: Engine) -> None:
+    asyncio.run(engine.run_forever())
+
+
+def _ensure_config_exists() -> None:
+    target = Path("config.json")
+    if target.exists():
         return
-    try:
-        asyncio.run(engine.run_forever())
-    finally:
-        conn.shutdown()
+    bundle_dir = Path(getattr(sys, "_MEIPASS", "."))
+    template = bundle_dir / "config.example.json"
+    if not template.exists():
+        return
+    shutil.copyfile(template, target)
+    logger.info("Created config.json from bundled template at %s", target.resolve())
 
 
 def main() -> None:
     setup_logging()
+
+    if _acquire_single_instance_lock() is None:
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "MT5 Auto Execution Bot is already running. Check your system tray.",
+            "MT5Bot",
+            0x40,  # MB_ICONINFORMATION
+        )
+        sys.exit(0)
+
+    _ensure_config_exists()
 
     config = load_config()
     if config is None:
@@ -73,6 +125,7 @@ def main() -> None:
 
     engine = Engine(
         mt5_client=mt5_client,
+        mt5_connection=conn,
         supabase=supabase,
         sqlite=sqlite,
         config=config,
@@ -100,7 +153,7 @@ def main() -> None:
 
     engine_thread = threading.Thread(
         target=_run_engine,
-        args=(conn, engine),
+        args=(engine,),
         name="engine",
         daemon=False,
     )

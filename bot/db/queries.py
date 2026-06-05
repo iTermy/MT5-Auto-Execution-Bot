@@ -150,6 +150,13 @@ GET_FILLED_SIGNAL_IDS = """
 SELECT DISTINCT signal_id FROM order_mappings WHERE status = 'filled'
 """
 
+# Signals where at least one limit has ever filled (currently open or already closed).
+# Used by the offset-drift gate to avoid cancelling pending siblings of a signal
+# whose other limits already hit.
+GET_SIGNALS_WITH_FILLS = """
+SELECT DISTINCT signal_id FROM order_mappings WHERE status IN ('filled', 'closed')
+"""
+
 UPDATE_DB_STOP_LOSS = """
 UPDATE order_mappings SET db_stop_loss = ?, last_known_mt5_sl = ? WHERE mt5_ticket = ?
 """

@@ -123,14 +123,17 @@ class DefaultTPStrategy:
                 comment=f"s{signal_id}",
             )
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                await sqlite.mark_closed(pos.ticket, pos.profit)
+                realized_pnl = mt5_client.get_position_realized_pnl(pos.ticket)
+                if realized_pnl is None:
+                    realized_pnl = pos.profit
+                await sqlite.mark_closed(pos.ticket, realized_pnl)
                 result.closed_tickets.append(pos.ticket)
                 logger.info(
                     "TP closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
                     pos.ticket,
                     signal_id,
                     pos.volume,
-                    pos.profit,
+                    realized_pnl,
                 )
             else:
                 retcode = res.retcode if res else "None"
@@ -153,14 +156,17 @@ class DefaultTPStrategy:
                 comment=f"s{signal_id}",
             )
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                await sqlite.mark_closed(newest.ticket, newest.profit)
+                realized_pnl = mt5_client.get_position_realized_pnl(newest.ticket)
+                if realized_pnl is None:
+                    realized_pnl = newest.profit
+                await sqlite.mark_closed(newest.ticket, realized_pnl)
                 result.closed_tickets.append(newest.ticket)
                 logger.info(
                     "TP fully closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
                     newest.ticket,
                     signal_id,
                     newest.volume,
-                    newest.profit,
+                    realized_pnl,
                 )
             else:
                 retcode = res.retcode if res else "None"

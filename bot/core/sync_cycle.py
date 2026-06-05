@@ -534,14 +534,18 @@ class SyncCycle:
                         result.errors += not ok
 
                 # Offset drift check: cancel drifted pending orders so they re-place next cycle.
-                # Throttled per-order via last_offset_check to prevent feed-mid jitter from
-                # churning orders every sync cycle.
+                # Skipped entirely for signals whose other limits have already hit — a stale
+                # offset on the remaining limits is better than re-placing further from the
+                # average entry of the existing fills.
                 now_drift = datetime.now(UTC)
                 drift_interval = config.offset_drift_check_interval_seconds
+                signals_with_fills = await sqlite.get_signals_with_fills()
                 for row in sqlite_pending:
                     if row["offset_at_placement"] is None:
                         continue
                     if row["limit_id"] not in supabase_by_limit:
+                        continue
+                    if row["signal_id"] in signals_with_fills:
                         continue
                     last_check = row["last_offset_check"]
                     if last_check:
@@ -624,7 +628,7 @@ class SyncCycle:
             )
 
         # M2: mark positions closed if they disappeared from MT5 externally
-        await self._check_external_closes(sqlite, mt5_positions)
+        await self._check_external_closes(sqlite, mt5_client, mt5_positions)
 
         if supabase_rows is not None:
             # Build signal-level lookup from supabase rows for SL sync and forced exit
@@ -723,6 +727,11 @@ class SyncCycle:
 
             pos = pos_by_ticket[ticket]
             res = mt5_client.modify_position_sl(ticket, pos.symbol, mt5_sl)
+            if res and res.retcode == mt5.TRADE_RETCODE_NO_CHANGES:
+                await sqlite.update_db_stop_loss(ticket, current_db_sl, mt5_sl)
+                self._sl_fail_count.pop(ticket, None)
+                self._sl_fail_target.pop(ticket, None)
+                continue
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 await sqlite.update_db_stop_loss(ticket, current_db_sl, mt5_sl)
                 self._sl_fail_count.pop(ticket, None)
@@ -863,7 +872,10 @@ class SyncCycle:
                     comment=f"force_{current}",
                 )
                 if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                    await sqlite.mark_closed(ticket, pos.profit)
+                    realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                    if realized_pnl is None:
+                        realized_pnl = pos.profit
+                    await sqlite.mark_closed(ticket, realized_pnl)
                     self._force_exit_fail_count.pop(ticket, None)
                     logger.info("Forced exit closed ticket=%d signal=%d", ticket, signal_id)
                 else:
@@ -888,7 +900,9 @@ class SyncCycle:
             sid: st for sid, st in self._last_signal_status.items() if sid in filled_sids
         }
 
-    async def _check_external_closes(self, sqlite: SQLiteDB, mt5_positions: list) -> None:
+    async def _check_external_closes(
+        self, sqlite: SQLiteDB, mt5_client: MT5Client, mt5_positions: list
+    ) -> None:
         """M2: detect positions no longer in MT5 and mark them closed."""
         filled = await sqlite.get_filled_positions()
         if not filled:
@@ -899,13 +913,20 @@ class SyncCycle:
         for row in filled:
             ticket = row["mt5_ticket"]
             if ticket not in pos_by_ticket:
-                await sqlite.mark_closed(ticket)
+                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                await sqlite.mark_closed(ticket, realized_pnl)
                 if row["is_trailing"]:
                     logger.info(
-                        "Trailing stop hit: ticket=%d signal=%d symbol=%s",
+                        "Trailing stop hit: ticket=%d signal=%d symbol=%s pnl=%s",
                         ticket,
                         row["signal_id"],
                         row["symbol"] or "?",
+                        f"{realized_pnl:.2f}" if realized_pnl is not None else "?",
                     )
                 else:
-                    logger.info("External close: ticket=%d signal=%d", ticket, row["signal_id"])
+                    logger.info(
+                        "External close: ticket=%d signal=%d pnl=%s",
+                        ticket,
+                        row["signal_id"],
+                        f"{realized_pnl:.2f}" if realized_pnl is not None else "?",
+                    )

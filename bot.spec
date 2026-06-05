@@ -6,6 +6,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('frontend/dist', 'frontend/dist'),
+        ('config.example.json', '.'),
     ],
     hiddenimports=[
         'asyncpg',

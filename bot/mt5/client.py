@@ -305,21 +305,43 @@ class MT5Client:
             comment=result.comment,
         )
 
-    def history_deals_get(self, from_time: datetime, to_time: datetime) -> list[DealInfo]:
-        raw = mt5.history_deals_get(from_time, to_time)
+    def history_deals_get(
+        self, from_time: datetime, to_time: datetime, position_id: int | None = None
+    ) -> list[DealInfo]:
+        # SL/TP-triggered close deals are issued by the broker and may not carry our
+        # magic, so don't filter by magic here — callers filter by position_id instead.
+        if position_id is not None:
+            raw = mt5.history_deals_get(position=position_id)
+        else:
+            raw = mt5.history_deals_get(from_time, to_time)
         if raw is None:
             return []
         return [
             DealInfo(
                 ticket=d.ticket,
                 order=d.order,
+                position_id=d.position_id,
                 symbol=d.symbol,
                 type=d.type,
+                entry=d.entry,
                 volume=d.volume,
                 price=d.price,
+                profit=d.profit,
+                commission=d.commission,
+                swap=d.swap,
                 time=d.time,
                 comment=d.comment,
             )
             for d in raw
-            if d.magic == MAGIC_NUMBER
         ]
+
+    def get_position_realized_pnl(self, position_ticket: int) -> float | None:
+        """Sum of profit + swap + commission across all deals for this position.
+        Returns None if MT5 history is unavailable. Returns 0.0 if no deals match
+        (e.g. position just opened with no closing deal yet)."""
+        deals = self.history_deals_get(
+            datetime.fromtimestamp(0), datetime.now(), position_id=position_ticket
+        )
+        if not deals:
+            return None
+        return sum(d.profit + d.swap + d.commission for d in deals)

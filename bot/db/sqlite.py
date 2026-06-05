@@ -14,6 +14,7 @@ from bot.db.queries import (
     GET_ORDER_HISTORY,
     GET_PENDING_BY_SIGNAL,
     GET_PENDING_ORDERS,
+    GET_SIGNALS_WITH_FILLS,
     GET_TRAILING_POSITIONS,
     INSERT_CLAIMED_ORDER,
     INSERT_ORDER,
@@ -261,6 +262,11 @@ class SQLiteDB:
 
     async def get_filled_signal_ids(self) -> set[int]:
         async with self._db.execute(GET_FILLED_SIGNAL_IDS) as cursor:
+            rows = await cursor.fetchall()
+        return {row["signal_id"] for row in rows}
+
+    async def get_signals_with_fills(self) -> set[int]:
+        async with self._db.execute(GET_SIGNALS_WITH_FILLS) as cursor:
             rows = await cursor.fetchall()
         return {row["signal_id"] for row in rows}
 

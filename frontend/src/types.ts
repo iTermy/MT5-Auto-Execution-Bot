@@ -81,6 +81,7 @@ export interface SpreadHourConfig {
 
 export interface Config {
   license_key: string
+  mt5_terminal_path: string
   lot_sizing: LotSizingConfig
   polling: PollingConfig
   magic_number: number

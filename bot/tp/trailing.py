@@ -43,6 +43,8 @@ class TrailingStopManager:
                 return False
 
         res = mt5_client.modify_position_sl(position.ticket, position.symbol, new_sl)
+        if res is not None and res.retcode == mt5.TRADE_RETCODE_NO_CHANGES:
+            return False
         if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
             retcode = res.retcode if res else "None"
             logger.error("Trail SL failed ticket=%d retcode=%s", position.ticket, retcode)

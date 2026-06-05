@@ -92,9 +92,14 @@ class AccountInfo:
 class DealInfo:
     ticket: int
     order: int  # originating order ticket
+    position_id: int
     symbol: str
     type: int
+    entry: int  # 0=in, 1=out, 2=inout, 3=out_by
     volume: float
     price: float
+    profit: float
+    commission: float
+    swap: float
     time: int
     comment: str

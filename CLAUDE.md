@@ -60,7 +60,7 @@ CREATE TABLE licenses (
 
 ## Key Constraints (Non-Negotiable)
 
-- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`) are **read-only** from the bot. `tp_outcomes` is write-only (append-only analytics log; INSERT granted to `execution_bot_ro`/`contribution_bot_ro` via DDL run in the Supabase SQL editor).
+- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`) are **read-only** from the bot. `tp_outcomes` is write-only (append-only analytics log; INSERT granted to `contributor_bot` plus a row-level-security INSERT policy on the same role, applied via DDL run in the Supabase SQL editor).
 - All mutable transactional state lives in local SQLite (`orders.db`).
 - No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments.
 - All MT5 orders use magic number `20250001`.
@@ -72,6 +72,18 @@ CREATE TABLE licenses (
 - **Crypto symbols (BTCUSDT, ETHUSDT, anything `detect_asset_class()` classifies as `CRYPTO`) are exempt from spread-hour and news-mode gates** — they keep placing and stay live through those windows because the 24/7 crypto market doesn't have the same liquidity events.
 - **Weekend force-close window**: when a signal's status flips to `cancelled`, the bot only force-closes filled positions if `MarketScheduler.is_weekend_window()` is True (Fri ≥16:45 EST through Sun <18:00 EST) **or** the position is on BTCUSD/crypto. Weekday cancellations on signals with fills are expected (Supabase extends expiry) so positions stay open. `breakeven` status closes unconditionally.
 - **Offset-drift throttle**: drift checks are gated per-order by `last_offset_check` and `config.offset_drift_check_interval_seconds` (default 1800s = 30 min). Prevents feed-mid jitter from churning the same order every sync cycle.
+- **TP `instrument_overrides`** key by **DB symbol** (e.g. `SPX500USD`, `NAS100USD`, `BTCUSDT`), not MT5 symbol. Note this differs from `lot_sizing.*` per-instrument dicts which key by MT5 symbol (e.g. `US500`). Each entry can be either flat (applies to all signal types) or nested per-signal-type:
+  ```json
+  "instrument_overrides": {
+    "SPX500USD": { "profit_threshold": 15.0, "trailing_distance": 4.0 },
+    "NAS100USD": {
+      "default": { "profit_threshold": 50.0, "trailing_distance": 15.0 },
+      "scalp":   { "profit_threshold": 30.0, "trailing_distance": 8.0 },
+      "swing":   { "profit_threshold": 150.0, "trailing_distance": 40.0 }
+    }
+  }
+  ```
+  Detection rule: if any of `profit_threshold`/`trailing_distance`/`threshold_unit`/`partial_close_percent` sits at the top level, the entry is flat. Otherwise nested — lookup order is `signal_type` key → `"default"` key → no override (asset-class value stands). Each block may set any subset of fields; unspecified fields keep the value resolved earlier in the chain.
 
 ## Concurrency (Critical)
 

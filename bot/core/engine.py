@@ -11,6 +11,7 @@ from bot.core.sync_cycle import SyncCycle
 from bot.db.sqlite import SQLiteDB
 from bot.db.supabase import SupabaseDB
 from bot.mt5.client import MT5Client
+from bot.mt5.connection import MT5Connection
 from bot.tp.engine import TPEngine
 from bot.utils.time_utils import MarketScheduler
 
@@ -23,6 +24,7 @@ class Engine:
     def __init__(
         self,
         mt5_client: MT5Client,
+        mt5_connection: MT5Connection,
         supabase: SupabaseDB,
         sqlite: SQLiteDB,
         config: Settings,
@@ -30,6 +32,7 @@ class Engine:
         license_validator: Any | None = None,
     ) -> None:
         self._mt5 = mt5_client
+        self._mt5_conn = mt5_connection
         self._supabase = supabase
         self._sqlite = sqlite
         self._config = config
@@ -53,6 +56,8 @@ class Engine:
         self._license_expired: bool = False
         self.shutdown_reason: str | None = None
         self._last_license_valid: bool = True
+        # True after MT5 has been initialized; gates Supabase/sync/tp startup.
+        self._engine_started: bool = False
 
     def start(self) -> None:
         self._trading_active = True
@@ -104,6 +109,17 @@ class Engine:
 
             await self._sqlite.init_schema()
 
+            # Wait until a license key is configured before launching MT5 or
+            # opening the Supabase pool. This keeps the UI responsive while the
+            # user enters their credentials and prevents signal data from being
+            # fetched without an active license.
+            await self._wait_for_license_config()
+
+            self._mt5_conn.set_terminal_path(self._config.mt5_terminal_path)
+            if not self._mt5_conn.initialize():
+                logger.critical("MT5 initialization failed — engine cannot start")
+                return
+
             try:
                 await self._supabase.create_pool()
             except Exception:
@@ -119,6 +135,8 @@ class Engine:
                 # Sync _last_license_valid to the real post-validate state so a failed
                 # startup validate does not falsely trigger teardown on the first sync cycle.
                 self._last_license_valid = self._license.license_valid
+
+            self._engine_started = True
 
             tasks = [
                 asyncio.create_task(self._sync_loop(), name="sync_loop"),
@@ -141,8 +159,33 @@ class Engine:
             await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             self._running = False
-            await self._supabase.close()
-            await self._sqlite.close()
+            try:
+                await self._supabase.close()
+            except Exception:
+                pass
+            try:
+                await self._sqlite.close()
+            except Exception:
+                pass
+            try:
+                self._mt5_conn.shutdown()
+            except Exception:
+                pass
+
+    async def _wait_for_license_config(self) -> None:
+        """Poll config.json until license_key is set. Broadcasts status so the UI
+        can show the engine is awaiting credentials."""
+        if self._config.license_key:
+            return
+        logger.info("Waiting for license key in config.json — engine paused")
+        while not self._config.license_key:
+            await self._broadcast_status()
+            await asyncio.sleep(2.0)
+            new_config = load_config()
+            if new_config is not None:
+                self._config = new_config
+                self._scheduler = MarketScheduler(new_config.spread_hour)
+        logger.info("License key configured — proceeding with engine startup")
 
     async def _sync_loop(self) -> None:
         while True:
@@ -162,8 +205,18 @@ class Engine:
             try:
                 new_config = load_config()
                 if new_config:
+                    old_license_key = self._config.license_key
                     self._config = new_config
                     self._scheduler = MarketScheduler(new_config.spread_hour)
+                    if (
+                        self._license is not None
+                        and new_config.license_key
+                        and new_config.license_key != old_license_key
+                    ):
+                        acct = self._mt5.account_info()
+                        mt5_account = acct.login if acct else 0
+                        await self._license.validate(new_config.license_key, mt5_account)
+                        self._last_license_valid = self._license.license_valid
 
                 placement_active = self._trading_active and (
                     self._license is None or getattr(self._license, "license_valid", True)
@@ -290,7 +343,10 @@ class Engine:
                     comment="license_expired",
                 )
                 if res and res.retcode == _RETCODE_DONE:
-                    await self._sqlite.mark_closed(ticket, pos.profit)
+                    realized_pnl = self._mt5.get_position_realized_pnl(ticket)
+                    if realized_pnl is None:
+                        realized_pnl = pos.profit
+                    await self._sqlite.mark_closed(ticket, realized_pnl)
                     logger.info("License teardown: closed position ticket=%d", ticket)
                 else:
                     retcode = res.retcode if res else "None"

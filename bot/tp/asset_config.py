@@ -3,6 +3,10 @@ from dataclasses import dataclass
 from bot.config.constants import AssetClass
 from bot.config.settings import Settings
 
+_OVERRIDE_FIELDS = frozenset(
+    {"profit_threshold", "trailing_distance", "threshold_unit", "partial_close_percent"}
+)
+
 
 @dataclass
 class AssetClassConfig:
@@ -10,6 +14,26 @@ class AssetClassConfig:
     threshold_unit: str  # "pips" or "dollars"
     partial_close_percent: int
     trailing_distance: float
+
+
+def _resolve_instrument_override(inst: dict, signal_type: str) -> dict | None:
+    """Pick the right override dict for this signal_type from an instrument entry.
+
+    Flat form (all signal types):  {"profit_threshold": ..., "trailing_distance": ...}
+    Nested form (per signal_type): {"scalp": {...}, "swing": {...}, "default": {...}}
+
+    Detection: if any override field key (profit_threshold etc.) sits at the top
+    level, it's flat. Otherwise nested — try the signal_type key first, then "default".
+    """
+    if not inst:
+        return None
+    if any(k in inst for k in _OVERRIDE_FIELDS):
+        return inst
+    if signal_type in inst and isinstance(inst[signal_type], dict):
+        return inst[signal_type]
+    if "default" in inst and isinstance(inst["default"], dict):
+        return inst["default"]
+    return None
 
 
 def get_config(
@@ -55,11 +79,16 @@ def get_config(
         # scalp/toll/pa with no override fall through to base asset-class config
 
     if instrument and instrument in tp.instrument_overrides:
-        inst = tp.instrument_overrides[instrument]
-        profit_threshold = inst.get("profit_threshold", profit_threshold)
-        trailing_distance = inst.get("trailing_distance", trailing_distance)
-        threshold_unit = inst.get("threshold_unit", threshold_unit)
-        partial_close_percent = inst.get("partial_close_percent", partial_close_percent)
+        inst_override = _resolve_instrument_override(
+            tp.instrument_overrides[instrument], signal_type
+        )
+        if inst_override:
+            profit_threshold = inst_override.get("profit_threshold", profit_threshold)
+            trailing_distance = inst_override.get("trailing_distance", trailing_distance)
+            threshold_unit = inst_override.get("threshold_unit", threshold_unit)
+            partial_close_percent = inst_override.get(
+                "partial_close_percent", partial_close_percent
+            )
 
     return AssetClassConfig(
         profit_threshold=profit_threshold,

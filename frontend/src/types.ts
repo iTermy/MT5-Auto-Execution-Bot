@@ -159,7 +159,7 @@ export interface NearbySignalData {
 }
 
 export interface DashboardData {
-  account: AccountData
+  account: AccountData | null
   positions: PositionData[]
   pending_orders: PendingOrderData[]
   nearby_signals: NearbySignalData[]

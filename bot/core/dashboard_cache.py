@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DashboardData:
-    account: dict = field(default_factory=dict)
+    account: dict | None = None
     positions: list[dict] = field(default_factory=list)
     pending_orders: list[dict] = field(default_factory=list)
     nearby_signals: list[dict] = field(default_factory=list)
@@ -51,7 +51,7 @@ class DashboardCache:
 
         sqlite_by_ticket = {r["mt5_ticket"]: r for r in sqlite_active}
 
-        acct = {}
+        acct: dict | None = None
         if account_info:
             acct = {
                 "login": account_info.login,

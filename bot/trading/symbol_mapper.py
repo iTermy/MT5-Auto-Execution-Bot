@@ -3,7 +3,7 @@ from bot.config.settings import Settings
 
 _METALS = frozenset({"XAUUSD", "XAGUSD", "GOLD", "SILVER"})
 _OIL_KEYWORDS = ("OIL", "WTI", "BRENT")
-_INDEX_KEYWORDS = ("SPX", "NAS", "DAX", "JP225", "UK100", "US500", "USTEC")
+_INDEX_KEYWORDS = ("SPX", "NAS", "DAX", "DE30", "DE40", "JP225", "UK100", "US500", "USTEC")
 
 
 def detect_asset_class(db_symbol: str) -> AssetClass:

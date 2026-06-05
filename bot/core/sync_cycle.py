@@ -287,6 +287,18 @@ class SyncCycle:
 
                 new_limit_ids = supabase_limit_ids - sqlite_limit_ids
 
+                # When non-crypto is blocked (spread hour / weekend / news mode), drop
+                # non-crypto from the pre-check phase entirely — otherwise tick/proximity
+                # /live-price-staleness checks fire (and spam WARN logs) for symbols the
+                # placement loop is about to skip anyway.
+                if non_crypto_blocked:
+                    new_limit_ids = {
+                        lid
+                        for lid in new_limit_ids
+                        if detect_asset_class(supabase_by_limit[lid]["instrument"])
+                        == AssetClass.CRYPTO
+                    }
+
                 stale_feeds: set[str] = set()
                 if not self._feed_health_failed:
                     try:

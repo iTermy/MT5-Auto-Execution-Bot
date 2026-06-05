@@ -2,7 +2,18 @@ export type AssetClass = 'forex' | 'forex_jpy' | 'metals' | 'indices' | 'stocks'
 
 const METALS = new Set(['XAUUSD', 'XAGUSD', 'GOLD', 'SILVER'])
 const OIL_KEYWORDS = ['OIL', 'WTI', 'BRENT']
-const INDEX_KEYWORDS = ['SPX', 'NAS', 'DAX', 'JP225', 'UK100', 'US500', 'USTEC', 'US30']
+const INDEX_KEYWORDS = [
+  'SPX',
+  'NAS',
+  'DAX',
+  'DE30',
+  'DE40',
+  'JP225',
+  'UK100',
+  'US500',
+  'USTEC',
+  'US30',
+]
 
 export function detectAssetClass(dbSymbol: string): AssetClass {
   const s = dbSymbol.toUpperCase()

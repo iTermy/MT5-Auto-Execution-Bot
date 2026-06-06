@@ -10,6 +10,7 @@ from bot.db.queries import (
     FETCH_NEWS_MODE,
     FETCH_SIGNAL_STATUS,
     FETCH_SIGNAL_STATUSES,
+    UPSERT_USER_SNAPSHOT,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,3 +99,42 @@ class SupabaseDB:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(FETCH_FEED_HEALTH)
         return {row["feed"]: row["status"] for row in rows}
+
+    async def upsert_user_snapshot(
+        self,
+        license_key: str,
+        mt5_account: int,
+        balance: float,
+        equity: float,
+        currency: str,
+        leverage: int,
+        open_positions_count: int,
+        total_realized_pnl: float,
+        total_trades: int,
+        wins: int,
+        losses: int,
+        win_rate: float,
+        bot_version: str,
+    ) -> None:
+        if self._pool is None:
+            return
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    UPSERT_USER_SNAPSHOT,
+                    license_key,
+                    mt5_account,
+                    balance,
+                    equity,
+                    currency,
+                    leverage,
+                    open_positions_count,
+                    total_realized_pnl,
+                    total_trades,
+                    wins,
+                    losses,
+                    win_rate,
+                    bot_version,
+                )
+        except Exception:
+            logger.error("User snapshot upsert failed account=%d", mt5_account, exc_info=True)

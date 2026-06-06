@@ -12,11 +12,13 @@ import type { Period } from '../utils/stats'
 import { getChannelName } from '../utils/channels'
 import { directionFromOrderType } from '../utils/orderType'
 import { formatSignalType } from '../utils/signalType'
-import type { DashboardData, HistoryData, TradeData } from '../types'
+import type { Config, DashboardData, HistoryData, Page, TradeData } from '../types'
 
 interface Props {
   dashboard: DashboardData | null
   history: HistoryData | null
+  config: Config | null
+  onNavigate: (page: Page) => void
 }
 
 function proximityPctFromPrice(closestPrice: number, currentPrice: number): number {
@@ -28,7 +30,8 @@ function proximityPctFromPrice(closestPrice: number, currentPrice: number): numb
   return Math.max(0, Math.min(100, Math.round(closeness * 100)))
 }
 
-export function DashboardPage({ dashboard, history }: Props) {
+export function DashboardPage({ dashboard, history, config, onNavigate }: Props) {
+  const licenseMissing = config !== null && !config.license_key
   const [pnlP, setPnlP] = useState<Period>('all')
   const [wlP, setWlP] = useState<Period>('all')
   const [showAll, setShowAll] = useState(false)
@@ -121,6 +124,21 @@ export function DashboardPage({ dashboard, history }: Props) {
 
   return (
     <div className="page">
+      {licenseMissing && (
+        <div className="license-banner">
+          <Icon name="bell" size={18} />
+          <div className="license-banner-body">
+            <div className="license-banner-title">License key not set</div>
+            <div className="license-banner-text">
+              Run <span className="mono">!activate</span> in the bot-commands channel of the
+              Trademaster Discord to get your key, then paste it into Settings.
+            </div>
+          </div>
+          <button className="btn sm" onClick={() => onNavigate('settings')}>
+            Go to Settings
+          </button>
+        </div>
+      )}
       {/* HERO */}
       <div className="row">
         <div className="panel pad" style={{ flex: 2.1, minWidth: 0 }}>

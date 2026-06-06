@@ -218,6 +218,59 @@ VALUES (
 )
 """
 
+# SQLite — aggregated lifetime stats across all closed signals.
+# Treats one signal_id as one trade (matches the History view); pnl is the
+# sum of realized_pnl across all closed limits for that signal.
+GET_USER_STATS = """
+WITH signal_pnl AS (
+    SELECT signal_id, SUM(COALESCE(realized_pnl, 0)) AS pnl
+    FROM order_mappings
+    WHERE status = 'closed'
+    GROUP BY signal_id
+)
+SELECT
+    COUNT(*) AS total_trades,
+    COALESCE(SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END), 0) AS wins,
+    COALESCE(SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END), 0) AS losses,
+    COALESCE(SUM(pnl), 0) AS total_pnl
+FROM signal_pnl
+"""
+
+# Supabase — UPSERT one row per user (keyed on license_key). Pulls user_id
+# from the licenses table; if the license_key is unknown the INSERT inserts
+# zero rows (and there's nothing to update either).
+UPSERT_USER_SNAPSHOT = """
+INSERT INTO users (
+    license_id, license_key, mt5_account,
+    balance, equity, currency, leverage,
+    open_positions_count, total_realized_pnl,
+    total_trades, wins, losses, win_rate,
+    bot_version, last_update_at
+)
+SELECT
+    l.id, $1, $2,
+    $3, $4, $5, $6,
+    $7, $8,
+    $9, $10, $11, $12,
+    $13, now()
+FROM licenses l
+WHERE l.license_key = $1
+ON CONFLICT (license_key) DO UPDATE SET
+    mt5_account = EXCLUDED.mt5_account,
+    balance = EXCLUDED.balance,
+    equity = EXCLUDED.equity,
+    currency = EXCLUDED.currency,
+    leverage = EXCLUDED.leverage,
+    open_positions_count = EXCLUDED.open_positions_count,
+    total_realized_pnl = EXCLUDED.total_realized_pnl,
+    total_trades = EXCLUDED.total_trades,
+    wins = EXCLUDED.wins,
+    losses = EXCLUDED.losses,
+    win_rate = EXCLUDED.win_rate,
+    bot_version = EXCLUDED.bot_version,
+    last_update_at = EXCLUDED.last_update_at
+"""
+
 # SQLite — aggregate counts of a signal's limits (filled / pending / cancelled / closed)
 SIGNAL_SUMMARY = """
 SELECT

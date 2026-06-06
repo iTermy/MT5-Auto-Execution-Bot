@@ -181,7 +181,8 @@ Multiple signals can exist for same instrument. signal_id encoded in MT5 order c
 **signals**: id, instrument, direction(long/short), stop_loss, status(active/hit/profit/breakeven/stop_loss/cancelled), type(standard/scalp/swing/toll/pa/1-1), expiry_time, channel_id
 **limits**: id, signal_id(FK), price_level, sequence_number, status(pending/hit/cancelled)
 **live_prices**: symbol(PK), bid, ask, feed(oanda/binance), updated_at
-**licenses**: (queried by Edge Function, not by bot directly)
+**licenses**: queried by the Edge Function for validation, and SELECTed by the bot only as a subquery in the `users` UPSERT to resolve `license_id`
+**users**: per-license snapshot (balance / equity / cumulative P&L / wins / losses / win_rate). UPSERT-only from the bot, every 5 min. Schema in CLAUDE.md.
 
 ## SQLite Schema (orders.db)
 ```sql
@@ -404,7 +405,9 @@ Static files: FastAPI serves `frontend/dist/` at `/`. In dev, Vite dev server on
    ```sql
    CREATE ROLE contributor_bot WITH LOGIN PASSWORD 'initial_password';
    GRANT USAGE ON SCHEMA public TO contributor_bot;
-   GRANT SELECT ON signals, limits, live_prices TO contributor_bot;
+   GRANT SELECT ON signals, limits, live_prices, licenses TO contributor_bot;
+   GRANT INSERT ON tp_outcomes TO contributor_bot;
+   GRANT SELECT, INSERT, UPDATE ON users TO contributor_bot;
    ```
 2. Monthly password rotation:
    ```sql

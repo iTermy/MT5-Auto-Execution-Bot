@@ -58,9 +58,42 @@ CREATE TABLE licenses (
 );
 ```
 
+`users` table (one row per license, UPSERTed by the bot every 5 min for leaderboard / TP optimization). `license_id` matches the `licenses.id` column type — change it if your `licenses.id` is something other than `BIGINT`:
+
+```sql
+CREATE TABLE users (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    license_id            BIGINT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
+    license_key           TEXT NOT NULL UNIQUE,
+    mt5_account           BIGINT NOT NULL,
+    balance               NUMERIC(14,2),
+    equity                NUMERIC(14,2),
+    currency              TEXT,
+    leverage              INTEGER,
+    open_positions_count  INTEGER NOT NULL DEFAULT 0,
+    total_realized_pnl    NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_trades          INTEGER NOT NULL DEFAULT 0,
+    wins                  INTEGER NOT NULL DEFAULT 0,
+    losses                INTEGER NOT NULL DEFAULT 0,
+    win_rate              NUMERIC(5,2) NOT NULL DEFAULT 0,
+    bot_version           TEXT,
+    last_update_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+GRANT SELECT ON licenses TO contributor_bot;
+GRANT SELECT, INSERT, UPDATE ON users TO contributor_bot;
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY users_insert ON users FOR INSERT TO contributor_bot WITH CHECK (true);
+CREATE POLICY users_update ON users FOR UPDATE TO contributor_bot USING (true) WITH CHECK (true);
+```
+
+The bot's UPSERT pulls `license_id` from `licenses` via the `license_key`, so it needs SELECT on `licenses`. If the configured `license_key` isn't in `licenses`, the INSERT silently inserts zero rows.
+
 ## Key Constraints (Non-Negotiable)
 
-- Supabase tables (`signals`, `limits`, `live_prices`, `licenses`) are **read-only** from the bot. `tp_outcomes` is write-only (append-only analytics log; INSERT granted to `contributor_bot` plus a row-level-security INSERT policy on the same role, applied via DDL run in the Supabase SQL editor).
+- Supabase tables (`signals`, `limits`, `live_prices`) are **read-only** from the bot. `licenses` is read-only via SELECT (used by `users` UPSERT to resolve `license_id`); writes still go through the Edge Function. `tp_outcomes` is write-only (append-only analytics log; INSERT granted to `contributor_bot` plus a row-level-security INSERT policy on the same role, applied via DDL run in the Supabase SQL editor). `users` is upsert-only (one row per license, refreshed every 5 min; INSERT + UPDATE granted to `contributor_bot` with matching RLS policies).
 - All mutable transactional state lives in local SQLite (`orders.db`).
 - No MT5 credentials in code or UI — always `mt5.initialize()` with no arguments.
 - All MT5 orders use magic number `20250001`.

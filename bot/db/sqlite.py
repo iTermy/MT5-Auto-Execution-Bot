@@ -16,6 +16,7 @@ from bot.db.queries import (
     GET_PENDING_ORDERS,
     GET_SIGNALS_WITH_FILLS,
     GET_TRAILING_POSITIONS,
+    GET_USER_STATS,
     INSERT_CLAIMED_ORDER,
     INSERT_ORDER,
     MARK_CANCELLED,
@@ -283,6 +284,18 @@ class SQLiteDB:
     async def update_last_offset_check(self, mt5_ticket: int, checked_at: str) -> None:
         await self._db.execute(UPDATE_LAST_OFFSET_CHECK, (checked_at, mt5_ticket))
         await self._db.commit()
+
+    async def get_user_stats(self) -> dict[str, float]:
+        async with self._db.execute(GET_USER_STATS) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return {"total_trades": 0, "wins": 0, "losses": 0, "total_pnl": 0.0}
+        return {
+            "total_trades": row["total_trades"] or 0,
+            "wins": row["wins"] or 0,
+            "losses": row["losses"] or 0,
+            "total_pnl": float(row["total_pnl"] or 0.0),
+        }
 
     async def get_signal_summary(self, signal_id: int) -> dict[str, int]:
         async with self._db.execute(SIGNAL_SUMMARY, (signal_id,)) as cursor:

@@ -4,6 +4,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from bot.config.constants import BOT_VERSION
 from bot.config.settings import Settings, load_config
 from bot.core.dashboard_cache import DashboardCache
 from bot.core.reconciler import Reconciler
@@ -16,6 +17,7 @@ from bot.tp.engine import TPEngine
 from bot.utils.time_utils import MarketScheduler
 
 _RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
+_USER_SNAPSHOT_INTERVAL = 300.0  # 5 min between user-table upserts
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,8 @@ class Engine:
         self._last_license_valid: bool = True
         # True after MT5 has been initialized; gates Supabase/sync/tp startup.
         self._engine_started: bool = False
+        # monotonic timestamp of last successful user-snapshot upsert
+        self._last_user_snapshot: float = 0.0
 
     def start(self) -> None:
         self._trading_active = True
@@ -272,6 +276,7 @@ class Engine:
                     )
                 await self._broadcast_status()
                 await self._update_dashboard()
+                await self._maybe_upsert_user_snapshot()
             except Exception:
                 logger.error("sync_loop error", exc_info=True)
 
@@ -399,6 +404,44 @@ class Engine:
             )
         except Exception:
             logger.error("Dashboard cache update failed", exc_info=True)
+
+    async def _maybe_upsert_user_snapshot(self) -> None:
+        """Push a per-user account snapshot to Supabase every 5 min for leaderboard
+        and TP-optimization analysis. Non-fatal; logged on failure and skipped if
+        prerequisites are missing."""
+        if not self._config.license_key:
+            return
+        if self._supabase._pool is None:
+            return
+        now = time.monotonic()
+        if now - self._last_user_snapshot < _USER_SNAPSHOT_INTERVAL:
+            return
+
+        acct = self._mt5.account_info()
+        if acct is None:
+            return
+
+        stats = await self._sqlite.get_user_stats()
+        decided = stats["wins"] + stats["losses"]
+        win_rate = (stats["wins"] / decided * 100.0) if decided else 0.0
+        open_positions_count = len(await self._sqlite.get_filled_positions())
+
+        await self._supabase.upsert_user_snapshot(
+            license_key=self._config.license_key,
+            mt5_account=int(acct.login),
+            balance=float(acct.balance),
+            equity=float(acct.equity),
+            currency=acct.currency,
+            leverage=int(acct.leverage),
+            open_positions_count=open_positions_count,
+            total_realized_pnl=stats["total_pnl"],
+            total_trades=int(stats["total_trades"]),
+            wins=int(stats["wins"]),
+            losses=int(stats["losses"]),
+            win_rate=round(win_rate, 2),
+            bot_version=BOT_VERSION,
+        )
+        self._last_user_snapshot = now
 
     async def _active_interval(self) -> float:
         if self._scheduler.is_spread_hour():

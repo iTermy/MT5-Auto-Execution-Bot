@@ -63,7 +63,14 @@ export default function App() {
         />
         <div className="main">
           <div className="content">
-            {page === 'dashboard' && <DashboardPage dashboard={dashboard} history={history} />}
+            {page === 'dashboard' && (
+              <DashboardPage
+                dashboard={dashboard}
+                history={history}
+                config={config}
+                onNavigate={setPage}
+              />
+            )}
             {page === 'history' && <HistoryPage />}
             {page === 'settings' && (
               <SettingsPage config={config} status={status} onConfigSaved={setConfig} />

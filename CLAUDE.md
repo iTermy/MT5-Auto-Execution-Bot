@@ -81,15 +81,22 @@ CREATE TABLE users (
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Production role (used by the shipped .exe; DSN role is `execution_bot_ro`):
+GRANT SELECT ON licenses TO execution_bot_ro;
+GRANT SELECT, INSERT, UPDATE ON users TO execution_bot_ro;
+
+-- Contributor role (used by `.env` setups in dev):
 GRANT SELECT ON licenses TO contributor_bot;
 GRANT SELECT, INSERT, UPDATE ON users TO contributor_bot;
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-CREATE POLICY users_insert ON users FOR INSERT TO contributor_bot WITH CHECK (true);
-CREATE POLICY users_update ON users FOR UPDATE TO contributor_bot USING (true) WITH CHECK (true);
+CREATE POLICY users_insert_exec ON users FOR INSERT TO execution_bot_ro WITH CHECK (true);
+CREATE POLICY users_update_exec ON users FOR UPDATE TO execution_bot_ro USING (true) WITH CHECK (true);
+CREATE POLICY users_insert      ON users FOR INSERT TO contributor_bot   WITH CHECK (true);
+CREATE POLICY users_update      ON users FOR UPDATE TO contributor_bot   USING (true) WITH CHECK (true);
 ```
 
-The bot's UPSERT pulls `license_id` from `licenses` via the `license_key`, so it needs SELECT on `licenses`. If the configured `license_key` isn't in `licenses`, the INSERT silently inserts zero rows.
+The bot's UPSERT pulls `license_id` from `licenses` via the `license_key`, so each role needs SELECT on `licenses`. If the configured `license_key` isn't in `licenses`, the INSERT silently inserts zero rows. Policy names must be unique per table — that's why the production and contributor policies have distinct names even though they apply the same predicate.
 
 ## Key Constraints (Non-Negotiable)
 

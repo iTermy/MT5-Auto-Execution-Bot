@@ -238,9 +238,11 @@ FROM signal_pnl
 
 # Supabase — UPSERT one row per user (keyed on license_key). Pulls user_id
 # from the licenses table; if the license_key is unknown the INSERT inserts
-# zero rows (and there's nothing to update either).
+# zero rows (and there's nothing to update either). Schemas are qualified
+# explicitly because Supabase ships an `auth.users` table that otherwise
+# wins via search_path in some pooler sessions.
 UPSERT_USER_SNAPSHOT = """
-INSERT INTO users (
+INSERT INTO public.users (
     license_id, license_key, mt5_account,
     balance, equity, currency, leverage,
     open_positions_count, total_realized_pnl,
@@ -253,7 +255,7 @@ SELECT
     $7, $8,
     $9, $10, $11, $12,
     $13, now()
-FROM licenses l
+FROM public.licenses l
 WHERE l.license_key = $1
 ON CONFLICT (license_key) DO UPDATE SET
     mt5_account = EXCLUDED.mt5_account,

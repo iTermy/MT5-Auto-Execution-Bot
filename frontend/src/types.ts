@@ -2,6 +2,8 @@ export interface StatusData {
   engine_running: boolean
   trading_active: boolean
   license_valid: boolean
+  license_status?: string
+  license_message?: string
   mt5_connected: boolean
   mt5_error?: string | null
   supabase_connected: boolean

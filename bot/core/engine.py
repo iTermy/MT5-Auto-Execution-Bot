@@ -475,6 +475,8 @@ class Engine:
             "engine_running": self._running,
             "trading_active": self._trading_active,
             "license_valid": getattr(self._license, "license_valid", True),
+            "license_status": getattr(getattr(self._license, "status", None), "value", "valid"),
+            "license_message": getattr(self._license, "message", ""),
             "mt5_connected": mt5_connected,
             "mt5_error": None if mt5_connected else self._mt5_conn.last_error,
             "supabase_connected": self._supabase._pool is not None,

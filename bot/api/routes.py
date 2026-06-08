@@ -14,6 +14,8 @@ _STATUS_DEFAULTS: dict = {
     "engine_running": False,
     "trading_active": False,
     "license_valid": False,
+    "license_status": "error",
+    "license_message": "",
     "mt5_connected": False,
     "supabase_connected": False,
     "pending_count": 0,

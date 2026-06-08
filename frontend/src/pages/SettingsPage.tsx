@@ -92,6 +92,7 @@ interface Props {
     mt5_error?: string | null
     supabase_connected?: boolean
     license_valid?: boolean
+    license_message?: string
   } | null
   onConfigSaved: (config: Config) => void
 }
@@ -624,11 +625,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     const t = setTimeout(() => {
       setValidateMsg({
         kind: 'error',
-        text: 'License not validated. Check the key and try again.',
+        text: status?.license_message || 'License not validated. Check the key and try again.',
       })
     }, 30000)
     return () => clearTimeout(t)
-  }, [licenseOk, validateMsg])
+  }, [licenseOk, validateMsg, status?.license_message])
 
   useEffect(() => {
     if (!validateMsg || validateMsg.kind === 'info') return
@@ -664,6 +665,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           </div>
           <div className={`conn ${licenseOk ? 'live' : 'off'}`}>
             <span className="d" /> License {licenseOk ? 'valid' : 'invalid'}
+            {!licenseOk && status?.license_message && (
+              <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>
+                · {status.license_message}
+              </span>
+            )}
           </div>
           <div style={{ flex: 1 }} />
           {isActive ? (

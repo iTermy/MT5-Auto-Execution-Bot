@@ -47,7 +47,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   if (Number(data.mt5_account) !== mt5_account) {
-    return json({ status: 'invalid', expires_at: null, message: 'Account mismatch' })
+    return json({
+      status: 'invalid',
+      expires_at: null,
+      message: `License is bound to MT5 account ${data.mt5_account}, but bot is connected to ${mt5_account}. Log into account ${data.mt5_account} in MT5.`,
+    })
   }
 
   return json({ status: 'valid', expires_at: null, message: 'OK' })

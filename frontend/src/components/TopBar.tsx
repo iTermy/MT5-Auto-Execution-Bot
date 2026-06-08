@@ -89,7 +89,10 @@ export function TopBar({
           <div className={`conn ${supaOk ? 'live' : 'off'}`}>
             <span className="d" /> Database
           </div>
-          <div className={`conn ${licenseOk && connected ? 'live' : 'off'}`}>
+          <div
+            className={`conn ${licenseOk && connected ? 'live' : 'off'}`}
+            title={!licenseOk ? status?.license_message || undefined : undefined}
+          >
             <span className="d" /> License
           </div>
         </div>

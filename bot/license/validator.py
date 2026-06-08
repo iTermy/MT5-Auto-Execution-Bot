@@ -15,6 +15,8 @@ class LicenseValidator:
         self._license_key: str = ""
         self._mt5_account: int = 0
         self.license_valid: bool = False
+        self.status: LicenseStatus = LicenseStatus.ERROR
+        self.message: str = ""
 
     async def validate(self, license_key: str, mt5_account: int) -> LicenseResult:
         self._license_key = license_key
@@ -23,7 +25,9 @@ class LicenseValidator:
         # Dev/contributor mode: no URL configured
         if not self._url:
             self.license_valid = True
-            return LicenseResult(LicenseStatus.VALID, None, "No license URL (dev mode)")
+            self.status = LicenseStatus.VALID
+            self.message = "No license URL (dev mode)"
+            return LicenseResult(LicenseStatus.VALID, None, self.message)
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -55,6 +59,8 @@ class LicenseValidator:
             result = LicenseResult(LicenseStatus.ERROR, None, str(e))
 
         self.license_valid = result.status == LicenseStatus.VALID
+        self.status = result.status
+        self.message = result.message
         logger.info("License: %s — %s", result.status.value, result.message)
         return result
 

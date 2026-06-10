@@ -879,9 +879,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                 </div>
               )}
             </div>
-            <small className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>
-              Leave blank to attach to the most recently launched MT5 terminal.
-            </small>
           </div>
           <button className="btn" onClick={handleValidate}>
             Save &amp; validate

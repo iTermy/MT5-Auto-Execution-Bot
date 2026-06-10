@@ -10,6 +10,7 @@ export interface StatusData {
   pending_count: number
   open_count: number
   trailing_count: number
+  bot_version?: string
 }
 
 export interface LogEntry {

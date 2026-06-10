@@ -483,6 +483,7 @@ class Engine:
             "pending_count": pending_count,
             "open_count": open_count,
             "trailing_count": trailing_count,
+            "bot_version": BOT_VERSION,
         }
         try:
             self.status_queue.put_nowait(status)

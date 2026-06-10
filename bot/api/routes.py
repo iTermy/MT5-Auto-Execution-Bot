@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from bot.config.constants import BOT_VERSION
 from bot.config.settings import Settings
 
 router = APIRouter()
@@ -22,6 +23,7 @@ _STATUS_DEFAULTS: dict = {
     "pending_count": 0,
     "open_count": 0,
     "trailing_count": 0,
+    "bot_version": BOT_VERSION,
 }
 
 
@@ -156,20 +158,33 @@ async def list_mt5_terminals() -> dict:
 
     found: set[Path] = set()
     for root in roots:
-        if not root.exists():
-            continue
-        for pattern in ("*/terminal64.exe", "*/*/terminal64.exe"):
-            try:
-                for terminal in root.glob(pattern):
-                    try:
-                        if terminal.is_file():
-                            found.add(terminal.resolve())
-                    except OSError:
-                        continue
-            except (OSError, PermissionError):
-                continue
+        if root.exists():
+            _scan_for_terminal(root, max_depth=3, found=found)
 
     return {"paths": sorted(str(p) for p in found)}
+
+
+def _scan_for_terminal(start: Path, max_depth: int, found: set[Path]) -> None:
+    """Walk *start* up to *max_depth* directory levels deep, collecting any
+    `terminal64.exe` files. Uses os.scandir so a PermissionError on one
+    subdirectory (e.g. C:\\Program Files\\WindowsApps) does not abort the
+    whole scan — only that subtree is skipped."""
+    stack: list[tuple[Path, int]] = [(start, 0)]
+    target = "terminal64.exe"
+    while stack:
+        current, depth = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file(follow_symlinks=False) and entry.name.lower() == target:
+                            found.add(Path(entry.path))
+                        elif depth < max_depth and entry.is_dir(follow_symlinks=False):
+                            stack.append((Path(entry.path), depth + 1))
+                    except OSError:
+                        continue
+        except OSError:
+            continue
 
 
 @router.get("/api/logs")

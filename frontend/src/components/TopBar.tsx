@@ -62,7 +62,7 @@ export function TopBar({
     <header className="topbar">
       <div className="tb-title">
         <span className="t">Auto-Execution Bot</span>
-        {status?.bot_version && <span className="s">v{status.bot_version}</span>}
+        {status?.bot_version && <span className="s">Version {status.bot_version}</span>}
         <span className="s">ICMarkets{acct ? ` · #${acct.login}` : ''}</span>
       </div>
       <div className="divider-v" />

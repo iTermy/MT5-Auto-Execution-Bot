@@ -159,32 +159,60 @@ async def list_mt5_terminals() -> dict:
     found: set[Path] = set()
     for root in roots:
         if root.exists():
-            _scan_for_terminal(root, max_depth=3, found=found)
+            _scan_for_terminal(root, found)
 
     return {"paths": sorted(str(p) for p in found)}
 
 
-def _scan_for_terminal(start: Path, max_depth: int, found: set[Path]) -> None:
-    """Walk *start* up to *max_depth* directory levels deep, collecting any
-    `terminal64.exe` files. Uses os.scandir so a PermissionError on one
-    subdirectory (e.g. C:\\Program Files\\WindowsApps) does not abort the
-    whole scan — only that subtree is skipped."""
-    stack: list[tuple[Path, int]] = [(start, 0)]
-    target = "terminal64.exe"
-    while stack:
-        current, depth = stack.pop()
-        try:
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    try:
-                        if entry.is_file(follow_symlinks=False) and entry.name.lower() == target:
-                            found.add(Path(entry.path))
-                        elif depth < max_depth and entry.is_dir(follow_symlinks=False):
-                            stack.append((Path(entry.path), depth + 1))
-                    except OSError:
+# Common protected / oversized trees on Windows. Skipping them keeps the
+# scan fast and avoids permission-denied bombs that used to abort the
+# parent iterator before legitimate MT5 installs were reached.
+_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        "windowsapps",
+        "modifiablewindowsapps",
+        "windowsappsdeleted",
+        "packages",
+    }
+)
+
+
+def _scan_for_terminal(root: Path, found: set[Path]) -> None:
+    """Look for `terminal64.exe` directly under `root/*` and `root/*/*` —
+    enough to cover both `C:\\Program Files\\<broker>\\terminal64.exe`
+    style installs and `%LOCALAPPDATA%\\Programs\\<broker>\\terminal64.exe`
+    style ones, without recursing through tens of thousands of unrelated
+    subfolders (the previous open-ended walk was timing out)."""
+    for level1 in _safe_subdirs(root):
+        _check_terminal(level1, found)
+        for level2 in _safe_subdirs(level1):
+            _check_terminal(level2, found)
+
+
+def _safe_subdirs(path: Path) -> list[Path]:
+    out: list[Path] = []
+    try:
+        with os.scandir(path) as entries:
+            for entry in entries:
+                try:
+                    if entry.name.lower() in _SCAN_SKIP_DIRS:
                         continue
-        except OSError:
-            continue
+                    if entry.is_dir(follow_symlinks=False):
+                        out.append(Path(entry.path))
+                except OSError:
+                    continue
+    except OSError:
+        return out
+    return out
+
+
+def _check_terminal(folder: Path, found: set[Path]) -> None:
+    candidate = folder / "terminal64.exe"
+    try:
+        if candidate.is_file():
+            found.add(candidate)
+    except OSError:
+        pass
 
 
 @router.get("/api/logs")

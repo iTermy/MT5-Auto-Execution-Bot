@@ -74,7 +74,7 @@ class SyncResult:
     filled: int = 0
     new_trailing: int = 0
     errors: int = 0
-    skipped: int = 0  # proximity-filtered limits
+    skipped: int = 0  # proximity-filtered limits + past-price placement skips
 
 
 _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
@@ -527,7 +527,7 @@ class SyncCycle:
                                 result.errors += 1
                                 continue
 
-                        ok = await self._placer.place_order(
+                        outcome = await self._placer.place_order(
                             signal_id=sig_id,
                             limit_id=lid,
                             direction=row["direction"],
@@ -542,22 +542,32 @@ class SyncCycle:
                             supabase=supabase,
                             channel_id=row["channel_id"],
                         )
-                        result.placed += ok
-                        result.errors += not ok
+                        if outcome == "placed":
+                            result.placed += 1
+                        elif outcome == "skipped":
+                            result.skipped += 1
+                        else:
+                            result.errors += 1
 
                 # Offset drift check: cancel drifted pending orders so they re-place next cycle.
-                # Skipped entirely for signals whose other limits have already hit — a stale
-                # offset on the remaining limits is better than re-placing further from the
-                # average entry of the existing fills.
+                # Skipped entirely for signals whose other limits have already hit — re-placing
+                # the survivors at a fresh offset leaves the already-filled (or TM-marked-hit)
+                # limits at the old offset, producing inconsistent entries across the same signal.
+                # "Hit" here means either: bot has a local fill, OR Supabase signal_status is 'hit'
+                # (the TM has marked at least one limit hit, even if MT5 hasn't filled yet).
                 now_drift = datetime.now(UTC)
                 drift_interval = config.offset_drift_check_interval_seconds
                 signals_with_fills = await sqlite.get_signals_with_fills()
+                signals_hit_in_db = {
+                    r["signal_id"] for r in supabase_rows if r.get("signal_status") == "hit"
+                }
+                signals_blocked_from_drift = signals_with_fills | signals_hit_in_db
                 for row in sqlite_pending:
                     if row["offset_at_placement"] is None:
                         continue
                     if row["limit_id"] not in supabase_by_limit:
                         continue
-                    if row["signal_id"] in signals_with_fills:
+                    if row["signal_id"] in signals_blocked_from_drift:
                         continue
                     last_check = row["last_offset_check"]
                     if last_check:

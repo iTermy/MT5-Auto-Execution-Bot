@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 import MetaTrader5 as mt5
 
@@ -12,6 +13,8 @@ from bot.mt5.types import OrderRequest
 logger = logging.getLogger(__name__)
 
 _ACTIVE_SIGNAL_STATUSES = frozenset({"active", "hit"})
+
+PlacementOutcome = Literal["placed", "skipped", "error"]
 
 
 class OrderPlacer:
@@ -30,38 +33,54 @@ class OrderPlacer:
         sqlite: SQLiteDB,
         supabase: SupabaseDB,
         channel_id: int | None = None,
-    ) -> bool:
+    ) -> PlacementOutcome:
         tick = mt5_client.symbol_info_tick(mt5_symbol)
         if tick is None:
             logger.error("No tick for %s (signal=%d limit=%d)", mt5_symbol, signal_id, limit_id)
-            return False
+            return "error"
 
         info = mt5_client.symbol_info(mt5_symbol)
         if info is None:
             logger.error("No symbol_info for %s", mt5_symbol)
-            return False
+            return "error"
 
         spread = tick.ask - tick.bid
         base_price = db_price + (offset or 0.0)
 
+        # Limit-only placement: never place stop orders. If the adjusted price is
+        # already at/past current market, the signal-provider treats price having
+        # crossed the level as a "hit" and would retract the limit anyway — placing
+        # a stop here would just get cancelled by the next stale-pending sync.
         if direction == "long":
             adj_price = round(base_price + spread, info.digits)
             adj_sl = round(db_stop_loss + (offset or 0.0) - spread, info.digits)
-            if adj_price < tick.ask:
-                order_type = mt5.ORDER_TYPE_BUY_LIMIT
-                order_type_str = "buy_limit"
-            else:
-                order_type = mt5.ORDER_TYPE_BUY_STOP
-                order_type_str = "buy_stop"
+            if adj_price >= tick.ask:
+                logger.info(
+                    "Skipping signal=%d limit=%d %s: buy_limit %.5f at/above ask %.5f — price already past",
+                    signal_id,
+                    limit_id,
+                    mt5_symbol,
+                    adj_price,
+                    tick.ask,
+                )
+                return "skipped"
+            order_type = mt5.ORDER_TYPE_BUY_LIMIT
+            order_type_str = "buy_limit"
         else:
             adj_price = round(base_price - spread, info.digits)
             adj_sl = round(db_stop_loss + (offset or 0.0) + spread, info.digits)
-            if adj_price > tick.bid:
-                order_type = mt5.ORDER_TYPE_SELL_LIMIT
-                order_type_str = "sell_limit"
-            else:
-                order_type = mt5.ORDER_TYPE_SELL_STOP
-                order_type_str = "sell_stop"
+            if adj_price <= tick.bid:
+                logger.info(
+                    "Skipping signal=%d limit=%d %s: sell_limit %.5f at/below bid %.5f — price already past",
+                    signal_id,
+                    limit_id,
+                    mt5_symbol,
+                    adj_price,
+                    tick.bid,
+                )
+                return "skipped"
+            order_type = mt5.ORDER_TYPE_SELL_LIMIT
+            order_type_str = "sell_limit"
 
         comment = f"s{signal_id}_l{limit_id}"[:32]
         placed_at = datetime.now(UTC).isoformat()
@@ -89,7 +108,7 @@ class OrderPlacer:
                 "Pre-send abort: signal=%d status=%r — placement cancelled", signal_id, status
             )
             await sqlite.delete_claimed_order(limit_id)
-            return False
+            return "error"
 
         request = OrderRequest(
             action=mt5.TRADE_ACTION_PENDING,
@@ -109,7 +128,7 @@ class OrderPlacer:
                 "Placement failed: signal=%d limit=%d retcode=%s", signal_id, limit_id, retcode
             )
             await sqlite.delete_claimed_order(limit_id)
-            return False
+            return "error"
 
         await sqlite.promote_claimed_to_pending(limit_id, result.ticket)
 
@@ -142,4 +161,4 @@ class OrderPlacer:
             adj_price,
             lot,
         )
-        return True
+        return "placed"

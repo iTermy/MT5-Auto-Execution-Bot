@@ -1,10 +1,12 @@
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.core.sync_cycle import SyncCycle
-from tests.conftest import make_order_result, make_symbol_info
+from tests.conftest import make_account_info, make_order_result, make_symbol_info
 
 
-def _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD") -> dict:
+def _make_supabase_row(
+    limit_id=1, signal_id=1, instrument="EURUSD", signal_status="active"
+) -> dict:
     return {
         "limit_id": limit_id,
         "signal_id": signal_id,
@@ -13,6 +15,7 @@ def _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD") -> dict:
         "stop_loss": 1.08500,
         "price_level": 1.09100,
         "signal_type": "standard",
+        "signal_status": signal_status,
         "channel_id": None,
     }
 
@@ -174,6 +177,68 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
 
     rows = await sqlite_db.get_pending_orders()
     assert len(rows) == 0
+
+
+async def test_placement_skips_limit_past_current_price(sqlite_db, mock_mt5, sample_config) -> None:
+    # New EURUSD long limit whose price is at/above current ask — would have to
+    # be a buy_stop. Should be skipped, not placed as a stop.
+    row = _make_supabase_row(limit_id=50, signal_id=5)
+    row["price_level"] = 1.10001  # mid; adj_price = mid + spread > ask
+    row["stop_loss"] = 1.09500
+    mock_mt5.account_info.return_value = make_account_info()
+    supabase = _mock_supabase(signals=[row])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    assert result.skipped == 1
+    assert result.errors == 0
+    mock_mt5.order_send.assert_not_called()
+
+
+async def test_offset_drift_skipped_when_signal_marked_hit(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Same setup as test_offset_drift_cancels_pending, but signal_status='hit'.
+    # The remaining pending limit must NOT be cancelled — re-placing it at a
+    # fresh offset would leave it inconsistent with the already-hit limit.
+    await sqlite_db.insert_order(
+        limit_id=10,
+        signal_id=1,
+        mt5_ticket=3001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+        feed_price=4500.0,
+        mt5_price=4510.0,
+        offset=10.0,
+    )
+    mock_mt5.symbol_info.return_value = make_symbol_info(name="US500", digits=1, point=0.1)
+
+    row = _make_supabase_row(limit_id=10, instrument="SPX500USD", signal_status="hit")
+    row["stop_loss"] = 4000.0
+    row["price_level"] = 4510.0
+    supabase = _mock_supabase(
+        signals=[row],
+        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+    )
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    cycle._offset_calc.get_offset = MagicMock(return_value=90.0)
+    cycle._offset_calc.check_drift = MagicMock(return_value=True)
+
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+
+    rows = await sqlite_db.get_pending_orders()
+    assert len(rows) == 1
 
 
 # ---------------------------------------------------------------------------

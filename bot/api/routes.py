@@ -1,9 +1,15 @@
 import json
 import os
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
+
+if sys.platform == "win32":
+    import winreg
+else:
+    winreg = None  # type: ignore[assignment]
 
 from bot.config.constants import BOT_VERSION
 from bot.config.settings import Settings
@@ -144,49 +150,184 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
 
 @router.get("/api/mt5/terminals")
 async def list_mt5_terminals() -> dict:
-    roots: list[Path] = []
-    seen_roots: set[Path] = set()
-    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
-        val = os.environ.get(env_var)
-        if not val:
-            continue
-        root = Path(val)
-        if root in seen_roots:
-            continue
-        seen_roots.add(root)
-        roots.append(root)
-
     found: set[Path] = set()
-    for root in roots:
-        if root.exists():
-            _scan_for_terminal(root, found)
-
+    _scan_origin_files(found)
+    _scan_uninstall_registry(found)
+    _scan_install_roots(found)
     return {"paths": sorted(str(p) for p in found)}
 
 
-# Common protected / oversized trees on Windows. Skipping them keeps the
-# scan fast and avoids permission-denied bombs that used to abort the
-# parent iterator before legitimate MT5 installs were reached.
+def _add_install_dir(install_dir: Path, found: set[Path]) -> None:
+    candidate = install_dir / "terminal64.exe"
+    try:
+        if candidate.is_file():
+            found.add(candidate.resolve())
+    except OSError:
+        pass
+
+
+# ---- Source 1: %APPDATA%\MetaQuotes\Terminal\<hash>\origin.txt ----
+# MT5 writes the absolute install path here for every terminal it has
+# launched. Authoritative regardless of where the broker installed to.
+
+
+def _scan_origin_files(found: set[Path]) -> None:
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return
+    meta_root = Path(appdata) / "MetaQuotes" / "Terminal"
+    try:
+        entries = list(meta_root.iterdir())
+    except OSError:
+        return
+    for sub in entries:
+        try:
+            if not sub.is_dir():
+                continue
+        except OSError:
+            continue
+        if sub.name.lower() in {"common", "community"}:
+            continue
+        origin = sub / "origin.txt"
+        try:
+            raw = origin.read_bytes()
+        except OSError:
+            continue
+        text = _decode_origin(raw).strip().strip('"')
+        if text:
+            _add_install_dir(Path(text), found)
+
+
+def _decode_origin(raw: bytes) -> str:
+    for enc in ("utf-16", "utf-8-sig", "utf-8", "mbcs", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return ""
+
+
+# ---- Source 2: Windows Uninstall registry ----
+# Every MetaTrader installer (broker-branded or plain) writes a
+# DisplayName + InstallLocation here. Covers terminals that exist but
+# have never been launched, so origin.txt doesn't exist yet.
+
+_REG_NAME_HINTS = ("metatrader", "mt5", "metaquotes")
+
+
+def _scan_uninstall_registry(found: set[Path]) -> None:
+    if winreg is None:
+        return
+    sub = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    bases = (
+        (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_READ | winreg.KEY_WOW64_64KEY),
+        (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_READ | winreg.KEY_WOW64_32KEY),
+        (winreg.HKEY_CURRENT_USER, winreg.KEY_READ),
+    )
+    for hive, access in bases:
+        try:
+            base = winreg.OpenKey(hive, sub, 0, access)
+        except OSError:
+            continue
+        try:
+            _walk_uninstall_key(base, found)
+        finally:
+            base.Close()
+
+
+def _walk_uninstall_key(base, found: set[Path]) -> None:
+    i = 0
+    while True:
+        try:
+            name = winreg.EnumKey(base, i)
+        except OSError:
+            return
+        i += 1
+        try:
+            with winreg.OpenKey(base, name) as key:
+                display = _read_reg_str(key, "DisplayName").lower()
+                if not any(h in display for h in _REG_NAME_HINTS):
+                    continue
+                loc = _read_reg_str(key, "InstallLocation")
+                if loc:
+                    _add_install_dir(Path(loc), found)
+                    continue
+                uninstall = _read_reg_str(key, "UninstallString")
+                parent = _parent_from_uninstall(uninstall)
+                if parent is not None:
+                    _add_install_dir(parent, found)
+        except OSError:
+            continue
+
+
+def _read_reg_str(key, name: str) -> str:
+    try:
+        val, _ = winreg.QueryValueEx(key, name)
+    except OSError:
+        return ""
+    return str(val).strip().strip('"') if val else ""
+
+
+def _parent_from_uninstall(uninstall: str) -> Path | None:
+    s = uninstall.strip().strip('"')
+    if not s:
+        return None
+    if s.lower().endswith(".exe"):
+        try:
+            return Path(s).parent
+        except (OSError, ValueError):
+            return None
+    return None
+
+
+# ---- Source 3: filesystem scan ----
+# Fallback for portable installs that aren't in the registry and have
+# never been launched. Walks to depth 3 under the standard install roots.
+
 _SCAN_SKIP_DIRS: frozenset[str] = frozenset(
     {
         "windowsapps",
         "modifiablewindowsapps",
         "windowsappsdeleted",
         "packages",
+        "common files",
+        "windows defender",
+        "windows nt",
+        "windows mail",
+        "windows photo viewer",
+        "windows portable devices",
+        "windows security",
+        "windows sidebar",
+        "internet explorer",
     }
 )
 
+_SCAN_MAX_DEPTH = 3
 
-def _scan_for_terminal(root: Path, found: set[Path]) -> None:
-    """Look for `terminal64.exe` directly under `root/*` and `root/*/*` —
-    enough to cover both `C:\\Program Files\\<broker>\\terminal64.exe`
-    style installs and `%LOCALAPPDATA%\\Programs\\<broker>\\terminal64.exe`
-    style ones, without recursing through tens of thousands of unrelated
-    subfolders (the previous open-ended walk was timing out)."""
-    for level1 in _safe_subdirs(root):
-        _check_terminal(level1, found)
-        for level2 in _safe_subdirs(level1):
-            _check_terminal(level2, found)
+
+def _scan_install_roots(found: set[Path]) -> None:
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
+        val = os.environ.get(env_var)
+        if not val:
+            continue
+        root = Path(val)
+        if root in seen:
+            continue
+        seen.add(root)
+        if root.exists():
+            roots.append(root)
+    for root in roots:
+        _scan_for_terminal(root, found, _SCAN_MAX_DEPTH)
+
+
+def _scan_for_terminal(folder: Path, found: set[Path], depth: int) -> None:
+    _add_install_dir(folder, found)
+    if depth <= 0:
+        return
+    for sub in _safe_subdirs(folder):
+        _scan_for_terminal(sub, found, depth - 1)
 
 
 def _safe_subdirs(path: Path) -> list[Path]:
@@ -204,15 +345,6 @@ def _safe_subdirs(path: Path) -> list[Path]:
     except OSError:
         return out
     return out
-
-
-def _check_terminal(folder: Path, found: set[Path]) -> None:
-    candidate = folder / "terminal64.exe"
-    try:
-        if candidate.is_file():
-            found.add(candidate)
-    except OSError:
-        pass
 
 
 @router.get("/api/logs")

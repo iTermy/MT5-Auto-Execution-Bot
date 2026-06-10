@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
-import { startEngine, stopEngine, shutdownEngine, updateConfig } from '../api'
+import {
+  startEngine,
+  stopEngine,
+  shutdownEngine,
+  updateConfig,
+  scanMt5Terminals,
+} from '../api'
 import type {
   Config,
   TPConfig,
@@ -128,6 +134,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [stopMenuOpen, setStopMenuOpen] = useState(false)
   const stopMenuRef = useRef<HTMLDivElement | null>(null)
+  const [pathMenuOpen, setPathMenuOpen] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [terminalPaths, setTerminalPaths] = useState<string[]>([])
+  const pathMenuRef = useRef<HTMLDivElement | null>(null)
   const [validateMsg, setValidateMsg] = useState<{
     kind: 'info' | 'success' | 'error'
     text: string
@@ -606,6 +617,38 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     return () => document.removeEventListener('mousedown', onClick)
   }, [stopMenuOpen])
 
+  useEffect(() => {
+    if (!pathMenuOpen) return
+    function onClick(e: MouseEvent) {
+      if (pathMenuRef.current && !pathMenuRef.current.contains(e.target as Node)) {
+        setPathMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [pathMenuOpen])
+
+  async function handleScanTerminals() {
+    setPathMenuOpen(true)
+    setScanning(true)
+    setScanError(null)
+    try {
+      const paths = await scanMt5Terminals()
+      setTerminalPaths(paths)
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : 'Scan failed')
+      setTerminalPaths([])
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  function pickTerminalPath(p: string) {
+    setMt5TerminalPath(p)
+    setPathMenuOpen(false)
+    touch()
+  }
+
   const isActive = status?.trading_active ?? false
   const mt5Ok = status?.mt5_connected ?? false
   const mt5Error = status?.mt5_error ?? null
@@ -748,16 +791,97 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           </div>
           <div className="field">
             <label>MT5 terminal path (optional)</label>
-            <input
-              className="inp mono"
-              value={mt5TerminalPath}
-              onChange={e => {
-                setMt5TerminalPath(e.target.value)
-                touch()
-              }}
-              placeholder="C:\Program Files\MetaTrader 5\terminal64.exe"
-              style={{ width: 420 }}
-            />
+            <div
+              ref={pathMenuRef}
+              style={{ display: 'flex', gap: 6, alignItems: 'center', position: 'relative' }}
+            >
+              <input
+                className="inp mono"
+                value={mt5TerminalPath}
+                onChange={e => {
+                  setMt5TerminalPath(e.target.value)
+                  touch()
+                }}
+                placeholder="e.g. C:\Program Files\MetaTrader 5\terminal64.exe"
+                style={{ width: 420 }}
+              />
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={handleScanTerminals}
+                disabled={scanning}
+                title="Search this PC for installed MT5 terminals"
+                style={{ padding: '6px 10px' }}
+              >
+                <Icon name="folder" size={15} strokeWidth={2} />
+              </button>
+              {pathMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    left: 0,
+                    minWidth: 420,
+                    maxWidth: 560,
+                    background: 'var(--surface)',
+                    border: '1px solid var(--hairline-strong)',
+                    borderRadius: 10,
+                    boxShadow: 'var(--shadow)',
+                    padding: 4,
+                    zIndex: 30,
+                    maxHeight: 240,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {scanning ? (
+                    <div className="faint" style={{ padding: '8px 12px', fontSize: 12.5 }}>
+                      Searching…
+                    </div>
+                  ) : scanError ? (
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: 12.5,
+                        color: 'var(--neg)',
+                      }}
+                    >
+                      {scanError}
+                    </div>
+                  ) : terminalPaths.length === 0 ? (
+                    <div className="faint" style={{ padding: '8px 12px', fontSize: 12.5 }}>
+                      No MT5 terminals found
+                    </div>
+                  ) : (
+                    terminalPaths.map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        className="btn sm ghost mono"
+                        onClick={() => pickTerminalPath(p)}
+                        style={{
+                          width: '100%',
+                          justifyContent: 'flex-start',
+                          border: 'none',
+                          textAlign: 'left',
+                          fontSize: 12.5,
+                          padding: '6px 10px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          display: 'block',
+                        }}
+                        title={p}
+                      >
+                        {p}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            <small className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>
+              Leave blank to attach to the most recently launched MT5 terminal.
+            </small>
           </div>
           <button className="btn" onClick={handleValidate}>
             Save &amp; validate

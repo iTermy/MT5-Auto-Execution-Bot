@@ -13,6 +13,7 @@ const PATHS: Record<string, string> = {
   chevDown: 'M6 9l6 6 6-6',
   arrowUpRight: 'M7 17L17 7 M8 7h9v9',
   check: 'M5 12l4.5 4.5L19 7',
+  folder: 'M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z',
 }
 
 interface IconProps {

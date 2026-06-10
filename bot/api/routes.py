@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -137,6 +138,38 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
             "total_pnl": round(total_pnl, 2),
         },
     }
+
+
+@router.get("/api/mt5/terminals")
+async def list_mt5_terminals() -> dict:
+    roots: list[Path] = []
+    seen_roots: set[Path] = set()
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
+        val = os.environ.get(env_var)
+        if not val:
+            continue
+        root = Path(val)
+        if root in seen_roots:
+            continue
+        seen_roots.add(root)
+        roots.append(root)
+
+    found: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for pattern in ("*/terminal64.exe", "*/*/terminal64.exe"):
+            try:
+                for terminal in root.glob(pattern):
+                    try:
+                        if terminal.is_file():
+                            found.add(terminal.resolve())
+                    except OSError:
+                        continue
+            except (OSError, PermissionError):
+                continue
+
+    return {"paths": sorted(str(p) for p in found)}
 
 
 @router.get("/api/logs")

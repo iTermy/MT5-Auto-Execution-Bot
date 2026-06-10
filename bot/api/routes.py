@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -150,11 +151,16 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
 
 @router.get("/api/mt5/terminals")
 async def list_mt5_terminals() -> dict:
+    paths = await asyncio.to_thread(_collect_mt5_terminals)
+    return {"paths": paths}
+
+
+def _collect_mt5_terminals() -> list[str]:
     found: set[Path] = set()
     _scan_origin_files(found)
     _scan_uninstall_registry(found)
     _scan_install_roots(found)
-    return {"paths": sorted(str(p) for p in found)}
+    return sorted(str(p) for p in found)
 
 
 def _add_install_dir(install_dir: Path, found: set[Path]) -> None:
@@ -282,27 +288,17 @@ def _parent_from_uninstall(uninstall: str) -> Path | None:
 
 # ---- Source 3: filesystem scan ----
 # Fallback for portable installs that aren't in the registry and have
-# never been launched. Walks to depth 3 under the standard install roots.
+# never been launched. Only descends into directories whose name itself
+# contains an MT5 token — keeps the scan tiny (no walking Program Files
+# at large) and dodges permission/junction issues on unrelated trees.
 
-_SCAN_SKIP_DIRS: frozenset[str] = frozenset(
-    {
-        "windowsapps",
-        "modifiablewindowsapps",
-        "windowsappsdeleted",
-        "packages",
-        "common files",
-        "windows defender",
-        "windows nt",
-        "windows mail",
-        "windows photo viewer",
-        "windows portable devices",
-        "windows security",
-        "windows sidebar",
-        "internet explorer",
-    }
-)
+_MT5_NAME_TOKENS = ("metatrader", "mt5", "metaquotes")
+_FS_SCAN_MAX_DEPTH = 4
 
-_SCAN_MAX_DEPTH = 3
+
+def _is_mt5_named(name: str) -> bool:
+    n = name.lower()
+    return any(t in n for t in _MT5_NAME_TOKENS)
 
 
 def _scan_install_roots(found: set[Path]) -> None:
@@ -319,15 +315,17 @@ def _scan_install_roots(found: set[Path]) -> None:
         if root.exists():
             roots.append(root)
     for root in roots:
-        _scan_for_terminal(root, found, _SCAN_MAX_DEPTH)
+        for sub in _safe_subdirs(root):
+            if _is_mt5_named(sub.name):
+                _scan_mt5_tree(sub, found, _FS_SCAN_MAX_DEPTH)
 
 
-def _scan_for_terminal(folder: Path, found: set[Path], depth: int) -> None:
+def _scan_mt5_tree(folder: Path, found: set[Path], depth: int) -> None:
     _add_install_dir(folder, found)
     if depth <= 0:
         return
     for sub in _safe_subdirs(folder):
-        _scan_for_terminal(sub, found, depth - 1)
+        _scan_mt5_tree(sub, found, depth - 1)
 
 
 def _safe_subdirs(path: Path) -> list[Path]:
@@ -336,8 +334,6 @@ def _safe_subdirs(path: Path) -> list[Path]:
         with os.scandir(path) as entries:
             for entry in entries:
                 try:
-                    if entry.name.lower() in _SCAN_SKIP_DIRS:
-                        continue
                     if entry.is_dir(follow_symlinks=False):
                         out.append(Path(entry.path))
                 except OSError:

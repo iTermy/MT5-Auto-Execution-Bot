@@ -20,6 +20,8 @@ export interface LogEntry {
 }
 
 export interface LotExceptionConfig {
+  symbol: string
+  signal_type: string
   mode: 'risk_percent' | 'fixed'
   value: number
 }
@@ -29,7 +31,7 @@ export interface LotSizingConfig {
   risk_percent: number | Record<string, number>
   fixed_lot: number | Record<string, number>
   max_lot_per_order: number
-  exceptions?: Record<string, LotExceptionConfig>
+  exceptions?: LotExceptionConfig[]
 }
 
 export interface AssetTPConfig {

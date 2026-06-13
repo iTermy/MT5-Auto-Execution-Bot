@@ -495,7 +495,10 @@ class SyncCycle:
                         all_prices = [float(r["price_level"]) for r in by_signal[sig_id]]
                         mt5_sym = map_symbol(row0["instrument"], config)
                         signal_lots[sig_id] = lot_calc.calculate(
-                            float(row0["stop_loss"]), all_prices, mt5_sym
+                            float(row0["stop_loss"]),
+                            all_prices,
+                            mt5_sym,
+                            row0["signal_type"] or "standard",
                         )
 
                     # --- Placement phase: approved signals only ---

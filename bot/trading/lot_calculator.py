@@ -1,7 +1,7 @@
 import logging
 import math
 
-from bot.config.settings import Settings
+from bot.config.settings import LotExceptionConfig, Settings
 from bot.mt5.client import MT5Client
 from bot.mt5.types import SymbolInfo
 
@@ -44,14 +44,33 @@ class LotCalculator:
             return rp.get(mt5_symbol) or rp.get("default") or 1.0
         return float(rp)
 
-    def calculate(self, stop_loss: float, limit_prices: list[float], mt5_symbol: str) -> float:
+    def _resolve_exception(self, mt5_symbol: str, signal_type: str) -> LotExceptionConfig | None:
+        # A signal-type-specific exception beats an "all" one for the same symbol.
+        exact: LotExceptionConfig | None = None
+        fallback: LotExceptionConfig | None = None
+        for ex in self._config.lot_sizing.exceptions:
+            if ex.symbol != mt5_symbol:
+                continue
+            if ex.signal_type == signal_type:
+                exact = ex
+            elif ex.signal_type == "all":
+                fallback = ex
+        return exact or fallback
+
+    def calculate(
+        self,
+        stop_loss: float,
+        limit_prices: list[float],
+        mt5_symbol: str,
+        signal_type: str = "all",
+    ) -> float:
         info = self._client.symbol_info(mt5_symbol)
         if info is None:
             logger.error("symbol_info unavailable for %s, using fixed_lot fallback", mt5_symbol)
             return self._get_fixed_lot(mt5_symbol)
 
         # Per-symbol exception takes precedence over the global mode.
-        exception = self._config.lot_sizing.exceptions.get(mt5_symbol)
+        exception = self._resolve_exception(mt5_symbol, signal_type)
         if exception is not None:
             if exception.mode == "fixed":
                 return _clamp(exception.value, info)

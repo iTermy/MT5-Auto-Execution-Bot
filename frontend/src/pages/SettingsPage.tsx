@@ -1,13 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
-import {
-  startEngine,
-  stopEngine,
-  shutdownEngine,
-  updateConfig,
-  scanMt5Terminals,
-} from '../api'
+import { startEngine, stopEngine, shutdownEngine, updateConfig, scanMt5Terminals } from '../api'
 import type {
   Config,
   TPConfig,
@@ -30,6 +24,17 @@ type AssetKey = (typeof ASSET_CLASSES)[number]
 
 type OverrideType = 'scalp' | 'toll' | 'swing' | 'pa'
 const OVERRIDE_TYPES: OverrideType[] = ['scalp', 'toll', 'swing', 'pa']
+
+// Lot-sizing exceptions can target a specific signal type; "all" = every type.
+const LOT_SIGNAL_TYPES: { value: string; label: string }[] = [
+  { value: 'all', label: 'All types' },
+  { value: 'standard', label: 'Standard' },
+  { value: 'scalp', label: 'Scalp' },
+  { value: 'swing', label: 'Swing' },
+  { value: 'toll', label: 'Toll' },
+  { value: 'pa', label: 'PA' },
+  { value: '1-1', label: '1-1' },
+]
 
 // Trailing % is the inverse of partial_close_percent (storage unchanged).
 const partialToTrailing = (p: number) => Math.max(0, Math.min(100, 100 - p))
@@ -63,6 +68,7 @@ interface SymbolRow {
 
 interface LotExceptionRow {
   symbol: string
+  signalType: string
   mode: 'risk_percent' | 'fixed'
   value: string
 }
@@ -172,23 +178,33 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     // any legacy non-`default` keys from risk_percent / fixed_lot dicts.
     const exceptions: LotExceptionRow[] = []
     const seen = new Set<string>()
-    if (cfg.lot_sizing.exceptions) {
-      for (const [sym, ex] of Object.entries(cfg.lot_sizing.exceptions)) {
-        exceptions.push({ symbol: sym, mode: ex.mode, value: String(ex.value) })
-        seen.add(sym)
+    if (Array.isArray(cfg.lot_sizing.exceptions)) {
+      for (const ex of cfg.lot_sizing.exceptions) {
+        exceptions.push({
+          symbol: ex.symbol,
+          signalType: ex.signal_type || 'all',
+          mode: ex.mode,
+          value: String(ex.value),
+        })
+        seen.add(ex.symbol)
       }
     }
     if (rp && typeof rp === 'object') {
       for (const [sym, value] of Object.entries(rp as Record<string, number>)) {
         if (sym === 'default' || seen.has(sym)) continue
-        exceptions.push({ symbol: sym, mode: 'risk_percent', value: String(value) })
+        exceptions.push({
+          symbol: sym,
+          signalType: 'all',
+          mode: 'risk_percent',
+          value: String(value),
+        })
         seen.add(sym)
       }
     }
     if (fl && typeof fl === 'object') {
       for (const [sym, value] of Object.entries(fl as Record<string, number>)) {
         if (sym === 'default' || seen.has(sym)) continue
-        exceptions.push({ symbol: sym, mode: 'fixed', value: String(value) })
+        exceptions.push({ symbol: sym, signalType: 'all', mode: 'fixed', value: String(value) })
         seen.add(sym)
       }
     }
@@ -337,7 +353,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     touch()
   }
 
-  function updateLotException(i: number, field: 'symbol' | 'mode' | 'value', value: string) {
+  function updateLotException(
+    i: number,
+    field: 'symbol' | 'signalType' | 'mode' | 'value',
+    value: string
+  ) {
     setLotExceptions(prev =>
       prev.map((r, j) => {
         if (j !== i) return r
@@ -349,7 +369,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   }
 
   function addLotException() {
-    setLotExceptions(prev => [...prev, { symbol: '', mode: 'risk_percent', value: '1.0' }])
+    setLotExceptions(prev => [
+      ...prev,
+      { symbol: '', signalType: 'all', mode: 'risk_percent', value: '1.0' },
+    ])
     touch()
   }
 
@@ -358,12 +381,15 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     touch()
   }
 
-  function buildLotExceptions(): Record<string, LotExceptionConfig> {
-    return Object.fromEntries(
-      lotExceptions
-        .filter(r => r.symbol.trim())
-        .map(r => [r.symbol.trim(), { mode: r.mode, value: parseFloat(r.value) || 0 }])
-    )
+  function buildLotExceptions(): LotExceptionConfig[] {
+    return lotExceptions
+      .filter(r => r.symbol.trim())
+      .map(r => ({
+        symbol: r.symbol.trim(),
+        signal_type: r.signalType,
+        mode: r.mode,
+        value: parseFloat(r.value) || 0,
+      }))
   }
 
   function updateInstrumentOverride(
@@ -983,13 +1009,16 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>Exceptions</h3>
-          <span className="sub">override mode and value for specific MT5 symbols</span>
+          <span className="sub">
+            override mode and value for specific MT5 symbols · optionally scoped to one signal type
+          </span>
         </div>
         {lotExceptions.length > 0 && (
-          <table className="tbl" style={{ maxWidth: 600 }}>
+          <table className="tbl" style={{ maxWidth: 720 }}>
             <thead>
               <tr>
                 <th>Symbol</th>
+                <th>Signal type</th>
                 <th>Mode</th>
                 <th className="num">Value</th>
                 <th />
@@ -1006,6 +1035,20 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                       placeholder="BTCUSD, XAUUSD, …"
                       style={{ width: 160 }}
                     />
+                  </td>
+                  <td>
+                    <select
+                      className="inp"
+                      value={r.signalType}
+                      onChange={e => updateLotException(i, 'signalType', e.target.value)}
+                      style={{ width: 130 }}
+                    >
+                      {LOT_SIGNAL_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     <Seg

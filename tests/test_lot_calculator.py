@@ -1,5 +1,6 @@
 import pytest
 
+from bot.config.settings import LotExceptionConfig
 from bot.trading.lot_calculator import LotCalculator
 from tests.conftest import make_account_info, make_settings, make_symbol_info
 
@@ -139,6 +140,82 @@ def test_clamp_to_max_lot_per_order(mock_mt5) -> None:
     lot = calc.calculate(stop_loss=1.08999, limit_prices=[1.09000], mt5_symbol="EURUSD")
 
     assert lot == pytest.approx(2.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Per-symbol exceptions, optionally scoped to a signal type
+# ---------------------------------------------------------------------------
+
+
+def _cfg_with_exceptions(*exceptions: LotExceptionConfig):
+    return make_settings(
+        lot_sizing=make_settings().lot_sizing.model_copy(update={"exceptions": list(exceptions)})
+    )
+
+
+def test_exception_all_applies_to_any_signal_type(mock_mt5) -> None:
+    cfg = _cfg_with_exceptions(
+        LotExceptionConfig(symbol="EURUSD", signal_type="all", mode="fixed", value=0.5)
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(
+        stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD", signal_type="scalp"
+    )
+
+    assert lot == pytest.approx(0.5, abs=1e-6)
+
+
+def test_exception_signal_type_specific_beats_all(mock_mt5) -> None:
+    cfg = _cfg_with_exceptions(
+        LotExceptionConfig(symbol="EURUSD", signal_type="all", mode="fixed", value=0.5),
+        LotExceptionConfig(symbol="EURUSD", signal_type="scalp", mode="fixed", value=0.2),
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    scalp = calc.calculate(
+        stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD", signal_type="scalp"
+    )
+    swing = calc.calculate(
+        stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD", signal_type="swing"
+    )
+
+    assert scalp == pytest.approx(0.2, abs=1e-6)  # scalp-specific
+    assert swing == pytest.approx(0.5, abs=1e-6)  # falls back to "all"
+
+
+def test_exception_signal_type_only_does_not_apply_to_others(mock_mt5) -> None:
+    cfg = _cfg_with_exceptions(
+        LotExceptionConfig(symbol="EURUSD", signal_type="scalp", mode="fixed", value=0.2)
+    )
+    cfg = cfg.model_copy(
+        update={
+            "lot_sizing": cfg.lot_sizing.model_copy(update={"mode": "fixed", "fixed_lot": 0.05})
+        }
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    # swing has no matching exception → global fixed_lot applies
+    lot = calc.calculate(
+        stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD", signal_type="swing"
+    )
+
+    assert lot == pytest.approx(0.05, abs=1e-6)
+
+
+def test_legacy_dict_exceptions_coerced(mock_mt5) -> None:
+    from bot.config.settings import LotSizingConfig
+
+    cfg = LotSizingConfig.model_validate(
+        {"mode": "fixed", "exceptions": {"EURUSD": {"mode": "fixed", "value": 0.3}}}
+    )
+
+    assert cfg.exceptions[0].symbol == "EURUSD"
+    assert cfg.exceptions[0].signal_type == "all"
+    assert cfg.exceptions[0].value == 0.3
 
 
 # ---------------------------------------------------------------------------

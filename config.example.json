@@ -6,9 +6,10 @@
     "risk_percent": 5.0,
     "fixed_lot": 0.01,
     "max_lot_per_order": 999.0,
-    "exceptions": {
-      "XAUUSD": { "mode": "risk_percent", "value": 5.0 }
-    }
+    "exceptions": [
+      { "symbol": "XAUUSD", "signal_type": "all", "mode": "risk_percent", "value": 5.0 },
+      { "symbol": "XAUUSD", "signal_type": "scalp", "mode": "fixed", "value": 0.5 }
+    ]
   },
   "polling": {
     "supabase_interval_seconds": 30,

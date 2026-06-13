@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 from bot.config.constants import _PRODUCTION_DSN, _PRODUCTION_LICENSE_URL
 
@@ -12,6 +12,8 @@ _CONFIG_PATH = Path("config.json")
 
 
 class LotExceptionConfig(BaseModel):
+    symbol: str
+    signal_type: str = "all"  # "all" applies to every signal type
     mode: str  # "risk_percent" | "fixed"
     value: float  # percent for risk_percent, lots for fixed
 
@@ -21,7 +23,15 @@ class LotSizingConfig(BaseModel):
     risk_percent: float | dict[str, float] = 1.0
     fixed_lot: float | dict[str, float] = 0.01
     max_lot_per_order: float = 5.0
-    exceptions: dict[str, LotExceptionConfig] = {}
+    exceptions: list[LotExceptionConfig] = []
+
+    @field_validator("exceptions", mode="before")
+    @classmethod
+    def _coerce_exceptions(cls, v: object) -> object:
+        # Back-compat: legacy `{symbol: {mode, value}}` dict → list of entries.
+        if isinstance(v, dict):
+            return [{"symbol": sym, **ex} for sym, ex in v.items()]
+        return v
 
 
 class PollingConfig(BaseModel):

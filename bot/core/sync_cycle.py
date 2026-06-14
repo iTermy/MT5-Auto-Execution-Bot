@@ -119,6 +119,8 @@ class SyncCycle:
         self._last_signal_status: dict[int, str] = {}
         # limit_ids whose exclusion has already been logged (logged once per lifetime)
         self._logged_excluded: set[int] = set()
+        # mt5_symbols the broker doesn't offer at all (logged once per lifetime)
+        self._logged_unmapped: set[str] = set()
         # signal_ids whose proximity rejection has been logged (logged once per lifetime)
         self._logged_proximity: set[int] = set()
         # C8: SL sync consecutive failure tracking
@@ -330,42 +332,58 @@ class SyncCycle:
                         db_sym = supabase_by_limit[lid]["instrument"]
                         unique_syms[map_symbol(db_sym, config)] = db_sym
 
-                    # Fetch tick once per symbol with cooldown for unavailable symbols.
-                    # Symbols that failed recently are skipped entirely (no MT5 call, no log).
-                    # On first detection or after cooldown expires, mt5_client logs one ERROR
-                    # and we log one WARNING — then silence for _UNAVAILABLE_COOLDOWN seconds.
+                    # Resolve availability against the broker's symbol catalogue, then
+                    # fetch the tick. Symbols the broker doesn't carry (e.g. GCQ26) are
+                    # skipped cleanly and logged once for their lifetime — no retry churn.
+                    # Catalogued-but-hidden symbols are selected into MarketWatch first.
+                    # Symbols whose tick failed recently are cooldown-suppressed (no MT5
+                    # call, no log); on first failure / after cooldown we warn once.
                     sym_ticks: dict = {}
                     sym_infos: dict = {}
                     newly_unavailable: set[str] = set()
+                    broker_symbols = mt5_client.symbols_get()
                     now_mono = time.monotonic()
                     for mt5_sym in list(unique_syms):
                         if now_mono < self._unavailable_until.get(mt5_sym, 0.0):
                             sym_ticks[mt5_sym] = None
                             sym_infos[mt5_sym] = None
                             continue
-                        tick = mt5_client.symbol_info_tick(mt5_sym)
 
-                        # Stock suffix fallback: try without suffix
-                        if (
-                            tick is None
-                            and config.stock_suffix
-                            and mt5_sym.endswith(config.stock_suffix)
-                        ):
-                            base_sym = mt5_sym[: -len(config.stock_suffix)]
-                            fallback_tick = mt5_client.symbol_info_tick(base_sym)
-                            if fallback_tick is not None:
+                        # Catalogue check (skipped if symbols_get is unavailable this cycle).
+                        if broker_symbols and mt5_sym not in broker_symbols:
+                            base_sym = (
+                                mt5_sym[: -len(config.stock_suffix)]
+                                if config.stock_suffix and mt5_sym.endswith(config.stock_suffix)
+                                else None
+                            )
+                            if base_sym and base_sym in broker_symbols:
+                                # Broker lists the bare stock symbol, not the suffixed one.
                                 db_sym = unique_syms[mt5_sym]
                                 logger.info(
-                                    "Stock suffix fallback: %s unavailable, using %s",
+                                    "Stock suffix fallback: %s not in catalogue, using %s",
                                     mt5_sym,
                                     base_sym,
                                 )
                                 _persist_stock_no_suffix(db_sym, config)
-                                # Remap: remove old key, add base as the symbol for this cycle
                                 unique_syms[base_sym] = db_sym
                                 del unique_syms[mt5_sym]
-                                tick = fallback_tick
                                 mt5_sym = base_sym
+                            else:
+                                # Instrument simply isn't offered by this broker — skip.
+                                sym_ticks[mt5_sym] = None
+                                sym_infos[mt5_sym] = None
+                                if mt5_sym not in self._logged_unmapped:
+                                    logger.info(
+                                        "Symbol %s not offered by this broker — skipping "
+                                        "(map it under Settings if it exists by another name)",
+                                        mt5_sym,
+                                    )
+                                    self._logged_unmapped.add(mt5_sym)
+                                continue
+
+                        # Catalogued (or catalogue unknown) — ensure it's in MarketWatch.
+                        mt5_client.symbol_select(mt5_sym)
+                        tick = mt5_client.symbol_info_tick(mt5_sym)
 
                         sym_ticks[mt5_sym] = tick
                         sym_infos[mt5_sym] = (
@@ -398,7 +416,10 @@ class SyncCycle:
                                 )
                                 result.errors += count
 
-                    # Pre-check offset staleness per instrument (log once, not once per limit)
+                    # Pre-check dead feeds per instrument (log once, not once per limit).
+                    # An old updated_at is normal for an idle feed; only a feed that
+                    # has gone fully dark (beyond the dead-feed bound) is skipped — the
+                    # offset itself is anchored to updated_at, not to "now".
                     stale_instruments: set[str] = set()
                     now_utc = datetime.now(UTC)
                     for instrument in offset_needed:
@@ -414,7 +435,7 @@ class SyncCycle:
                             )
                             if count:
                                 logger.warning(
-                                    "Live price stale for %s (%.0fs) — skipping %d limit(s)",
+                                    "Live price dark for %s (%.0fs old) — skipping %d limit(s)",
                                     instrument,
                                     age,
                                     count,

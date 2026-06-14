@@ -155,6 +155,12 @@ async def list_mt5_terminals() -> dict:
     return {"paths": paths}
 
 
+@router.get("/api/mt5/symbols")
+async def list_mt5_symbols(request: Request) -> dict:
+    # Served from the engine's cached catalogue — never calls MT5 from the handler.
+    return {"symbols": request.app.state.engine.broker_symbols}
+
+
 def _collect_mt5_terminals() -> list[str]:
     found: set[Path] = set()
     _scan_origin_files(found)

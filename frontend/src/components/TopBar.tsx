@@ -63,7 +63,20 @@ export function TopBar({
       <div className="tb-title">
         <span className="t">Auto-Execution Bot</span>
         {status?.bot_version && <span className="s">Version {status.bot_version}</span>}
-        <span className="s">ICMarkets{acct ? ` · #${acct.login}` : ''}</span>
+        <span className="s">
+          {acct?.company || acct?.server || 'MT5'}
+          {acct ? ` · #${acct.login}` : ''}
+          {acct && acct.hedging === false && (
+            <span
+              className="s"
+              style={{ color: 'var(--neg, #c0392b)' }}
+              title="Account is not in hedging mode — position tracking assumes hedging"
+            >
+              {' '}
+              · netting
+            </span>
+          )}
+        </span>
       </div>
       <div className="divider-v" />
       <div className="tb-figs">

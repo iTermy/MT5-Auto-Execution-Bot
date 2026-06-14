@@ -49,6 +49,13 @@ export async function scanMt5Terminals(): Promise<string[]> {
   return data.paths
 }
 
+export async function fetchMt5Symbols(): Promise<string[]> {
+  const r = await fetch('/api/mt5/symbols')
+  if (!r.ok) throw new Error(`GET /api/mt5/symbols ${r.status}`)
+  const data = (await r.json()) as { symbols: string[] }
+  return data.symbols
+}
+
 export async function fetchHistory(fromDate?: string, toDate?: string): Promise<HistoryData> {
   const params = new URLSearchParams()
   if (fromDate) params.set('from_date', fromDate)

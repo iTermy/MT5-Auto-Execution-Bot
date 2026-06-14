@@ -17,6 +17,7 @@ from bot.tp.engine import TPEngine
 from bot.utils.time_utils import MarketScheduler
 
 _RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
+_MARGIN_MODE_HEDGING = 2  # mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
 _USER_SNAPSHOT_INTERVAL = 300.0  # 5 min between user-table upserts
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ class Engine:
         self.app: Any | None = None
         self.api_ready = asyncio.Event()
         self.dashboard_cache = DashboardCache()
+        # Broker symbol catalogue, refreshed on the engine thread for the Settings
+        # symbol-mapping picker. The API reads this list; it never calls MT5 directly.
+        self.broker_symbols: list[str] = []
         # SSE consumers read from this queue
         self.status_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         # License teardown state
@@ -129,6 +133,7 @@ class Engine:
                 return
 
             await self._reconciler.reconcile(self._mt5, self._sqlite)
+            self._check_account_mode()
 
             if self._license is not None:
                 acct = self._mt5.account_info()
@@ -173,6 +178,26 @@ class Engine:
                 self._mt5_conn.shutdown()
             except Exception:
                 pass
+
+    def _check_account_mode(self) -> None:
+        """Fill detection and reconciliation assume hedging mode (position.identifier
+        == originating order ticket). Warn loudly if the account is netting/exchange
+        so the operator knows position tracking may misbehave; don't refuse to run."""
+        acct = self._mt5.account_info()
+        if acct is None:
+            return
+        company = acct.company or "broker"
+        if acct.margin_mode != _MARGIN_MODE_HEDGING:
+            logger.warning(
+                "Account %s (%s, %s) is NOT in hedging mode (margin_mode=%d) — this bot "
+                "assumes hedging; position tracking may be unreliable on netting accounts",
+                acct.login,
+                company,
+                acct.server,
+                acct.margin_mode,
+            )
+        else:
+            logger.info("Connected to %s (%s), hedging mode OK", company, acct.server)
 
     async def _wait_for_mt5_init(self) -> bool:
         """Initialize MT5 with retry. On failure (e.g. wrong terminal path),
@@ -391,6 +416,8 @@ class Engine:
             positions = self._mt5.positions_get()
             orders = self._mt5.orders_get()
             active = await self._sqlite.get_all_active()
+            # symbols_get() is cached in the client; refresh the API-facing copy cheaply.
+            self.broker_symbols = sorted(self._mt5.symbols_get())
             self.dashboard_cache.update(
                 acct,
                 positions,

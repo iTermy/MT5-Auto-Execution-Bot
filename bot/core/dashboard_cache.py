@@ -9,6 +9,8 @@ from bot.trading.symbol_mapper import detect_asset_class, map_symbol, needs_offs
 
 logger = logging.getLogger(__name__)
 
+_MARGIN_MODE_HEDGING = 2  # mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
+
 
 @dataclass
 class DashboardData:
@@ -61,6 +63,9 @@ class DashboardCache:
                 "margin_free": account_info.margin_free,
                 "leverage": account_info.leverage,
                 "currency": account_info.currency,
+                "server": account_info.server,
+                "company": account_info.company,
+                "hedging": account_info.margin_mode == _MARGIN_MODE_HEDGING,
             }
 
         all_symbols = {p.symbol for p in mt5_positions} | {o.symbol for o in mt5_orders}

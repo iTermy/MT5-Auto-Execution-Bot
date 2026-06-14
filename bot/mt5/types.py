@@ -15,6 +15,7 @@ class OrderRequest:
     deviation: int = 20
     type_time: int = 0  # ORDER_TIME_GTC
     expiration: int = 0
+    type_filling: int | None = None  # None → omit, let the terminal pick its default
 
 
 @dataclass
@@ -75,6 +76,14 @@ class SymbolInfo:
     trade_tick_value: float
     trade_tick_size: float
     trade_contract_size: float
+    filling_mode: int = 0  # SYMBOL_FILLING_* bitmask of modes the broker allows
+
+
+@dataclass
+class RateInfo:
+    time: int  # bar open time, broker-server epoch seconds
+    open: float
+    close: float
 
 
 @dataclass
@@ -86,6 +95,9 @@ class AccountInfo:
     margin_free: float
     leverage: int
     currency: str
+    margin_mode: int = 0  # ACCOUNT_MARGIN_MODE_* (RETAIL_HEDGING expected)
+    server: str = ""
+    company: str = ""
 
 
 @dataclass

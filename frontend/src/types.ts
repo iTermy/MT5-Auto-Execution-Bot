@@ -110,6 +110,9 @@ export interface AccountData {
   margin_free: number
   leverage: number
   currency: string
+  server?: string
+  company?: string
+  hedging?: boolean
 }
 
 export interface PositionData {

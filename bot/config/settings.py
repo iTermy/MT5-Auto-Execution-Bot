@@ -128,7 +128,10 @@ class Settings(BaseModel):
     ]
     offset_drift_threshold_pips: float = 5.0
     offset_drift_check_interval_seconds: int = 1800
-    feed_max_staleness_seconds: int = 30
+    # Dead-feed bound, not a freshness gate: the feed is written infrequently and
+    # may sit idle, so an old updated_at is normal. The offset is anchored to that
+    # timestamp; only skip when the feed has gone fully dark beyond this many seconds.
+    feed_max_staleness_seconds: int = 3600
     spread_hour: SpreadHourConfig = SpreadHourConfig()
     proximity: ProximityConfig = ProximityConfig()
     tp_config: TPConfig

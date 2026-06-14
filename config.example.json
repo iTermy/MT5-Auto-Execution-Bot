@@ -40,7 +40,7 @@
     "USOILSPOT"
   ],
   "offset_drift_threshold_pips": 5.0,
-  "feed_max_staleness_seconds": 30,
+  "feed_max_staleness_seconds": 3600,
   "spread_hour": {
     "daily_start": "16:45",
     "daily_end": "18:00",

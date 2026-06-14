@@ -1,7 +1,14 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
-import { startEngine, stopEngine, shutdownEngine, updateConfig, scanMt5Terminals } from '../api'
+import {
+  startEngine,
+  stopEngine,
+  shutdownEngine,
+  updateConfig,
+  scanMt5Terminals,
+  fetchMt5Symbols,
+} from '../api'
 import type {
   Config,
   TPConfig,
@@ -132,6 +139,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [oneToOneDefault, setOneToOneDefault] = useState('10')
   const [oneToOneRows, setOneToOneRows] = useState<OneToOneOverrideRow[]>([])
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
+  const [brokerSymbols, setBrokerSymbols] = useState<string[]>([])
   const [stockSuffix, setStockSuffix] = useState('-24')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -301,6 +309,18 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   useEffect(() => {
     if (config) initFromConfig(config)
   }, [config, initFromConfig])
+
+  // Broker symbol catalogue for the mapping picker — populated once MT5 is up.
+  useEffect(() => {
+    fetchMt5Symbols()
+      .then(setBrokerSymbols)
+      .catch(() => setBrokerSymbols([]))
+  }, [])
+
+  const brokerSymbolSet = useMemo(() => new Set(brokerSymbols), [brokerSymbols])
+  // Flag a mapping whose target isn't in the broker's catalogue (only once it's loaded).
+  const isUnknownSymbol = (sym: string) =>
+    brokerSymbolSet.size > 0 && sym.trim().length > 0 && !brokerSymbolSet.has(sym.trim())
 
   function updateTpStandard(i: number, field: 'thr' | 'unit' | 'trail' | 'partial', value: string) {
     setTpRows(prev => prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)))
@@ -1728,13 +1748,24 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                 <td>
                   <input
                     className="inp mono"
+                    list="broker-symbols"
                     value={m.mt5}
                     onChange={e => updateSymbolRow(i, 'mt5', e.target.value)}
-                    style={{ width: 150 }}
+                    style={{
+                      width: 150,
+                      borderColor: isUnknownSymbol(m.mt5) ? 'var(--neg, #c0392b)' : undefined,
+                    }}
+                    title={
+                      isUnknownSymbol(m.mt5) ? 'Not found in this broker’s symbol list' : undefined
+                    }
                   />
                 </td>
                 <td>
-                  {m.feed ? (
+                  {isUnknownSymbol(m.mt5) ? (
+                    <span className="tag ghost" style={{ color: 'var(--neg, #c0392b)' }}>
+                      not found
+                    </span>
+                  ) : m.feed ? (
                     <span className="tag long">offset feed</span>
                   ) : (
                     <span className="tag ghost">direct</span>
@@ -1749,6 +1780,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             ))}
           </tbody>
         </table>
+        <datalist id="broker-symbols">
+          {brokerSymbols.map(s => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
         <div
           style={{
             display: 'flex',

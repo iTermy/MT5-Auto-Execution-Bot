@@ -155,6 +155,11 @@ def mock_mt5() -> MagicMock:
     client.ensure_connected.return_value = True
     client.symbol_info.return_value = make_symbol_info()
     client.symbol_info_tick.return_value = make_tick()
+    # Empty catalogue → availability falls back to tick checks (legacy behavior).
+    client.symbols_get.return_value = frozenset()
+    client.symbol_select.return_value = True
+    client.copy_ticks_range.return_value = []
+    client.copy_rates_range.return_value = []
     # Default: no MT5 deal history available → callers fall back to position.profit
     client.get_position_realized_pnl.return_value = None
     return client

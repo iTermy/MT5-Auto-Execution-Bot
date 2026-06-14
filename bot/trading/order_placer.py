@@ -119,6 +119,7 @@ class OrderPlacer:
             sl=adj_sl,
             magic=MAGIC_NUMBER,
             comment=comment,
+            type_filling=mt5.ORDER_FILLING_RETURN,  # resting limit order
         )
 
         result = mt5_client.order_send(request)

@@ -13,6 +13,7 @@ from bot.mt5.types import (
     OrderRequest,
     OrderResult,
     PositionInfo,
+    RateInfo,
     SymbolInfo,
     TickInfo,
 )
@@ -29,6 +30,12 @@ _TRANSIENT_RETCODES = frozenset(
 
 _BULK_CACHE_TTL = 0.5  # seconds — collapses duplicate calls within a single cycle
 _TICK_FAIL_COOLDOWN = 60.0  # seconds — silence repeat errors for a missing symbol
+_SYMBOLS_CACHE_TTL = 300.0  # seconds — broker symbol list is near-static
+
+# symbol_info.filling_mode bitmask values (the MetaTrader5 package exposes the
+# ORDER_FILLING_* enum but not these SYMBOL_FILLING_* bits).
+_SYMBOL_FILLING_FOK = 1
+_SYMBOL_FILLING_IOC = 2
 
 
 class MT5Client:
@@ -39,6 +46,8 @@ class MT5Client:
         self._orders_cache: tuple[float, list[OrderInfo]] | None = None
         self._account_cache: tuple[float, AccountInfo | None] | None = None
         self._tick_unavailable_until: dict[str, float] = {}
+        self._symbols_cache: tuple[float, frozenset[str]] | None = None
+        self._selected: set[str] = set()
 
     def ensure_connected(self) -> bool:
         return self._conn.ensure_connected()
@@ -58,6 +67,8 @@ class MT5Client:
             "type_time": request.type_time,
             "expiration": request.expiration,
         }
+        if request.type_filling is not None:
+            req["type_filling"] = request.type_filling
         result = None
         for attempt in range(1, 4):
             result = mt5.order_send(req)
@@ -175,6 +186,7 @@ class MT5Client:
             trade_tick_value=raw.trade_tick_value,
             trade_tick_size=raw.trade_tick_size,
             trade_contract_size=raw.trade_contract_size,
+            filling_mode=raw.filling_mode,
         )
         self._symbol_info_cache[symbol] = info
         return info
@@ -208,9 +220,71 @@ class MT5Client:
             margin_free=raw.margin_free,
             leverage=raw.leverage,
             currency=raw.currency,
+            margin_mode=raw.margin_mode,
+            server=raw.server,
+            company=raw.company,
         )
         self._account_cache = (now, result)
         return result
+
+    def symbols_get(self) -> frozenset[str]:
+        """All symbol names the broker exposes (visible or not). Cached — the list
+        is near-static and symbols_get() returns thousands of rows."""
+        now = time.monotonic()
+        if self._symbols_cache and (now - self._symbols_cache[0]) < _SYMBOLS_CACHE_TTL:
+            return self._symbols_cache[1]
+        raw = mt5.symbols_get()
+        names = frozenset(s.name for s in raw) if raw else frozenset()
+        self._symbols_cache = (now, names)
+        return names
+
+    def symbol_select(self, symbol: str) -> bool:
+        """Load a symbol into MarketWatch so ticks/history become available. Called
+        once per symbol — brokers hide most of their catalogue by default."""
+        if symbol in self._selected:
+            return True
+        if mt5.symbol_select(symbol, True):
+            self._selected.add(symbol)
+            return True
+        return False
+
+    def resolve_filling(self, symbol: str) -> int:
+        """Pick a market-order filling mode the symbol actually allows. Prefer IOC
+        (the prior hardcoded choice — keeps ICMarkets behavior), then FOK, then
+        RETURN, so brokers that reject IOC don't fail closes."""
+        info = self.symbol_info(symbol)
+        mode = info.filling_mode if info else 0
+        if mode & _SYMBOL_FILLING_IOC:
+            return mt5.ORDER_FILLING_IOC
+        if mode & _SYMBOL_FILLING_FOK:
+            return mt5.ORDER_FILLING_FOK
+        return mt5.ORDER_FILLING_RETURN
+
+    def copy_ticks_range(
+        self, symbol: str, date_from: datetime, date_to: datetime
+    ) -> list[TickInfo]:
+        """Historical ticks in [date_from, date_to]. Datetimes must already be in
+        the broker server frame (see OffsetCalculator). Returns [] when none."""
+        raw = mt5.copy_ticks_range(symbol, date_from, date_to, mt5.COPY_TICKS_ALL)
+        if raw is None or len(raw) == 0:
+            return []
+        return [
+            TickInfo(symbol=symbol, bid=float(t["bid"]), ask=float(t["ask"]), time=int(t["time"]))
+            for t in raw
+        ]
+
+    def copy_rates_range(
+        self, symbol: str, timeframe: int, date_from: datetime, date_to: datetime
+    ) -> list[RateInfo]:
+        """Historical bars in [date_from, date_to] — M1 fallback for offset lookups
+        when tick history isn't available that far back. Returns [] when none."""
+        raw = mt5.copy_rates_range(symbol, timeframe, date_from, date_to)
+        if raw is None or len(raw) == 0:
+            return []
+        return [
+            RateInfo(time=int(r["time"]), open=float(r["open"]), close=float(r["close"]))
+            for r in raw
+        ]
 
     def cancel_pending_order(self, ticket: int) -> OrderResult | None:
         result = mt5.order_send(
@@ -258,7 +332,7 @@ class MT5Client:
             "deviation": 20,
             "magic": MAGIC_NUMBER,
             "comment": comment or "tp",
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self.resolve_filling(symbol),
         }
         result = None
         for attempt in range(1, 4):

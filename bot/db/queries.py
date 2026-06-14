@@ -21,7 +21,7 @@ ORDER BY s.id, l.sequence_number
 """
 
 FETCH_LIVE_PRICES = """
-SELECT symbol, bid, ask, feed, updated_at, ic_bid, ic_ask
+SELECT symbol, bid, ask, feed, updated_at
 FROM live_prices
 WHERE symbol = ANY($1)
 """

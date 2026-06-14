@@ -201,7 +201,9 @@ class MT5Client:
             self._tick_unavailable_until[symbol] = now + _TICK_FAIL_COOLDOWN
             return None
         self._tick_unavailable_until.pop(symbol, None)
-        return TickInfo(symbol=symbol, bid=raw.bid, ask=raw.ask, time=raw.time)
+        return TickInfo(
+            symbol=symbol, bid=raw.bid, ask=raw.ask, time=raw.time, time_msc=raw.time_msc
+        )
 
     def account_info(self) -> AccountInfo | None:
         now = time.monotonic()
@@ -269,7 +271,13 @@ class MT5Client:
         if raw is None or len(raw) == 0:
             return []
         return [
-            TickInfo(symbol=symbol, bid=float(t["bid"]), ask=float(t["ask"]), time=int(t["time"]))
+            TickInfo(
+                symbol=symbol,
+                bid=float(t["bid"]),
+                ask=float(t["ask"]),
+                time=int(t["time"]),
+                time_msc=int(t["time_msc"]),
+            )
             for t in raw
         ]
 

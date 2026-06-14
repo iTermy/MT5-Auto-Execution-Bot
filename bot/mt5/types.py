@@ -63,6 +63,7 @@ class TickInfo:
     bid: float
     ask: float
     time: int
+    time_msc: int = 0  # broker-server epoch milliseconds (sub-second tick precision)
 
 
 @dataclass

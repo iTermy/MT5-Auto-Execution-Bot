@@ -117,8 +117,15 @@ offset = mt5_mid - feed_mid
 mt5_order_price = db_limit_price + offset  (then apply spread adjustment)
 ```
 Offset instruments: SPX500USD->US500, NAS100USD->USTEC, BTCUSDT->BTCUSD, ETHUSDT->ETHUSD.
-Freshness check: `live_prices.updated_at` must be within 30s. Skip placement if stale.
-Readjust existing orders if offset drift > threshold (default 5 pips).
+`mt5_mid` and `feed_mid` are paired AT THE FEED'S EXACT `updated_at`: the broker mid is read
+from MT5 tick history (`copy_ticks_range`) matched to `updated_at` to the millisecond
+(`time_msc`), so the gap between the feed timestamp and "now" never leaks into the offset
+(M1-bar mid is the fallback when tick history is empty). Recompute is throttled per symbol
+(`offset_recompute_interval_seconds`, default 300s) and the cached offset served between — one
+tick + one history call per symbol per interval; a transient history gap reuses the last good
+offset. Dead-feed bound (`feed_max_staleness_seconds`, default 120s): while a signal is active
+a stale `updated_at` means the feed updater stalled → skip placement. Readjust existing orders
+if offset drift > threshold (default 5 pips).
 
 ## Symbol Mapping
 | DB Instrument | MT5 Symbol | Offset? |

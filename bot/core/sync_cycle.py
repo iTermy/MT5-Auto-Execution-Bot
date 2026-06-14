@@ -545,7 +545,11 @@ class SyncCycle:
                                 result.errors += 1
                                 continue
                             offset = self._offset_calc.get_offset(
-                                mt5_sym, live_row, mt5_client, config.feed_max_staleness_seconds
+                                mt5_sym,
+                                live_row,
+                                mt5_client,
+                                config.feed_max_staleness_seconds,
+                                config.offset_recompute_interval_seconds,
                             )
                             if offset is None:
                                 result.errors += 1
@@ -607,7 +611,11 @@ class SyncCycle:
                     if live_row is None:
                         continue
                     current_offset = self._offset_calc.get_offset(
-                        mt5_symbol, live_row, mt5_client, config.feed_max_staleness_seconds
+                        mt5_symbol,
+                        live_row,
+                        mt5_client,
+                        config.feed_max_staleness_seconds,
+                        config.offset_recompute_interval_seconds,
                     )
                     if current_offset is None:
                         continue
@@ -751,7 +759,11 @@ class SyncCycle:
                 live_row = live_prices.get(instrument)
                 if live_row is not None:
                     current_offset = self._offset_calc.get_offset(
-                        mt5_sym, live_row, mt5_client, config.feed_max_staleness_seconds
+                        mt5_sym,
+                        live_row,
+                        mt5_client,
+                        config.feed_max_staleness_seconds,
+                        config.offset_recompute_interval_seconds,
                     )
                     offset = (
                         current_offset

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.core.sync_cycle import SyncCycle
@@ -161,7 +162,9 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
     row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+        live_prices={
+            "SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -224,7 +227,9 @@ async def test_offset_drift_skipped_when_signal_marked_hit(
     row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+        live_prices={
+            "SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -340,7 +345,9 @@ async def test_drift_skipped_when_sibling_already_filled(
     filled_row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[filled_row, pending_row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+        live_prices={
+            "SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -386,7 +393,9 @@ async def test_drift_check_skipped_within_interval(sqlite_db, mock_mt5, sample_c
     row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": None}},
+        live_prices={
+            "SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 

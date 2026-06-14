@@ -7,8 +7,11 @@ from bot.trading.offset_calculator import OffsetCalculator
 from tests.conftest import make_tick
 
 # Pin "server == UTC" so target_epoch == updated_at epoch and history windows are
-# easy to reason about. ref tick .time is server epoch; with time.time() ~= now the
-# derived server_offset rounds to 0.
+# easy to reason about. The ref tick .time is the server epoch; with time.time() ~=
+# now the derived server_offset rounds to 0. A large recompute interval keeps each
+# call independent unless a test explicitly probes the throttle.
+
+_INTERVAL = 300
 
 
 def _client(**overrides) -> MagicMock:
@@ -31,90 +34,102 @@ def _row(bid: float, ask: float, age_seconds: float) -> dict:
     }
 
 
-def test_fresh_feed_uses_live_tick() -> None:
-    # Feed written seconds ago → pair with the current tick, no history call.
-    calc = OffsetCalculator()
-    client = _client()
-    client.symbol_info_tick.return_value = make_tick(bid=4610.0, ask=4612.0)
-    offset = calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=5), client, 3600)
-    assert offset == (4611.0 - 4600.5)
-    client.copy_ticks_range.assert_not_called()
+def _tick(updated_at: datetime, bid: float, ask: float, offset_ms: int = 0) -> TickInfo:
+    epoch_ms = int(updated_at.timestamp() * 1000) + offset_ms
+    return TickInfo(
+        symbol="US500", bid=bid, ask=ask, time=epoch_ms // 1000, time_msc=epoch_ms
+    )
 
 
-def test_old_feed_uses_timestamp_matched_history() -> None:
-    # Feed 10 min old → look up the broker tick at updated_at, not the live tick.
+def test_offset_matched_to_updated_at() -> None:
+    # Broker mid at the feed's exact updated_at minus the feed mid.
     calc = OffsetCalculator()
-    row = _row(4600.0, 4601.0, age_seconds=600)
-    target = row["updated_at"].timestamp()
-    ticks = [
-        TickInfo(symbol="US500", bid=4598.0, ask=4600.0, time=int(target - 30)),
-        TickInfo(symbol="US500", bid=4620.0, ask=4622.0, time=int(target)),  # closest
-    ]
+    row = _row(4600.0, 4601.0, age_seconds=2)
     client = _client()
-    client.copy_ticks_range.return_value = ticks
-    offset = calc.get_offset("US500", row, client, 3600)
+    client.copy_ticks_range.return_value = [_tick(row["updated_at"], 4620.0, 4622.0)]
+    offset = calc.get_offset("US500", row, client, 120, _INTERVAL)
     assert offset == (4621.0 - 4600.5)
-    client.copy_ticks_range.assert_called_once()
+
+
+def test_picks_closest_tick_to_the_millisecond() -> None:
+    # Several ticks around updated_at → the one nearest in time_msc is used, even a
+    # second on either side.
+    calc = OffsetCalculator()
+    row = _row(4600.0, 4601.0, age_seconds=2)
+    client = _client()
+    client.copy_ticks_range.return_value = [
+        _tick(row["updated_at"], 4598.0, 4600.0, offset_ms=-1200),
+        _tick(row["updated_at"], 4620.0, 4622.0, offset_ms=-50),  # closest
+        _tick(row["updated_at"], 4640.0, 4642.0, offset_ms=900),
+    ]
+    offset = calc.get_offset("US500", row, client, 120, _INTERVAL)
+    assert offset == (4621.0 - 4600.5)
 
 
 def test_m1_fallback_when_no_ticks() -> None:
     calc = OffsetCalculator()
-    row = _row(4600.0, 4601.0, age_seconds=600)
+    row = _row(4600.0, 4601.0, age_seconds=60)
     target = row["updated_at"].timestamp()
     client = _client()
     client.copy_ticks_range.return_value = []
     client.copy_rates_range.return_value = [RateInfo(time=int(target), open=4618.0, close=4622.0)]
-    offset = calc.get_offset("US500", row, client, 3600)
+    offset = calc.get_offset("US500", row, client, 120, _INTERVAL)
     assert offset == (4620.0 - 4600.5)
 
 
-def test_skips_when_no_history() -> None:
+def test_skips_when_no_history_and_no_cache() -> None:
     calc = OffsetCalculator()
     client = _client()  # both tick-range and rate-range empty
-    assert calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=600), client, 3600) is None
+    assert calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=60), client, 120, _INTERVAL) is None
 
 
 def test_dead_feed_beyond_bound_skipped() -> None:
     calc = OffsetCalculator()
     client = _client()
-    # 2h old, bound 1h → dead feed, skip without any history lookup.
-    assert calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=7200), client, 3600) is None
+    # 5min old, bound 2min → stalled feed, skip without any history lookup.
+    assert calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=300), client, 120, _INTERVAL) is None
     client.copy_ticks_range.assert_not_called()
 
 
-def test_idle_feed_served_from_cache_no_repeat_history() -> None:
-    # Frozen updated_at over many cycles → exactly one history lookup, then cache.
+def test_recompute_throttled_to_interval() -> None:
+    # Within the recompute interval the cached offset is served and no MT5 history
+    # call is repeated, even as the feed row keeps changing.
     calc = OffsetCalculator()
-    row = _row(4600.0, 4601.0, age_seconds=600)
-    target = row["updated_at"].timestamp()
+    row1 = _row(4600.0, 4601.0, age_seconds=10)
     client = _client()
-    client.copy_ticks_range.return_value = [
-        TickInfo(symbol="US500", bid=4620.0, ask=4622.0, time=int(target))
-    ]
-    first = calc.get_offset("US500", row, client, 3600)
+    client.copy_ticks_range.return_value = [_tick(row1["updated_at"], 4620.0, 4622.0)]
+    first = calc.get_offset("US500", row1, client, 120, _INTERVAL)
     for _ in range(10):
-        again = calc.get_offset("US500", row, client, 3600)
+        again = calc.get_offset("US500", _row(4605.0, 4606.0, age_seconds=5), client, 120, _INTERVAL)
         assert again == first
     client.copy_ticks_range.assert_called_once()
 
 
-def test_new_feed_row_recomputes() -> None:
+def test_recomputes_after_interval_elapses() -> None:
+    # A zero interval forces recomputation on every call.
     calc = OffsetCalculator()
+    row1 = _row(4600.0, 4601.0, age_seconds=10)
     client = _client()
-    target1 = (datetime.now(UTC) - timedelta(seconds=600)).timestamp()
-    row1 = _row(4600.0, 4601.0, age_seconds=600)
-    client.copy_ticks_range.return_value = [
-        TickInfo(symbol="US500", bid=4620.0, ask=4622.0, time=int(row1["updated_at"].timestamp()))
-    ]
-    calc.get_offset("US500", row1, client, 3600)
-    row2 = _row(4605.0, 4606.0, age_seconds=600)
-    client.copy_ticks_range.return_value = [
-        TickInfo(symbol="US500", bid=4630.0, ask=4632.0, time=int(row2["updated_at"].timestamp()))
-    ]
-    offset2 = calc.get_offset("US500", row2, client, 3600)
+    client.copy_ticks_range.return_value = [_tick(row1["updated_at"], 4620.0, 4622.0)]
+    calc.get_offset("US500", row1, client, 120, 0)
+    row2 = _row(4605.0, 4606.0, age_seconds=10)
+    client.copy_ticks_range.return_value = [_tick(row2["updated_at"], 4630.0, 4632.0)]
+    offset2 = calc.get_offset("US500", row2, client, 120, 0)
     assert offset2 == (4631.0 - 4605.5)
     assert client.copy_ticks_range.call_count == 2
-    _ = target1
+
+
+def test_history_gap_serves_cached_offset() -> None:
+    # Once cached, a transient history gap returns the last good offset, not None.
+    calc = OffsetCalculator()
+    row1 = _row(4600.0, 4601.0, age_seconds=10)
+    client = _client()
+    client.copy_ticks_range.return_value = [_tick(row1["updated_at"], 4620.0, 4622.0)]
+    first = calc.get_offset("US500", row1, client, 120, 0)
+    client.copy_ticks_range.return_value = []
+    client.copy_rates_range.return_value = []
+    again = calc.get_offset("US500", _row(4605.0, 4606.0, age_seconds=10), client, 120, 0)
+    assert again == first
 
 
 def test_check_drift() -> None:

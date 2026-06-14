@@ -128,10 +128,12 @@ class Settings(BaseModel):
     ]
     offset_drift_threshold_pips: float = 5.0
     offset_drift_check_interval_seconds: int = 1800
-    # Dead-feed bound, not a freshness gate: the feed is written infrequently and
-    # may sit idle, so an old updated_at is normal. The offset is anchored to that
-    # timestamp; only skip when the feed has gone fully dark beyond this many seconds.
-    feed_max_staleness_seconds: int = 3600
+    # Offset is a slow-moving broker-vs-feed property — recompute at most this often
+    # per symbol and serve the cached value in between (the feed itself refreshes ~5s).
+    offset_recompute_interval_seconds: int = 300
+    # Dead-feed bound: while a signal is active the feed refreshes ~5s, so a stale
+    # updated_at means the feed updater has stalled — skip placement past this age.
+    feed_max_staleness_seconds: int = 120
     spread_hour: SpreadHourConfig = SpreadHourConfig()
     proximity: ProximityConfig = ProximityConfig()
     tp_config: TPConfig

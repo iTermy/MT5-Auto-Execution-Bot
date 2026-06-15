@@ -141,6 +141,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
   const [brokerSymbols, setBrokerSymbols] = useState<string[]>([])
   const [stockSuffix, setStockSuffix] = useState('-24')
+  const [universalSuffix, setUniversalSuffix] = useState('')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(false)
@@ -304,6 +305,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       }))
     )
     setStockSuffix(cfg.stock_suffix ?? '-24')
+    setUniversalSuffix(cfg.universal_suffix ?? '')
   }, [])
 
   useEffect(() => {
@@ -579,6 +581,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         tp_config: buildTpConfig(),
         symbol_map: buildSymbolMap(),
         stock_suffix: stockSuffix,
+        universal_suffix: universalSuffix,
       }
       await updateConfig(updated)
       onConfigSaved(updated)
@@ -1785,18 +1788,13 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             <option key={s} value={s} />
           ))}
         </datalist>
-        <div
-          style={{
-            display: 'flex',
-            gap: 20,
-            alignItems: 'flex-end',
-            marginTop: 14,
-            flexWrap: 'wrap',
-          }}
-        >
+        <div style={{ marginTop: 14 }}>
           <button className="btn sm ghost" onClick={addSymbolRow}>
             + Add mapping
           </button>
+        </div>
+        <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
+        <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="field" style={{ marginBottom: 0 }}>
             <label>Stock suffix</label>
             <input
@@ -1806,8 +1804,28 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                 setStockSuffix(e.target.value)
                 touch()
               }}
-              style={{ width: 80 }}
+              placeholder="-24"
+              style={{ width: 120 }}
             />
+            <span className="faint" style={{ fontSize: 12 }}>
+              appended to .NAS / .NYSE stocks only
+            </span>
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Universal suffix</label>
+            <input
+              className="inp mono"
+              value={universalSuffix}
+              onChange={e => {
+                setUniversalSuffix(e.target.value)
+                touch()
+              }}
+              placeholder="e.g. m"
+              style={{ width: 120 }}
+            />
+            <span className="faint" style={{ fontSize: 12 }}>
+              appended to every symbol (e.g. Exness: EURUSD → EURUSDm)
+            </span>
           </div>
         </div>
       </div>

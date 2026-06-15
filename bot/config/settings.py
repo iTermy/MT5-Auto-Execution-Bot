@@ -116,6 +116,8 @@ class Settings(BaseModel):
         "US30USD": "US30",
     }
     stock_suffix: str = "-24"
+    # Appended to every MT5 symbol (e.g. Exness adds "m": EURUSD -> EURUSDm).
+    universal_suffix: str = ""
     stock_no_suffix: list[str] = []
     excluded_symbols: list[str] = []
     offset_instruments: list[str] = [

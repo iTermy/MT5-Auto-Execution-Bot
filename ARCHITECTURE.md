@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     "ETHUSDT": "ETHUSD"
   },
   "stock_suffix": "-24",
+  "universal_suffix": "",
 
   "offset_instruments": ["SPX500USD", "NAS100USD", "BTCUSDT", "ETHUSDT"],
   "offset_drift_threshold_pips": 5,
@@ -370,6 +371,10 @@ Static files: FastAPI serves `frontend/dist/` at `/`. In dev, Vite dev server on
 - **db_symbol_from_mt5()** in `bot/trading/symbol_mapper.py` reverse-maps MT5 symbols to DB symbols
   (e.g., "BTCUSD" → "BTCUSDT", "AMD.NAS-24" → "AMD.NAS"). Required by TPEngine so it can call
   `detect_asset_class()` with the correct DB symbol.
+
+- **universal_suffix** is appended by `map_symbol()` to every resolved MT5 symbol (after symbol_map /
+  stock_suffix resolution) for brokers that suffix all symbols — e.g. Exness "m": EURUSD → EURUSDm.
+  `db_symbol_from_mt5()` strips it first before any other reverse mapping. Defaults to `""` (no-op).
 
 - **close_position() and modify_position_sl()** added to `MT5Client`. close_position() uses
   `TRADE_ACTION_DEAL` with retry on transient errors. modify_position_sl() uses `TRADE_ACTION_SLTP`,

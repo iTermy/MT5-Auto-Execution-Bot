@@ -30,12 +30,12 @@ def detect_asset_class(db_symbol: str) -> AssetClass:
 
 def map_symbol(db_symbol: str, config: Settings) -> str:
     if db_symbol in config.symbol_map:
-        return config.symbol_map[db_symbol]
-    if db_symbol.upper().endswith((".NAS", ".NYSE")):
-        if db_symbol in config.stock_no_suffix:
-            return db_symbol
-        return db_symbol + config.stock_suffix
-    return db_symbol
+        mt5_symbol = config.symbol_map[db_symbol]
+    elif db_symbol.upper().endswith((".NAS", ".NYSE")) and db_symbol not in config.stock_no_suffix:
+        mt5_symbol = db_symbol + config.stock_suffix
+    else:
+        mt5_symbol = db_symbol
+    return mt5_symbol + config.universal_suffix
 
 
 def needs_offset(db_symbol: str, config: Settings) -> bool:
@@ -44,6 +44,8 @@ def needs_offset(db_symbol: str, config: Settings) -> bool:
 
 def db_symbol_from_mt5(mt5_symbol: str, config: Settings) -> str:
     """Reverse-map MT5 symbol to DB symbol for asset-class detection."""
+    if config.universal_suffix and mt5_symbol.endswith(config.universal_suffix):
+        mt5_symbol = mt5_symbol[: -len(config.universal_suffix)]
     for db_sym, mapped in config.symbol_map.items():
         if mapped == mt5_symbol:
             return db_sym

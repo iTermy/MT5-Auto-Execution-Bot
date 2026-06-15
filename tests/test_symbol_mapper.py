@@ -87,6 +87,14 @@ def test_map_symbol_passthrough() -> None:
     assert map_symbol("XAUUSD", cfg) == "XAUUSD"
 
 
+def test_map_symbol_appends_universal_suffix() -> None:
+    cfg = make_settings(universal_suffix="m")
+    # Plain passthrough, symbol-map target, and stock suffix all get the universal suffix.
+    assert map_symbol("EURUSD", cfg) == "EURUSDm"
+    assert map_symbol("BTCUSDT", cfg) == "BTCUSDm"
+    assert map_symbol("AMD.NAS", cfg) == "AMD.NAS-24m"
+
+
 # ---------------------------------------------------------------------------
 # db_symbol_from_mt5 (reverse mapping)
 # ---------------------------------------------------------------------------
@@ -107,3 +115,10 @@ def test_db_symbol_from_mt5_strips_stock_suffix() -> None:
 def test_db_symbol_from_mt5_passthrough_unknown() -> None:
     cfg = make_settings()
     assert db_symbol_from_mt5("EURUSD", cfg) == "EURUSD"
+
+
+def test_db_symbol_from_mt5_strips_universal_suffix() -> None:
+    cfg = make_settings(universal_suffix="m")
+    assert db_symbol_from_mt5("EURUSDm", cfg) == "EURUSD"
+    assert db_symbol_from_mt5("BTCUSDm", cfg) == "BTCUSDT"  # reverse symbol_map after strip
+    assert db_symbol_from_mt5("AMD.NAS-24m", cfg) == "AMD.NAS"  # strip universal then stock

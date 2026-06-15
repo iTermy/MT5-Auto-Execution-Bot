@@ -27,6 +27,7 @@
     "DE30EUR": "DE40"
   },
   "stock_suffix": "-24",
+  "universal_suffix": "",
   "stock_no_suffix": [
     "GGLS.NAS",
     "COST.NAS"

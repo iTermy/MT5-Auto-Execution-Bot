@@ -93,6 +93,7 @@ export interface Config {
   magic_number: number
   symbol_map: Record<string, string>
   stock_suffix: string
+  universal_suffix: string
   stock_no_suffix: string[]
   excluded_symbols: string[]
   offset_instruments: string[]

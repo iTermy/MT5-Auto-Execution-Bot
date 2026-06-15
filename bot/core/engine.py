@@ -33,6 +33,7 @@ class Engine:
         sqlite: SQLiteDB,
         config: Settings,
         tp_engine: TPEngine,
+        tp_finalizer: Any | None = None,
         license_validator: Any | None = None,
     ) -> None:
         self._mt5 = mt5_client
@@ -41,6 +42,7 @@ class Engine:
         self._sqlite = sqlite
         self._config = config
         self._tp = tp_engine
+        self._tp_finalizer = tp_finalizer
         self._license = license_validator
         self._scheduler = MarketScheduler(config.spread_hour)
         self._sync_cycle = SyncCycle()
@@ -332,6 +334,8 @@ class Engine:
                     await self._tp.run_cycle(self._mt5, self._sqlite, config)
                 else:
                     await self._tp.run_cycle(self._mt5, self._sqlite, config, crypto_only=True)
+                if self._tp_finalizer is not None:
+                    await self._tp_finalizer.sweep(self._mt5, self._sqlite, config)
             except Exception:
                 logger.error("tp_loop error", exc_info=True)
 

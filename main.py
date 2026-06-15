@@ -24,6 +24,7 @@ from bot.license.validator import LicenseValidator
 from bot.mt5.client import MT5Client
 from bot.mt5.connection import MT5Connection
 from bot.tp.engine import TPEngine
+from bot.tp.finalizer import TPFinalizer
 from bot.utils.logging import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ def main() -> None:
     sqlite = SQLiteDB()
     tp_outcomes_writer = TPOutcomesWriter(supabase)
     tp_engine = TPEngine(outcomes_writer=tp_outcomes_writer)
+    tp_finalizer = TPFinalizer(tp_outcomes_writer)
     license_validator = LicenseValidator(license_url)
 
     engine = Engine(
@@ -130,6 +132,7 @@ def main() -> None:
         sqlite=sqlite,
         config=config,
         tp_engine=tp_engine,
+        tp_finalizer=tp_finalizer,
         license_validator=license_validator,
     )
     engine.app = create_app(engine)

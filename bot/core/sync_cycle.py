@@ -569,6 +569,7 @@ class SyncCycle:
                             sqlite=sqlite,
                             supabase=supabase,
                             channel_id=row["channel_id"],
+                            sequence_number=row["sequence_number"],
                         )
                         if outcome == "placed":
                             result.placed += 1

@@ -4,6 +4,7 @@ import aiosqlite
 
 from bot.db.queries import (
     CREATE_ORDER_MAPPINGS,
+    CREATE_SIGNAL_FINALIZED,
     DELETE_CLAIMED_ORDER,
     GET_ALL_ACTIVE,
     GET_CLAIMED_BY_SIGNAL_LIMIT,
@@ -14,6 +15,8 @@ from bot.db.queries import (
     GET_ORDER_HISTORY,
     GET_PENDING_BY_SIGNAL,
     GET_PENDING_ORDERS,
+    GET_SETTLED_UNFINALIZED_SIGNALS,
+    GET_SIGNAL_FINAL_AGGREGATE,
     GET_SIGNALS_WITH_FILLS,
     GET_TRAILING_POSITIONS,
     GET_USER_STATS,
@@ -22,10 +25,12 @@ from bot.db.queries import (
     MARK_CANCELLED,
     MARK_CLOSED,
     MARK_FILLED,
+    MARK_SIGNAL_FINALIZED,
     PROMOTE_CLAIMED_TO_PENDING,
     SET_TRAILING,
     SIGNAL_SUMMARY,
     UPDATE_DB_STOP_LOSS,
+    UPDATE_EXCURSION,
     UPDATE_LAST_OFFSET_CHECK,
     UPDATE_SL,
     UPDATE_TICKET,
@@ -58,9 +63,17 @@ class SQLiteDB:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute(CREATE_ORDER_MAPPINGS)
+        await self._db.execute(CREATE_SIGNAL_FINALIZED)
         await self._db.commit()
         # Migrations for existing databases
-        for col in ("symbol TEXT", "realized_pnl REAL", "channel_id INTEGER"):
+        for col in (
+            "symbol TEXT",
+            "realized_pnl REAL",
+            "channel_id INTEGER",
+            "sequence_number INTEGER",
+            "mfe_price REAL NOT NULL DEFAULT 0",
+            "mae_price REAL NOT NULL DEFAULT 0",
+        ):
             name = col.split()[0]
             try:
                 await self._db.execute(f"SELECT {name} FROM order_mappings LIMIT 0")
@@ -114,6 +127,7 @@ class SQLiteDB:
         offset: float | None = None,
         symbol: str | None = None,
         channel_id: int | None = None,
+        sequence_number: int | None = None,
     ) -> None:
         await self._db.execute(
             "DELETE FROM order_mappings WHERE limit_id = ? AND status NOT IN ('pending', 'filled')",
@@ -135,6 +149,7 @@ class SQLiteDB:
                 offset,
                 symbol,
                 channel_id,
+                sequence_number,
             ),
         )
         await self._db.commit()
@@ -191,6 +206,26 @@ class SQLiteDB:
         await self._db.execute(UPDATE_SL, (sl, mt5_ticket))
         await self._db.commit()
 
+    async def update_excursion(self, mt5_ticket: int, mfe_price: float, mae_price: float) -> None:
+        await self._db.execute(UPDATE_EXCURSION, (mfe_price, mae_price, mt5_ticket))
+        await self._db.commit()
+
+    async def get_settled_unfinalized_signals(self) -> list[int]:
+        async with self._db.execute(GET_SETTLED_UNFINALIZED_SIGNALS) as cursor:
+            rows = await cursor.fetchall()
+        return [row["signal_id"] for row in rows]
+
+    async def get_signal_final_aggregate(self, signal_id: int) -> aiosqlite.Row | None:
+        async with self._db.execute(GET_SIGNAL_FINAL_AGGREGATE, (signal_id,)) as cursor:
+            return await cursor.fetchone()
+
+    async def mark_signal_finalized(self, signal_id: int, finalized_at: str) -> bool:
+        """Record a signal as finalized. Returns True only if this call inserted the row
+        (i.e. it was not already finalized) — used to guard the single final-outcome write."""
+        cursor = await self._db.execute(MARK_SIGNAL_FINALIZED, (signal_id, finalized_at))
+        await self._db.commit()
+        return cursor.rowcount > 0
+
     async def update_ticket(self, old_ticket: int, new_ticket: int) -> bool:
         """Update the ticket on a filled row. Returns True if a row was actually updated."""
         cursor = await self._db.execute(UPDATE_TICKET, (new_ticket, old_ticket))
@@ -211,6 +246,7 @@ class SQLiteDB:
         offset: float | None = None,
         symbol: str | None = None,
         channel_id: int | None = None,
+        sequence_number: int | None = None,
     ) -> None:
         """Pre-write a claim row before order_send(). Uses -limit_id as placeholder ticket."""
         await self._db.execute(
@@ -233,6 +269,7 @@ class SQLiteDB:
                 offset,
                 symbol,
                 channel_id,
+                sequence_number,
             ),
         )
         await self._db.commit()

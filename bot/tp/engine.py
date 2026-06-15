@@ -14,9 +14,19 @@ from bot.tp.asset_config import get_config
 from bot.tp.default_strategy import DefaultTPStrategy
 from bot.tp.outcome import TPOutcome
 from bot.tp.strategy import TPResult, TPStrategy
+from bot.trading.lot_calculator import price_distance_to_money
 from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class
 
 logger = logging.getLogger(__name__)
+
+
+def _seconds_since(iso_str: str | None) -> float | None:
+    if not iso_str:
+        return None
+    try:
+        return (datetime.now(UTC) - datetime.fromisoformat(iso_str)).total_seconds()
+    except ValueError:
+        return None
 
 
 def _resolve_risk_percent(config: Settings, mt5_symbol: str) -> float | None:
@@ -50,6 +60,10 @@ class TPEngine:
         mt5_pos_map = {p.ticket: p for p in mt5_client.positions_get()}
         sqlite_rows = await sqlite.get_filled_positions()
 
+        # Sample MFE/MAE for every open position regardless of crypto_only — keeps
+        # excursion history complete through spread hours.
+        excursions = await self._sample_excursions(sqlite_rows, mt5_pos_map, mt5_client, sqlite)
+
         by_signal: dict[int, list] = defaultdict(list)
         for row in sqlite_rows:
             if row["mt5_ticket"] not in mt5_pos_map:
@@ -70,10 +84,50 @@ class TPEngine:
         for signal_id, rows in by_signal.items():
             try:
                 await self._process_group(
-                    signal_id, rows, mt5_pos_map, mt5_client, sqlite, config, mt5_account_login
+                    signal_id,
+                    rows,
+                    mt5_pos_map,
+                    mt5_client,
+                    sqlite,
+                    config,
+                    mt5_account_login,
+                    excursions,
                 )
             except Exception:
                 logger.error("TPEngine: unhandled error signal=%d", signal_id, exc_info=True)
+
+    async def _sample_excursions(
+        self,
+        sqlite_rows: list,
+        mt5_pos_map: dict[int, PositionInfo],
+        mt5_client: MT5Client,
+        sqlite: SQLiteDB,
+    ) -> dict[int, tuple[float, float]]:
+        """Ratchet each open position's max favourable / adverse price excursion
+        (distance from entry, always >= 0) and persist it. Returns ticket -> (mfe, mae)."""
+        ticks: dict[str, object] = {}
+        out: dict[int, tuple[float, float]] = {}
+        for row in sqlite_rows:
+            pos = mt5_pos_map.get(row["mt5_ticket"])
+            if pos is None:
+                continue
+            if pos.symbol not in ticks:
+                ticks[pos.symbol] = mt5_client.symbol_info_tick(pos.symbol)
+            tick = ticks[pos.symbol]
+            if tick is None:
+                continue
+            if pos.type == 0:  # long
+                fav, adv = tick.bid - pos.price_open, pos.price_open - tick.bid
+            else:  # short
+                fav, adv = pos.price_open - tick.ask, tick.ask - pos.price_open
+            prev_mfe = row["mfe_price"] or 0.0
+            prev_mae = row["mae_price"] or 0.0
+            mfe = max(prev_mfe, fav, 0.0)
+            mae = max(prev_mae, adv, 0.0)
+            out[pos.ticket] = (mfe, mae)
+            if mfe != prev_mfe or mae != prev_mae:
+                await sqlite.update_excursion(pos.ticket, mfe, mae)
+        return out
 
     async def _process_group(
         self,
@@ -84,6 +138,7 @@ class TPEngine:
         sqlite: SQLiteDB,
         config: Settings,
         mt5_account_login: int | None = None,
+        excursions: dict[int, tuple[float, float]] | None = None,
     ) -> None:
         trailing_rows = [r for r in rows if r["is_trailing"]]
         non_trailing_rows = [r for r in rows if not r["is_trailing"]]
@@ -129,6 +184,8 @@ class TPEngine:
                         sqlite,
                         config,
                         mt5_account_login,
+                        mt5_client,
+                        excursions or {},
                     )
 
     async def _record_outcome(
@@ -145,6 +202,8 @@ class TPEngine:
         sqlite: SQLiteDB,
         config: Settings,
         mt5_account_login: int | None,
+        mt5_client: MT5Client,
+        excursions: dict[int, tuple[float, float]],
     ) -> None:
         snapshot = result.snapshot
         if snapshot is None:
@@ -157,6 +216,25 @@ class TPEngine:
             risk_per_limit = (
                 abs(snapshot.avg_entry_price - float(stop_loss)) if stop_loss is not None else None
             )
+
+            sym_info = mt5_client.symbol_info(first_pos.symbol)
+            risk_money = (
+                price_distance_to_money(sym_info, risk_per_limit, snapshot.total_volume)
+                if sym_info is not None and risk_per_limit
+                else None
+            )
+            r_multiple = snapshot.realized_pnl / risk_money if risk_money else None
+
+            sig_excursions = [
+                excursions[r["mt5_ticket"]] for r in all_rows if r["mt5_ticket"] in excursions
+            ]
+            mfe_price = max((e[0] for e in sig_excursions), default=None)
+            mae_price = max((e[1] for e in sig_excursions), default=None)
+            mfe_r = mfe_price / risk_per_limit if mfe_price is not None and risk_per_limit else None
+            mae_r = mae_price / risk_per_limit if mae_price is not None and risk_per_limit else None
+
+            newest_row = max(non_trailing_rows, key=lambda r: r["mt5_ticket"])
+
             outcome = TPOutcome(
                 signal_id=signal_id,
                 mt5_account=mt5_account_login or 0,
@@ -181,9 +259,18 @@ class TPEngine:
                 partial_close_pct=int(snapshot.partial_close_pct),
                 trailing_started=snapshot.trailing_started,
                 risk_per_limit=risk_per_limit,
+                r_multiple=r_multiple,
                 risk_percent_cfg=_resolve_risk_percent(config, first_pos.symbol),
                 bot_version=BOT_VERSION,
                 notes={"non_trailing_count": len(non_trailing_rows)},
+                stage="trigger",
+                mfe_price=mfe_price,
+                mfe_r=mfe_r,
+                mae_price=mae_price,
+                mae_r=mae_r,
+                level_sequence=newest_row["sequence_number"],
+                total_levels=summary["total"],
+                seconds_to_trigger=_seconds_since(newest_row["filled_at"]),
             )
             await self._outcomes_writer.record(outcome)
         except Exception:

@@ -58,7 +58,10 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     is_trailing             INTEGER NOT NULL DEFAULT 0,
     symbol                  TEXT,
     realized_pnl            REAL,
-    channel_id              INTEGER
+    channel_id              INTEGER,
+    sequence_number         INTEGER,
+    mfe_price               REAL NOT NULL DEFAULT 0,
+    mae_price               REAL NOT NULL DEFAULT 0
 )
 """
 
@@ -66,8 +69,8 @@ INSERT_ORDER = """
 INSERT OR IGNORE INTO order_mappings
     (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
      db_stop_loss, signal_type, feed_price_at_placement, mt5_price_at_placement,
-     offset_at_placement, symbol, channel_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     offset_at_placement, symbol, channel_id, sequence_number)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 MARK_FILLED = """
@@ -106,6 +109,10 @@ UPDATE_SL = """
 UPDATE order_mappings SET last_known_mt5_sl = ? WHERE mt5_ticket = ?
 """
 
+UPDATE_EXCURSION = """
+UPDATE order_mappings SET mfe_price = ?, mae_price = ? WHERE mt5_ticket = ?
+"""
+
 UPDATE_TICKET = """
 UPDATE order_mappings SET mt5_ticket = ? WHERE mt5_ticket = ? AND status = 'filled'
 """
@@ -114,8 +121,8 @@ INSERT_CLAIMED_ORDER = """
 INSERT OR IGNORE INTO order_mappings
     (limit_id, signal_id, mt5_ticket, order_type, lot_size, placed_at,
      db_stop_loss, signal_type, feed_price_at_placement, mt5_price_at_placement,
-     offset_at_placement, symbol, channel_id, status)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'claimed')
+     offset_at_placement, symbol, channel_id, sequence_number, status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'claimed')
 """
 
 PROMOTE_CLAIMED_TO_PENDING = """
@@ -155,6 +162,60 @@ SELECT DISTINCT signal_id FROM order_mappings WHERE status = 'filled'
 # whose other limits already hit.
 GET_SIGNALS_WITH_FILLS = """
 SELECT DISTINCT signal_id FROM order_mappings WHERE status IN ('filled', 'closed')
+"""
+
+# SQLite — guard table marking a signal's full-trade outcome as already recorded.
+CREATE_SIGNAL_FINALIZED = """
+CREATE TABLE IF NOT EXISTS signal_finalized (
+    signal_id    BIGINT PRIMARY KEY,
+    finalized_at TEXT NOT NULL
+)
+"""
+
+MARK_SIGNAL_FINALIZED = """
+INSERT OR IGNORE INTO signal_finalized (signal_id, finalized_at) VALUES (?, ?)
+"""
+
+# Signals that have had at least one real fill, have nothing still open or pending,
+# and have not yet been finalized — i.e. the trade is fully settled.
+GET_SETTLED_UNFINALIZED_SIGNALS = """
+SELECT DISTINCT om.signal_id
+FROM order_mappings om
+WHERE om.signal_id NOT IN (SELECT signal_id FROM signal_finalized)
+  AND EXISTS (
+      SELECT 1 FROM order_mappings f
+      WHERE f.signal_id = om.signal_id
+        AND f.status IN ('filled', 'closed')
+        AND f.order_type != 'remainder'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM order_mappings a
+      WHERE a.signal_id = om.signal_id
+        AND a.status IN ('filled', 'pending', 'claimed')
+  )
+"""
+
+# Full-trade aggregate for a settled signal. realized_pnl and excursions span every
+# ticket (including trailing remainders); entry/risk/level stats use only real limits.
+GET_SIGNAL_FINAL_AGGREGATE = """
+SELECT
+    SUM(COALESCE(realized_pnl, 0))                                       AS realized_pnl,
+    MAX(mfe_price)                                                       AS mfe_price,
+    MAX(mae_price)                                                       AS mae_price,
+    MAX(is_trailing)                                                     AS any_trailing,
+    MIN(filled_at)                                                       AS first_filled_at,
+    MAX(cancelled_at)                                                    AS last_closed_at,
+    MAX(symbol)                                                          AS symbol,
+    MAX(signal_type)                                                     AS signal_type,
+    MAX(channel_id)                                                      AS channel_id,
+    MAX(CASE WHEN order_type != 'remainder' THEN db_stop_loss END)       AS stop_loss,
+    MAX(CASE WHEN order_type != 'remainder' THEN sequence_number END)    AS level_sequence,
+    SUM(CASE WHEN order_type != 'remainder' THEN lot_size ELSE 0 END)    AS total_volume,
+    SUM(CASE WHEN order_type != 'remainder'
+             THEN mt5_price_at_placement * lot_size ELSE 0 END)          AS entry_x_volume,
+    MAX(CASE WHEN order_type != 'remainder' THEN order_type END)         AS order_type
+FROM order_mappings
+WHERE signal_id = ? AND status = 'closed'
 """
 
 UPDATE_DB_STOP_LOSS = """
@@ -203,7 +264,9 @@ INSERT INTO tp_outcomes (
     move_at_trigger, realized_pnl, others_pnl, total_volume,
     partial_close_pct, trailing_started,
     risk_per_limit, r_multiple, risk_percent_cfg,
-    bot_version, tp_strategy, notes
+    bot_version, tp_strategy, notes,
+    stage, mfe_price, mfe_r, mae_price, mae_r,
+    level_sequence, total_levels, seconds_to_trigger, hold_seconds, exit_reason
 )
 VALUES (
     $1, $2, $3, $4, $5,
@@ -214,7 +277,9 @@ VALUES (
     $17, $18, $19, $20,
     $21, $22,
     $23, $24, $25,
-    $26, $27, $28
+    $26, $27, $28,
+    $29, $30, $31, $32, $33,
+    $34, $35, $36, $37, $38
 )
 """
 

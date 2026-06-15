@@ -19,6 +19,14 @@ def _pip_value_per_lot(info: SymbolInfo) -> float:
     return info.trade_tick_value * (pip_sz / info.trade_tick_size)
 
 
+def price_distance_to_money(info: SymbolInfo, distance: float, volume: float) -> float | None:
+    """Convert a price distance into account-currency money for `volume` lots.
+    Returns None when the symbol's tick metadata is unusable."""
+    if info.trade_tick_size <= 0:
+        return None
+    return abs(distance) * (info.trade_tick_value / info.trade_tick_size) * volume
+
+
 def _clamp(lot: float, info: SymbolInfo) -> float:
     step = info.volume_step
     # Floor to nearest step (conservative — never over-leverage)

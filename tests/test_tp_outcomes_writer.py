@@ -54,11 +54,12 @@ async def test_record_calls_insert_with_all_fields() -> None:
 
     conn.execute.assert_awaited_once()
     args = conn.execute.await_args.args
-    # 1st arg is the SQL, then 28 positional params
-    assert len(args) == 29
+    # 1st arg is the SQL, then 38 positional params
+    assert len(args) == 39
     assert args[1] == 2079  # signal_id
     assert args[2] == 123456  # mt5_account
     assert args[6] == "XAUUSD"  # symbol
+    assert args[29] == "trigger"  # stage (default)
 
 
 @pytest.mark.asyncio

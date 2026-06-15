@@ -22,6 +22,7 @@ class TriggerSnapshot:
 
 @dataclass
 class TPOutcome:
+    # Always present on both row stages ("trigger" and "final").
     signal_id: int
     mt5_account: int
     signal_type: str
@@ -33,16 +34,17 @@ class TPOutcome:
     limits_pending: int
     limits_cancelled: int
     avg_entry_price: float
-    tp_trigger_price: float
-    threshold_value: float
-    threshold_unit: str
-    move_at_trigger: float
-    realized_pnl: float
-    others_pnl: float
     total_volume: float
-    partial_close_pct: int
-    trailing_started: bool
+    realized_pnl: float
     bot_version: str
+    # Trigger-only / optional fields.
+    tp_trigger_price: float | None = None
+    threshold_value: float | None = None
+    threshold_unit: str | None = None
+    move_at_trigger: float | None = None
+    others_pnl: float | None = None
+    partial_close_pct: int | None = None
+    trailing_started: bool = False
     stop_loss: float | None = None
     risk_per_limit: float | None = None
     r_multiple: float | None = None
@@ -50,3 +52,14 @@ class TPOutcome:
     channel_id: int | None = None
     tp_strategy: str = "default"
     notes: dict | None = None
+    # Two-stage analytics: "trigger" snapshot vs "final" settled result.
+    stage: str = "trigger"
+    mfe_price: float | None = None
+    mfe_r: float | None = None
+    mae_price: float | None = None
+    mae_r: float | None = None
+    level_sequence: int | None = None
+    total_levels: int | None = None
+    seconds_to_trigger: float | None = None
+    hold_seconds: float | None = None
+    exit_reason: str | None = None

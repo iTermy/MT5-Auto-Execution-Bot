@@ -33,6 +33,7 @@ class OrderPlacer:
         sqlite: SQLiteDB,
         supabase: SupabaseDB,
         channel_id: int | None = None,
+        sequence_number: int | None = None,
     ) -> PlacementOutcome:
         tick = mt5_client.symbol_info_tick(mt5_symbol)
         if tick is None:
@@ -99,6 +100,7 @@ class OrderPlacer:
             offset=offset,
             symbol=mt5_symbol,
             channel_id=channel_id,
+            sequence_number=sequence_number,
         )
 
         # C3: pre-send status recheck — abort if signal was cancelled since this cycle began

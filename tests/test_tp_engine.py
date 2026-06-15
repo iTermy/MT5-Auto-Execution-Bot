@@ -1,8 +1,12 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
 from bot.tp.asset_config import AssetClassConfig
 from bot.tp.default_strategy import DefaultTPStrategy
+from bot.tp.engine import TPEngine
 from tests.conftest import (
+    make_account_info,
     make_order_result,
     make_position,
     make_symbol_info,
@@ -201,3 +205,56 @@ async def test_execute_closes_earlier_positions_first(sqlite_db, mock_mt5) -> No
     assert 1001 in result.closed_tickets
     assert 1002 in result.closed_tickets
     assert mock_mt5.close_position.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# TPEngine.run_cycle — trigger-row enrichment (r_multiple, MFE/MAE, level)
+# ---------------------------------------------------------------------------
+
+
+async def test_run_cycle_records_trigger_outcome(sqlite_db, mock_mt5, sample_config) -> None:
+    # XAUUSD long: entry 4459, bid 4465 → move 6 >= metals threshold 4.0 → triggers.
+    pos = make_position(
+        ticket=1001, symbol="XAUUSD", price_open=4459.0, volume=0.3, type=0, profit=11.4
+    )
+    mock_mt5.positions_get.return_value = [pos]
+    mock_mt5.symbol_info_tick.return_value = make_tick(symbol="XAUUSD", bid=4465.0, ask=4465.2)
+    mock_mt5.symbol_info.return_value = make_symbol_info(
+        name="XAUUSD", digits=2, point=0.01, trade_tick_value=1.0, trade_tick_size=1.0
+    )
+    mock_mt5.account_info.return_value = make_account_info()
+    mock_mt5.close_position.return_value = make_order_result(ticket=1001)
+
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=7,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.3,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4440.0,
+        signal_type="standard",
+        mt5_price=4459.0,
+        symbol="XAUUSD",
+        sequence_number=3,
+    )
+    await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
+
+    writer = AsyncMock()
+    engine = TPEngine(outcomes_writer=writer)
+    await engine.run_cycle(mock_mt5, sqlite_db, sample_config)
+
+    writer.record.assert_awaited_once()
+    outcome = writer.record.await_args.args[0]
+    assert outcome.stage == "trigger"
+    # risk_money = |4459-4440| * 0.3 = 5.7 → r = 11.4 / 5.7 = 2.0
+    assert outcome.r_multiple == pytest.approx(2.0)
+    assert outcome.mfe_price == pytest.approx(6.0)  # 4465 - 4459
+    assert outcome.mfe_r == pytest.approx(6.0 / 19.0)
+    assert outcome.level_sequence == 3
+    assert outcome.seconds_to_trigger is not None
+
+    # Excursion persisted to SQLite for the open position.
+    rows = await sqlite_db.get_all_active()
+    trailing_row = next(r for r in rows if r["mt5_ticket"] == 1001)
+    assert trailing_row["mfe_price"] == pytest.approx(6.0)

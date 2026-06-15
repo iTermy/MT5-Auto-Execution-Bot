@@ -46,9 +46,22 @@ class TPOutcomesWriter:
                     outcome.bot_version,
                     outcome.tp_strategy,
                     notes_json,
+                    outcome.stage,
+                    outcome.mfe_price,
+                    outcome.mfe_r,
+                    outcome.mae_price,
+                    outcome.mae_r,
+                    outcome.level_sequence,
+                    outcome.total_levels,
+                    outcome.seconds_to_trigger,
+                    outcome.hold_seconds,
+                    outcome.exit_reason,
                 )
             logger.info(
-                "TP outcome written signal=%d pnl=%.2f", outcome.signal_id, outcome.realized_pnl
+                "TP outcome written signal=%d stage=%s pnl=%.2f",
+                outcome.signal_id,
+                outcome.stage,
+                outcome.realized_pnl,
             )
         except Exception:
             logger.error("TP outcome write failed signal=%d", outcome.signal_id, exc_info=True)

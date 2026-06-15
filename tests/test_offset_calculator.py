@@ -36,9 +36,7 @@ def _row(bid: float, ask: float, age_seconds: float) -> dict:
 
 def _tick(updated_at: datetime, bid: float, ask: float, offset_ms: int = 0) -> TickInfo:
     epoch_ms = int(updated_at.timestamp() * 1000) + offset_ms
-    return TickInfo(
-        symbol="US500", bid=bid, ask=ask, time=epoch_ms // 1000, time_msc=epoch_ms
-    )
+    return TickInfo(symbol="US500", bid=bid, ask=ask, time=epoch_ms // 1000, time_msc=epoch_ms)
 
 
 def test_offset_matched_to_updated_at() -> None:
@@ -80,14 +78,20 @@ def test_m1_fallback_when_no_ticks() -> None:
 def test_skips_when_no_history_and_no_cache() -> None:
     calc = OffsetCalculator()
     client = _client()  # both tick-range and rate-range empty
-    assert calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=60), client, 120, _INTERVAL) is None
+    assert (
+        calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=60), client, 120, _INTERVAL)
+        is None
+    )
 
 
 def test_dead_feed_beyond_bound_skipped() -> None:
     calc = OffsetCalculator()
     client = _client()
     # 5min old, bound 2min → stalled feed, skip without any history lookup.
-    assert calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=300), client, 120, _INTERVAL) is None
+    assert (
+        calc.get_offset("US500", _row(4600.0, 4601.0, age_seconds=300), client, 120, _INTERVAL)
+        is None
+    )
     client.copy_ticks_range.assert_not_called()
 
 
@@ -100,7 +104,9 @@ def test_recompute_throttled_to_interval() -> None:
     client.copy_ticks_range.return_value = [_tick(row1["updated_at"], 4620.0, 4622.0)]
     first = calc.get_offset("US500", row1, client, 120, _INTERVAL)
     for _ in range(10):
-        again = calc.get_offset("US500", _row(4605.0, 4606.0, age_seconds=5), client, 120, _INTERVAL)
+        again = calc.get_offset(
+            "US500", _row(4605.0, 4606.0, age_seconds=5), client, 120, _INTERVAL
+        )
         assert again == first
     client.copy_ticks_range.assert_called_once()
 

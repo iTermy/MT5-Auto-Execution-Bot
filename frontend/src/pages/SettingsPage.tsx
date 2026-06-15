@@ -109,6 +109,104 @@ const emptyOverridePairs = (): Record<OverrideType, OverridePair> =>
     OverridePair
   >
 
+// Select-styled dropdown that toggles multiple asset classes. Matches the native
+// `.inp.sel` controls; selected rows are filled with the accent tint, classes
+// already claimed by another suffix rule are disabled.
+function MultiClassPicker({
+  selected,
+  disabledClasses,
+  onToggle,
+}: {
+  selected: AssetKey[]
+  disabledClasses: Set<AssetKey>
+  onToggle: (cls: AssetKey) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+  const summary = selected.length ? selected.join(', ') : 'Select asset classes'
+  return (
+    <div ref={ref} style={{ position: 'relative', width: 280 }}>
+      <div className="inp sel mono" onClick={() => setOpen(o => !o)} style={{ width: '100%' }}>
+        <span
+          className={selected.length ? undefined : 'faint'}
+          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {summary}
+        </span>
+        <Icon
+          name="chevDown"
+          size={14}
+          strokeWidth={2.2}
+          style={{
+            flexShrink: 0,
+            opacity: 0.6,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 120ms ease',
+          }}
+        />
+      </div>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            width: '100%',
+            background: 'var(--surface)',
+            border: '1px solid var(--hairline-strong)',
+            borderRadius: 10,
+            boxShadow: 'var(--shadow)',
+            padding: 4,
+            zIndex: 30,
+          }}
+        >
+          {ASSET_CLASSES.map(cls => {
+            const active = selected.includes(cls)
+            const disabled = !active && disabledClasses.has(cls)
+            return (
+              <button
+                key={cls}
+                type="button"
+                disabled={disabled}
+                onClick={() => onToggle(cls)}
+                title={disabled ? 'Already assigned to another suffix' : undefined}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  width: '100%',
+                  textAlign: 'left',
+                  border: 'none',
+                  borderRadius: 7,
+                  padding: '7px 10px',
+                  fontSize: 13,
+                  fontFamily: 'var(--mono)',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  background: active ? 'var(--accent-tint)' : 'transparent',
+                  color: active ? 'var(--accent)' : 'var(--text)',
+                  opacity: disabled ? 0.45 : 1,
+                }}
+              >
+                {cls}
+                {active && <Icon name="check" size={14} strokeWidth={2.6} />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface Props {
   config: Config | null
   status: {
@@ -327,12 +425,16 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     if (config) initFromConfig(config)
   }, [config, initFromConfig])
 
-  // Broker symbol catalogue for the mapping picker — populated once MT5 is up.
+  // Broker symbol catalogue for the mapping picker. broker_symbols only fills once
+  // MT5 is connected and a sync cycle has run, so (re)fetch whenever the connection
+  // comes up — fetching only on mount leaves the dropdown empty if Settings is opened
+  // before MT5 connects. A transient disconnect keeps the last good list.
   useEffect(() => {
+    if (!status?.mt5_connected) return
     fetchMt5Symbols()
       .then(setBrokerSymbols)
-      .catch(() => setBrokerSymbols([]))
-  }, [])
+      .catch(() => {})
+  }, [status?.mt5_connected])
 
   const brokerSymbolSet = useMemo(() => new Set(brokerSymbols), [brokerSymbols])
   // Flag a mapping whose target isn't in the broker's catalogue (only once it's loaded).
@@ -1877,7 +1979,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                 key={i}
                 style={{
                   display: 'flex',
-                  alignItems: 'flex-start',
+                  alignItems: 'center',
                   gap: 14,
                   marginBottom: 10,
                   flexWrap: 'wrap',
@@ -1890,28 +1992,14 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                   placeholder="e.g. m"
                   style={{ width: 90 }}
                 />
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
-                  {ASSET_CLASSES.map(cls => {
-                    const active = rule.classes.includes(cls)
-                    const disabled = !active && takenByOthers.has(cls)
-                    return (
-                      <button
-                        key={cls}
-                        type="button"
-                        className={`tag ${active ? 'long' : 'ghost'}`}
-                        disabled={disabled}
-                        onClick={() => toggleSuffixRuleClass(i, cls)}
-                        title={disabled ? 'Already assigned to another suffix' : undefined}
-                        style={{
-                          cursor: disabled ? 'not-allowed' : 'pointer',
-                          opacity: disabled ? 0.4 : 1,
-                        }}
-                      >
-                        {cls}
-                      </button>
-                    )
-                  })}
-                </div>
+                <span className="faint" style={{ fontSize: 12.5 }}>
+                  on
+                </span>
+                <MultiClassPicker
+                  selected={rule.classes}
+                  disabledClasses={takenByOthers}
+                  onToggle={cls => toggleSuffixRuleClass(i, cls)}
+                />
                 <button className="btn sm ghost" onClick={() => removeSuffixRule(i)}>
                   ×
                 </button>

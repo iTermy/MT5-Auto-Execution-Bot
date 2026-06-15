@@ -199,6 +199,9 @@
         "scalp":    { "profit_threshold": 40.0, "trailing_distance": 40.0 },
         "swing":    { "profit_threshold": 300.0, "trailing_distance": 300.0 }
       },
+      "US2000USD": {
+        "default": { "profit_threshold": 5.0, "trailing_distance": 5.0 }
+      },
       "DE30EUR": {
         "standard": { "profit_threshold": 50.0, "trailing_distance": 50.0 },
         "scalp":    { "profit_threshold": 30.0, "trailing_distance": 30.0 },

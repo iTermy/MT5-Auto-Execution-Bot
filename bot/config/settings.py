@@ -78,6 +78,7 @@ class ProximityConfig(BaseModel):
         "DAX": 50.0,
         "DE30": 50.0,
         "US30": 50.0,
+        "US2000": 10.0,
         "JP225": 100.0,
     }
     stock_overrides: dict[str, float] = {}
@@ -130,6 +131,7 @@ class Settings(BaseModel):
         "BTCUSDT": "BTCUSD",
         "ETHUSDT": "ETHUSD",
         "US30USD": "US30",
+        "US2000USD": "US2000",
     }
     stock_suffix: str = "-24"
     # Per-asset-class broker suffix rules. Each rule appends `suffix` to every MT5
@@ -145,6 +147,7 @@ class Settings(BaseModel):
         "BTCUSDT",
         "ETHUSDT",
         "US30USD",
+        "US2000USD",
         "JP225",
     ]
     offset_drift_threshold_pips: float = 5.0

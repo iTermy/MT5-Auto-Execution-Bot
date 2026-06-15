@@ -23,6 +23,7 @@
     "ETHUSDT": "ETHUSD",
     "USOILSPOT": "XTIUSD",
     "US30USD": "US30",
+    "US2000USD": "US2000",
     "DE30EUR": "DE40"
   },
   "stock_suffix": "-24",
@@ -39,6 +40,7 @@
     "ETHUSDT",
     "USOILSPOT",
     "US30USD",
+    "US2000USD",
     "DE30EUR"
   ],
   "offset_drift_threshold_pips": 5.0,
@@ -64,6 +66,7 @@
       "DAX": 50.0,
       "DE30": 50.0,
       "US30": 50.0,
+      "US2000": 10.0,
       "JP225": 100.0
     },
     "stock_overrides": {

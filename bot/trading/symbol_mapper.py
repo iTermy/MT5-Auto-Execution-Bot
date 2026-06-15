@@ -4,7 +4,19 @@ from bot.mt5.types import SymbolInfo
 
 _METALS = frozenset({"XAUUSD", "XAGUSD", "GOLD", "SILVER"})
 _OIL_KEYWORDS = ("OIL", "WTI", "BRENT")
-_INDEX_KEYWORDS = ("SPX", "NAS", "DAX", "DE30", "DE40", "JP225", "UK100", "US30", "US500", "USTEC")
+_INDEX_KEYWORDS = (
+    "SPX",
+    "NAS",
+    "DAX",
+    "DE30",
+    "DE40",
+    "JP225",
+    "UK100",
+    "US30",
+    "US500",
+    "US2000",
+    "USTEC",
+)
 
 
 def detect_asset_class(db_symbol: str) -> AssetClass:

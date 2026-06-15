@@ -10,13 +10,19 @@ logger = logging.getLogger(__name__)
 
 
 class LicenseValidator:
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, reject_threshold: int = 2) -> None:
         self._url = url
+        self._reject_threshold = reject_threshold
         self._license_key: str = ""
         self._mt5_account: int = 0
         self.license_valid: bool = False
         self.status: LicenseStatus = LicenseStatus.ERROR
         self.message: str = ""
+        # Consecutive confirmed-rejection (INVALID/EXPIRED) validations. A single
+        # anomalous rejection must never tear down a paying user; only a sustained
+        # streak does. A VALID result clears it; a transient ERROR leaves it untouched.
+        self._reject_streak: int = 0
+        self.confirmed_rejected: bool = False
 
     async def validate(self, license_key: str, mt5_account: int) -> LicenseResult:
         self._license_key = license_key
@@ -61,8 +67,25 @@ class LicenseValidator:
         self.license_valid = result.status == LicenseStatus.VALID
         self.status = result.status
         self.message = result.message
+        self._reject_streak, self.confirmed_rejected = self._next_streak(
+            self._reject_streak, self._reject_threshold, result.status
+        )
+
         logger.info("License: %s — %s", result.status.value, result.message)
         return result
+
+    @staticmethod
+    def _next_streak(streak: int, threshold: int, status: LicenseStatus) -> tuple[int, bool]:
+        """Returns (new_streak, confirmed_rejected). VALID clears the streak; a confirmed
+        rejection (INVALID/EXPIRED) extends it and only flips confirmed_rejected once it
+        reaches the threshold; a transient ERROR leaves the streak untouched (neither
+        confirms nor denies)."""
+        if status == LicenseStatus.VALID:
+            return 0, False
+        if status in (LicenseStatus.INVALID, LicenseStatus.EXPIRED):
+            streak += 1
+            return streak, streak >= threshold
+        return streak, streak >= threshold
 
     async def heartbeat_loop(self, interval_seconds: int) -> None:
         while True:

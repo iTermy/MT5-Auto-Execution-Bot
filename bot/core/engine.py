@@ -68,6 +68,12 @@ class Engine:
         # License teardown state
         self._license_expired: bool = False
         self.shutdown_reason: str | None = None
+        # "Armed" flag: True once the license has validated and not yet been confirmed
+        # rejected. It both arms teardown (a flip to a confirmed rejection flattens
+        # positions) and gates new placement (the bot keeps trading through transient
+        # ERRORs / sub-threshold rejections, and only stops once the rejection is
+        # confirmed). A license that is invalid from startup never arms, so it never
+        # trades. Set to the real post-validate state at startup (run_forever).
         self._last_license_valid: bool = True
         # True after MT5 has been initialized; gates Supabase/sync/tp startup.
         self._engine_started: bool = False
@@ -265,14 +271,16 @@ class Engine:
                 logger.info("Sync loop halted: license expired")
                 return
 
-            # Detect license flip from valid → invalid and run teardown
+            # Detect a license flip from valid → confirmed-rejected and run teardown.
             if self._license is not None:
-                current_valid = self._license.license_valid
-                if self._last_license_valid and not current_valid:
-                    self._last_license_valid = False
+                self._last_license_valid, should_teardown = self._teardown_decision(
+                    self._last_license_valid,
+                    self._license.license_valid,
+                    self._license.confirmed_rejected,
+                )
+                if should_teardown:
                     await self._license_teardown()
                     return
-                self._last_license_valid = current_valid
 
             try:
                 new_config = load_config()
@@ -290,8 +298,12 @@ class Engine:
                         await self._license.validate(new_config.license_key, mt5_account)
                         self._last_license_valid = self._license.license_valid
 
+                # Keep placing while the license is valid OR only transiently/
+                # not-yet-confirmed unhealthy (armed). A never-valid license (invalid
+                # from startup) is unarmed and never places; a confirmed rejection
+                # disarms via teardown above before this line is reached.
                 placement_active = self._trading_active and (
-                    self._license is None or getattr(self._license, "license_valid", True)
+                    self._license is None or self._last_license_valid
                 )
 
                 result = await self._sync_cycle.run(
@@ -380,6 +392,21 @@ class Engine:
                 except Exception:
                     logger.error("Periodic reconcile failed", exc_info=True)
                 last_full = now
+
+    @staticmethod
+    def _teardown_decision(
+        armed: bool, license_valid: bool, confirmed_rejected: bool
+    ) -> tuple[bool, bool]:
+        """Returns (new_armed, should_teardown). Teardown fires only on a flip from
+        valid → sustained rejection: the license must have been valid (armed) and the
+        validator must report a confirmed rejection (N consecutive INVALID/EXPIRED
+        results). A single anomalous rejection or a transient ERROR leaves the armed
+        state untouched, so neither can flatten a paying user's positions."""
+        if license_valid:
+            return True, False
+        if armed and confirmed_rejected:
+            return False, True
+        return armed, False
 
     async def _license_teardown(self) -> None:
         """Cancel all pending orders and close all positions after license expiry."""

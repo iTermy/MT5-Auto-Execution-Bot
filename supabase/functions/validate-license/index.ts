@@ -39,7 +39,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .eq('license_key', license_key)
     .single<LicenseRow>()
 
-  if (error || !data) {
+  // A query error means the lookup failed (DB unreachable, pool exhausted, timeout),
+  // NOT that the key is invalid. Surface it as a transient error (HTTP 500) so the bot
+  // treats it as "couldn't determine" and never tears down a valid user. Only a
+  // successful query that returns no row is a genuinely unknown key.
+  if (error) {
+    return json({ status: 'error', expires_at: null, message: 'License lookup failed' }, 500)
+  }
+  if (!data) {
     return json({ status: 'invalid', expires_at: null, message: 'Unknown license key' })
   }
 

@@ -2,13 +2,28 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
-from bot.config.constants import _PRODUCTION_DSN, _PRODUCTION_LICENSE_URL
+from bot.config.constants import _PRODUCTION_DSN, _PRODUCTION_LICENSE_URL, AssetClass
 
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config.json")
+
+_VALID_ASSET_CLASSES = frozenset(a.value for a in AssetClass)
+
+
+class SymbolSuffixRule(BaseModel):
+    suffix: str
+    asset_classes: list[str]  # AssetClass values this suffix applies to
+
+    @field_validator("asset_classes")
+    @classmethod
+    def _validate_classes(cls, v: list[str]) -> list[str]:
+        unknown = [c for c in v if c not in _VALID_ASSET_CLASSES]
+        if unknown:
+            raise ValueError(f"unknown asset class(es): {', '.join(unknown)}")
+        return v
 
 
 class LotExceptionConfig(BaseModel):
@@ -116,8 +131,11 @@ class Settings(BaseModel):
         "US30USD": "US30",
     }
     stock_suffix: str = "-24"
-    # Appended to every MT5 symbol (e.g. Exness adds "m": EURUSD -> EURUSDm).
-    universal_suffix: str = ""
+    # Per-asset-class broker suffix rules. Each rule appends `suffix` to every MT5
+    # symbol whose detected asset class is listed in `asset_classes` (e.g. Exness
+    # "m" on forex/metals/crypto: EURUSD -> EURUSDm). An asset class may appear in
+    # at most one rule.
+    symbol_suffixes: list[SymbolSuffixRule] = []
     stock_no_suffix: list[str] = []
     excluded_symbols: list[str] = []
     offset_instruments: list[str] = [
@@ -139,6 +157,32 @@ class Settings(BaseModel):
     spread_hour: SpreadHourConfig = SpreadHourConfig()
     proximity: ProximityConfig = ProximityConfig()
     tp_config: TPConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_universal_suffix(cls, data: object) -> object:
+        # Back-compat: a legacy flat `universal_suffix` becomes one rule covering
+        # every asset class (its original all-symbols behaviour).
+        if (
+            isinstance(data, dict)
+            and "symbol_suffixes" not in data
+            and data.get("universal_suffix")
+        ):
+            data["symbol_suffixes"] = [
+                {"suffix": data["universal_suffix"], "asset_classes": sorted(_VALID_ASSET_CLASSES)}
+            ]
+        return data
+
+    @field_validator("symbol_suffixes")
+    @classmethod
+    def _no_class_conflicts(cls, v: list[SymbolSuffixRule]) -> list[SymbolSuffixRule]:
+        seen: set[str] = set()
+        for rule in v:
+            for ac in rule.asset_classes:
+                if ac in seen:
+                    raise ValueError(f"asset class '{ac}' assigned to multiple suffix rules")
+                seen.add(ac)
+        return v
 
 
 def load_config(path: Path = _CONFIG_PATH) -> Settings | None:

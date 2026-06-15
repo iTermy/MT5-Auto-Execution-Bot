@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     "ETHUSDT": "ETHUSD"
   },
   "stock_suffix": "-24",
-  "universal_suffix": "",
+  "symbol_suffixes": [{ "suffix": "m", "asset_classes": ["forex", "forex_jpy", "metals", "crypto"] }],
 
   "offset_instruments": ["SPX500USD", "NAS100USD", "BTCUSDT", "ETHUSDT"],
   "offset_drift_threshold_pips": 5,
@@ -372,9 +372,13 @@ Static files: FastAPI serves `frontend/dist/` at `/`. In dev, Vite dev server on
   (e.g., "BTCUSD" → "BTCUSDT", "AMD.NAS-24" → "AMD.NAS"). Required by TPEngine so it can call
   `detect_asset_class()` with the correct DB symbol.
 
-- **universal_suffix** is appended by `map_symbol()` to every resolved MT5 symbol (after symbol_map /
-  stock_suffix resolution) for brokers that suffix all symbols — e.g. Exness "m": EURUSD → EURUSDm.
-  `db_symbol_from_mt5()` strips it first before any other reverse mapping. Defaults to `""` (no-op).
+- **symbol_suffixes** is a list of `{suffix, asset_classes}` rules. `map_symbol()` appends a rule's
+  `suffix` to every resolved MT5 symbol (after symbol_map / stock_suffix resolution) whose detected
+  asset class is listed in that rule — e.g. Exness "m" on forex/metals/crypto: EURUSD → EURUSDm,
+  while indices/stocks stay bare. An asset class may appear in at most one rule (validated on load).
+  `db_symbol_from_mt5()` reverses this by trying each suffix (longest first) and keeping the candidate
+  that round-trips through `map_symbol()`. A legacy flat `universal_suffix` is migrated on load to one
+  rule covering every asset class. Defaults to `[]` (no suffix).
 
 - **close_position() and modify_position_sl()** added to `MT5Client`. close_position() uses
   `TRADE_ACTION_DEAL` with retry on transient errors. modify_position_sl() uses `TRADE_ACTION_SLTP`,

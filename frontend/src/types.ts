@@ -11,6 +11,7 @@ export interface StatusData {
   open_count: number
   trailing_count: number
   bot_version?: string
+  shutdown_reason?: string | null
 }
 
 export interface LogEntry {
@@ -69,6 +70,11 @@ export interface TPConfig {
   instrument_overrides: Record<string, Record<string, unknown>>
 }
 
+export interface SymbolSuffixRule {
+  suffix: string
+  asset_classes: string[]
+}
+
 export type SignalType = 'standard' | 'scalp' | 'swing' | 'toll' | 'pa' | '1-1'
 
 export interface PollingConfig {
@@ -93,7 +99,7 @@ export interface Config {
   magic_number: number
   symbol_map: Record<string, string>
   stock_suffix: string
-  universal_suffix: string
+  symbol_suffixes: SymbolSuffixRule[]
   stock_no_suffix: string[]
   excluded_symbols: string[]
   offset_instruments: string[]

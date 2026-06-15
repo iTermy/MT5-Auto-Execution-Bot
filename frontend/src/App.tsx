@@ -54,6 +54,21 @@ export default function App() {
         onEngineToggle={handleEngineToggle}
         onShutdown={handleShutdown}
       />
+      {status?.shutdown_reason === 'netting_account' && (
+        <div
+          style={{
+            background: 'rgba(192,57,43,0.1)',
+            borderBottom: '1px solid rgba(192,57,43,0.35)',
+            color: '#a32020',
+            padding: '10px 20px',
+            fontSize: 13.5,
+            fontWeight: 600,
+          }}
+        >
+          This MT5 account is in netting mode. The bot requires a hedging account and will not trade
+          — switch to a hedging account and restart.
+        </div>
+      )}
       <div className="app-body">
         <NavSidebar
           page={page}

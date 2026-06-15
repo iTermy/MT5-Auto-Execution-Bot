@@ -126,6 +126,17 @@ class Engine:
             if not await self._wait_for_mt5_init():
                 return
 
+            # Hedging is a hard requirement: on a netting account fill detection and
+            # reconciliation are unsafe, so refuse to trade. Keep the API alive so the
+            # UI can show why, but never start the trading loops.
+            if not self._check_account_mode():
+                self.shutdown_reason = "netting_account"
+                await self._broadcast_status()
+                if api_task is not None:
+                    self._tasks = [api_task]
+                    await asyncio.gather(api_task, return_exceptions=True)
+                return
+
             try:
                 await self._supabase.create_pool()
             except Exception:
@@ -133,7 +144,6 @@ class Engine:
                 return
 
             await self._reconciler.reconcile(self._mt5, self._sqlite)
-            self._check_account_mode()
 
             if self._license is not None:
                 acct = self._mt5.account_info()
@@ -179,25 +189,27 @@ class Engine:
             except Exception:
                 pass
 
-    def _check_account_mode(self) -> None:
-        """Fill detection and reconciliation assume hedging mode (position.identifier
-        == originating order ticket). Warn loudly if the account is netting/exchange
-        so the operator knows position tracking may misbehave; don't refuse to run."""
+    def _check_account_mode(self) -> bool:
+        """Fill detection and reconciliation depend on hedging mode (position.identifier
+        == originating order ticket), which doesn't hold on netting/exchange accounts.
+        Returns False to block trading when the account is positively netting; True when
+        it's hedging or the account can't be read (transient — don't block on that)."""
         acct = self._mt5.account_info()
         if acct is None:
-            return
+            return True
         company = acct.company or "broker"
         if acct.margin_mode != _MARGIN_MODE_HEDGING:
-            logger.warning(
-                "Account %s (%s, %s) is NOT in hedging mode (margin_mode=%d) — this bot "
-                "assumes hedging; position tracking may be unreliable on netting accounts",
+            logger.critical(
+                "Account %s (%s, %s) is in netting mode (margin_mode=%d) — this bot requires a "
+                "hedging account; refusing to trade. Switch to a hedging MT5 account to continue.",
                 acct.login,
                 company,
                 acct.server,
                 acct.margin_mode,
             )
-        else:
-            logger.info("Connected to %s (%s), hedging mode OK", company, acct.server)
+            return False
+        logger.info("Connected to %s (%s), hedging mode OK", company, acct.server)
+        return True
 
     async def _wait_for_mt5_init(self) -> bool:
         """Initialize MT5 with retry. On failure (e.g. wrong terminal path),
@@ -511,6 +523,7 @@ class Engine:
             "open_count": open_count,
             "trailing_count": trailing_count,
             "bot_version": BOT_VERSION,
+            "shutdown_reason": self.shutdown_reason,
         }
         try:
             self.status_queue.put_nowait(status)

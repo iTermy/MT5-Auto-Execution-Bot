@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from bot.config.constants import AssetClass
 from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class, map_symbol
@@ -87,11 +88,69 @@ def test_map_symbol_passthrough() -> None:
     assert map_symbol("XAUUSD", cfg) == "XAUUSD"
 
 
-def test_map_symbol_appends_universal_suffix() -> None:
-    cfg = make_settings(universal_suffix="m")
-    # Plain passthrough, symbol-map target, and stock suffix all get the universal suffix.
+def test_map_symbol_appends_broker_suffix() -> None:
+    cfg = make_settings(
+        symbol_suffixes=[{"suffix": "m", "asset_classes": ["forex", "crypto", "stocks"]}]
+    )
+    # Plain passthrough, symbol-map target, and stock suffix all get the broker suffix.
     assert map_symbol("EURUSD", cfg) == "EURUSDm"
     assert map_symbol("BTCUSDT", cfg) == "BTCUSDm"
+    assert map_symbol("AMD.NAS", cfg) == "AMD.NAS-24m"
+
+
+def test_map_symbol_suffix_scoped_to_asset_class() -> None:
+    # "m" only on forex/metals/crypto — indices and stocks stay bare.
+    cfg = make_settings(
+        symbol_suffixes=[
+            {"suffix": "m", "asset_classes": ["forex", "forex_jpy", "metals", "crypto"]}
+        ]
+    )
+    assert map_symbol("EURUSD", cfg) == "EURUSDm"
+    assert map_symbol("XAUUSD", cfg) == "XAUUSDm"
+    assert map_symbol("SPX500USD", cfg) == "US500"
+    assert map_symbol("AMD.NAS", cfg) == "AMD.NAS-24"
+
+
+def test_map_symbol_multiple_suffix_rules() -> None:
+    cfg = make_settings(
+        symbol_suffixes=[
+            {"suffix": "m", "asset_classes": ["forex", "forex_jpy"]},
+            {"suffix": ".r", "asset_classes": ["crypto"]},
+        ]
+    )
+    assert map_symbol("EURUSD", cfg) == "EURUSDm"
+    assert map_symbol("BTCUSDT", cfg) == "BTCUSD.r"
+
+
+def test_map_symbol_does_not_double_suffix_explicit_mapping() -> None:
+    # Mapping straight to "SPX500m" while indices also carries an "m" rule must not
+    # produce "SPX500mm".
+    cfg = make_settings(
+        symbol_map={"SPX500USD": "SPX500m"},
+        symbol_suffixes=[{"suffix": "m", "asset_classes": ["indices"]}],
+    )
+    assert map_symbol("SPX500USD", cfg) == "SPX500m"
+
+
+def test_symbol_suffix_class_conflict_rejected() -> None:
+    with pytest.raises(ValidationError):
+        make_settings(
+            symbol_suffixes=[
+                {"suffix": "m", "asset_classes": ["forex"]},
+                {"suffix": "s", "asset_classes": ["forex"]},
+            ]
+        )
+
+
+def test_symbol_suffix_unknown_class_rejected() -> None:
+    with pytest.raises(ValidationError):
+        make_settings(symbol_suffixes=[{"suffix": "m", "asset_classes": ["stonks"]}])
+
+
+def test_legacy_universal_suffix_migrated_to_all_classes() -> None:
+    cfg = make_settings(universal_suffix="m")
+    assert map_symbol("EURUSD", cfg) == "EURUSDm"
+    assert map_symbol("SPX500USD", cfg) == "US500m"
     assert map_symbol("AMD.NAS", cfg) == "AMD.NAS-24m"
 
 
@@ -117,8 +176,17 @@ def test_db_symbol_from_mt5_passthrough_unknown() -> None:
     assert db_symbol_from_mt5("EURUSD", cfg) == "EURUSD"
 
 
-def test_db_symbol_from_mt5_strips_universal_suffix() -> None:
-    cfg = make_settings(universal_suffix="m")
+def test_db_symbol_from_mt5_strips_broker_suffix() -> None:
+    cfg = make_settings(
+        symbol_suffixes=[{"suffix": "m", "asset_classes": ["forex", "crypto", "stocks"]}]
+    )
     assert db_symbol_from_mt5("EURUSDm", cfg) == "EURUSD"
     assert db_symbol_from_mt5("BTCUSDm", cfg) == "BTCUSDT"  # reverse symbol_map after strip
-    assert db_symbol_from_mt5("AMD.NAS-24m", cfg) == "AMD.NAS"  # strip universal then stock
+    assert db_symbol_from_mt5("AMD.NAS-24m", cfg) == "AMD.NAS"  # strip broker then stock
+
+
+def test_db_symbol_from_mt5_no_suffix_for_unscoped_class() -> None:
+    # "m" only covers forex, so an indices symbol carries no suffix to strip.
+    cfg = make_settings(symbol_suffixes=[{"suffix": "m", "asset_classes": ["forex"]}])
+    assert db_symbol_from_mt5("US500", cfg) == "SPX500USD"
+    assert db_symbol_from_mt5("EURUSDm", cfg) == "EURUSD"

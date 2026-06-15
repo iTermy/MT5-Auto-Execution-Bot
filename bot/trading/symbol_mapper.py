@@ -28,6 +28,14 @@ def detect_asset_class(db_symbol: str) -> AssetClass:
     return AssetClass.FOREX
 
 
+def _suffix_for(db_symbol: str, config: Settings) -> str:
+    asset = detect_asset_class(db_symbol).value
+    for rule in config.symbol_suffixes:
+        if asset in rule.asset_classes:
+            return rule.suffix
+    return ""
+
+
 def map_symbol(db_symbol: str, config: Settings) -> str:
     if db_symbol in config.symbol_map:
         mt5_symbol = config.symbol_map[db_symbol]
@@ -35,20 +43,37 @@ def map_symbol(db_symbol: str, config: Settings) -> str:
         mt5_symbol = db_symbol + config.stock_suffix
     else:
         mt5_symbol = db_symbol
-    return mt5_symbol + config.universal_suffix
+    # Don't double up when an explicit symbol_map target already carries the suffix
+    # (e.g. mapping SPX500USD -> "SPX500m" while indices also has an "m" rule).
+    suffix = _suffix_for(db_symbol, config)
+    if suffix and not mt5_symbol.endswith(suffix):
+        mt5_symbol += suffix
+    return mt5_symbol
 
 
 def needs_offset(db_symbol: str, config: Settings) -> bool:
     return db_symbol in config.offset_instruments
 
 
-def db_symbol_from_mt5(mt5_symbol: str, config: Settings) -> str:
-    """Reverse-map MT5 symbol to DB symbol for asset-class detection."""
-    if config.universal_suffix and mt5_symbol.endswith(config.universal_suffix):
-        mt5_symbol = mt5_symbol[: -len(config.universal_suffix)]
+def _strip_to_base(mt5_symbol: str, config: Settings) -> str:
     for db_sym, mapped in config.symbol_map.items():
         if mapped == mt5_symbol:
             return db_sym
     if config.stock_suffix and mt5_symbol.endswith(config.stock_suffix):
         return mt5_symbol[: -len(config.stock_suffix)]
     return mt5_symbol
+
+
+def db_symbol_from_mt5(mt5_symbol: str, config: Settings) -> str:
+    """Reverse-map an MT5 symbol back to its DB symbol for asset-class detection.
+    The broker suffix depends on the (unknown) asset class, so try each configured
+    suffix (longest first) and keep the candidate that round-trips through
+    map_symbol; fall back to a plain strip when none match."""
+    for suffix in sorted(
+        {r.suffix for r in config.symbol_suffixes if r.suffix}, key=len, reverse=True
+    ):
+        if mt5_symbol.endswith(suffix):
+            db_sym = _strip_to_base(mt5_symbol[: -len(suffix)], config)
+            if map_symbol(db_sym, config) == mt5_symbol:
+                return db_sym
+    return _strip_to_base(mt5_symbol, config)

@@ -15,6 +15,7 @@ import type {
   AssetTPConfig,
   ScalpOverrideConfig,
   LotExceptionConfig,
+  SymbolSuffixRule,
 } from '../types'
 import { detectAssetClass } from '../utils/assetClass'
 
@@ -80,6 +81,11 @@ interface LotExceptionRow {
   value: string
 }
 
+interface SuffixRuleRow {
+  suffix: string
+  classes: AssetKey[]
+}
+
 interface InstrumentOverrideRow {
   symbol: string
   // Standard fields — empty string means "inherit asset-class value".
@@ -141,7 +147,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
   const [brokerSymbols, setBrokerSymbols] = useState<string[]>([])
   const [stockSuffix, setStockSuffix] = useState('-24')
-  const [universalSuffix, setUniversalSuffix] = useState('')
+  const [suffixRules, setSuffixRules] = useState<SuffixRuleRow[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(false)
@@ -305,7 +311,16 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       }))
     )
     setStockSuffix(cfg.stock_suffix ?? '-24')
-    setUniversalSuffix(cfg.universal_suffix ?? '')
+    const rawSuffixes = cfg.symbol_suffixes ?? []
+    const legacyUniversal = (cfg as { universal_suffix?: string }).universal_suffix
+    setSuffixRules(
+      rawSuffixes.length === 0 && legacyUniversal
+        ? [{ suffix: legacyUniversal, classes: [...ASSET_CLASSES] }]
+        : rawSuffixes.map(r => ({
+            suffix: r.suffix,
+            classes: (r.asset_classes as AssetKey[]).filter(c => ASSET_CLASSES.includes(c)),
+          }))
+    )
   }, [])
 
   useEffect(() => {
@@ -373,6 +388,40 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   function removeSymbolRow(i: number) {
     setSymbolRows(prev => prev.filter((_, j) => j !== i))
     touch()
+  }
+
+  function addSuffixRule() {
+    setSuffixRules(prev => [...prev, { suffix: '', classes: [] }])
+    touch()
+  }
+
+  function removeSuffixRule(i: number) {
+    setSuffixRules(prev => prev.filter((_, j) => j !== i))
+    touch()
+  }
+
+  function updateSuffixRuleSuffix(i: number, value: string) {
+    setSuffixRules(prev => prev.map((r, j) => (j === i ? { ...r, suffix: value } : r)))
+    touch()
+  }
+
+  // Toggle a class on a rule; a class assigned elsewhere is blocked in the UI, so
+  // rules stay conflict-free (the backend rejects conflicts on save too).
+  function toggleSuffixRuleClass(i: number, cls: AssetKey) {
+    setSuffixRules(prev =>
+      prev.map((r, j) => {
+        if (j !== i) return r
+        const has = r.classes.includes(cls)
+        return { ...r, classes: has ? r.classes.filter(c => c !== cls) : [...r.classes, cls] }
+      })
+    )
+    touch()
+  }
+
+  function buildSuffixRules(): SymbolSuffixRule[] {
+    return suffixRules
+      .filter(r => r.suffix.trim() && r.classes.length > 0)
+      .map(r => ({ suffix: r.suffix.trim(), asset_classes: r.classes }))
   }
 
   function updateLotException(
@@ -581,7 +630,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         tp_config: buildTpConfig(),
         symbol_map: buildSymbolMap(),
         stock_suffix: stockSuffix,
-        universal_suffix: universalSuffix,
+        symbol_suffixes: buildSuffixRules(),
       }
       await updateConfig(updated)
       onConfigSaved(updated)
@@ -1794,39 +1843,84 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           </button>
         </div>
         <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
-        <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Stock suffix</label>
-            <input
-              className="inp mono"
-              value={stockSuffix}
-              onChange={e => {
-                setStockSuffix(e.target.value)
-                touch()
-              }}
-              placeholder="-24"
-              style={{ width: 120 }}
-            />
-            <span className="faint" style={{ fontSize: 12 }}>
-              appended to .NAS / .NYSE stocks only
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>Stock suffix</label>
+          <input
+            className="inp mono"
+            value={stockSuffix}
+            onChange={e => {
+              setStockSuffix(e.target.value)
+              touch()
+            }}
+            placeholder="-24"
+            style={{ width: 120 }}
+          />
+          <span className="faint" style={{ fontSize: 12 }}>
+            appended to .NAS / .NYSE stocks only
+          </span>
+        </div>
+
+        <div style={{ marginTop: 22 }}>
+          <div className="panel-head" style={{ marginBottom: 4 }}>
+            <h3 style={{ fontSize: 14 }}>Broker suffixes</h3>
+            <span className="sub">
+              append a broker tag (e.g. Exness “m”) to chosen asset classes · each class can belong
+              to one suffix
             </span>
           </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Universal suffix</label>
-            <input
-              className="inp mono"
-              value={universalSuffix}
-              onChange={e => {
-                setUniversalSuffix(e.target.value)
-                touch()
-              }}
-              placeholder="e.g. m"
-              style={{ width: 120 }}
-            />
-            <span className="faint" style={{ fontSize: 12 }}>
-              appended to every symbol (e.g. Exness: EURUSD → EURUSDm)
-            </span>
-          </div>
+          {suffixRules.map((rule, i) => {
+            const takenByOthers = new Set<AssetKey>(
+              suffixRules.flatMap((r, j) => (j === i ? [] : r.classes))
+            )
+            return (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 14,
+                  marginBottom: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <input
+                  className="inp mono"
+                  value={rule.suffix}
+                  onChange={e => updateSuffixRuleSuffix(i, e.target.value)}
+                  placeholder="e.g. m"
+                  style={{ width: 90 }}
+                />
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+                  {ASSET_CLASSES.map(cls => {
+                    const active = rule.classes.includes(cls)
+                    const disabled = !active && takenByOthers.has(cls)
+                    return (
+                      <button
+                        key={cls}
+                        type="button"
+                        className={`tag ${active ? 'long' : 'ghost'}`}
+                        disabled={disabled}
+                        onClick={() => toggleSuffixRuleClass(i, cls)}
+                        title={disabled ? 'Already assigned to another suffix' : undefined}
+                        style={{
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          opacity: disabled ? 0.4 : 1,
+                        }}
+                      >
+                        {cls}
+                      </button>
+                    )
+                  })}
+                </div>
+                <button className="btn sm ghost" onClick={() => removeSuffixRule(i)}>
+                  ×
+                </button>
+              </div>
+            )
+          })}
+          <button className="btn sm ghost" style={{ marginTop: 6 }} onClick={addSuffixRule}>
+            + Add suffix
+          </button>
         </div>
       </div>
 

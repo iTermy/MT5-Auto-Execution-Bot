@@ -1,3 +1,4 @@
+// @ts-nocheck -- Supabase Edge Function runs on Deno; VS Code's TS server lacks Deno globals and remote-URL imports.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 interface RequestBody {

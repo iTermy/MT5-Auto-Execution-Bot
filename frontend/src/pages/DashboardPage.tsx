@@ -21,15 +21,6 @@ interface Props {
   onNavigate: (page: Page) => void
 }
 
-function proximityPctFromPrice(closestPrice: number, currentPrice: number): number {
-  // Use distance-as-fraction-of-price as a rough proximity heuristic. 0% when far,
-  // 100% when current price equals the limit price. Capped so 1% off price → 0%.
-  if (closestPrice === 0) return 0
-  const frac = Math.abs(currentPrice - closestPrice) / Math.abs(closestPrice)
-  const closeness = 1 - Math.min(frac / 0.01, 1)
-  return Math.max(0, Math.min(100, Math.round(closeness * 100)))
-}
-
 export function DashboardPage({ dashboard, history, config, onNavigate }: Props) {
   const licenseMissing = config !== null && !config.license_key
   const [pnlP, setPnlP] = useState<Period>('all')
@@ -90,7 +81,7 @@ export function DashboardPage({ dashboard, history, config, onNavigate }: Props)
       sym: s.symbol,
       side: s.direction as 'long' | 'short',
       closestPrice: s.closest_price_display,
-      pct: proximityPctFromPrice(s.closest_price, s.current_price),
+      pct: s.proximity_pct,
       dist: s.distance_display,
       channelName: getChannelName(s.channel_id),
       signalType: formatSignalType(s.signal_type),

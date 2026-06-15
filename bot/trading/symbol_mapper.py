@@ -1,9 +1,10 @@
 from bot.config.constants import AssetClass
-from bot.config.settings import Settings
+from bot.config.settings import ProximityConfig, Settings
+from bot.mt5.types import SymbolInfo
 
 _METALS = frozenset({"XAUUSD", "XAGUSD", "GOLD", "SILVER"})
 _OIL_KEYWORDS = ("OIL", "WTI", "BRENT")
-_INDEX_KEYWORDS = ("SPX", "NAS", "DAX", "DE30", "DE40", "JP225", "UK100", "US500", "USTEC")
+_INDEX_KEYWORDS = ("SPX", "NAS", "DAX", "DE30", "DE40", "JP225", "UK100", "US30", "US500", "USTEC")
 
 
 def detect_asset_class(db_symbol: str) -> AssetClass:
@@ -53,6 +54,42 @@ def map_symbol(db_symbol: str, config: Settings) -> str:
 
 def needs_offset(db_symbol: str, config: Settings) -> bool:
     return db_symbol in config.offset_instruments
+
+
+def proximity_threshold(
+    asset_class: AssetClass, info: SymbolInfo, prox: ProximityConfig, db_sym: str
+) -> float | None:
+    """Distance in price units within which a limit counts as 'close' — the same
+    distance the placement gate uses to decide a pending order is worth placing.
+    None means this asset class has no configured threshold (no proximity gate)."""
+    if asset_class == AssetClass.STOCKS:
+        s = db_sym.upper()
+        for sym, threshold in prox.stock_overrides.items():
+            if sym.upper() in s:
+                return threshold
+        return prox.stocks
+
+    if asset_class == AssetClass.INDICES:
+        s = db_sym.upper()
+        for keyword, threshold in prox.indices.items():
+            if keyword.upper() in s:
+                return threshold
+        return None  # unrecognized index → no filter
+
+    if asset_class in (AssetClass.FOREX, AssetClass.FOREX_JPY):
+        pip_sz = info.point * (10 if info.digits in (3, 5) else 1)
+        if pip_sz <= 0:
+            return None
+        pips = prox.forex_pips if asset_class == AssetClass.FOREX else prox.forex_jpy_pips
+        return pips * pip_sz
+
+    if asset_class == AssetClass.METALS:
+        return prox.metals
+
+    if asset_class == AssetClass.CRYPTO:
+        return prox.crypto
+
+    return None  # OIL and any other unhandled classes
 
 
 def is_symbol_available(db_symbol: str, broker_symbols, config: Settings) -> bool:

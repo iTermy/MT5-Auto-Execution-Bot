@@ -5,11 +5,31 @@ from datetime import UTC, datetime
 
 from bot.config.constants import AssetClass
 from bot.config.settings import Settings
-from bot.trading.symbol_mapper import detect_asset_class, map_symbol, needs_offset
+from bot.trading.symbol_mapper import (
+    detect_asset_class,
+    map_symbol,
+    needs_offset,
+    proximity_threshold,
+)
 
 logger = logging.getLogger(__name__)
 
 _MARGIN_MODE_HEDGING = 2  # mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
+_PIP_CLASSES = (AssetClass.FOREX, AssetClass.FOREX_JPY)
+
+
+def _proximity_pct(distance: float, closest_price: float, threshold: float | None) -> int:
+    """0–100 fill heuristic. Scaled by the instrument's placement-proximity threshold
+    when one is configured (100% = at the limit, 0% = at/beyond the threshold the bot
+    uses to decide a limit is worth placing). Falls back to distance-as-fraction-of-price
+    (1% → 0%) for asset classes with no configured threshold."""
+    if threshold and threshold > 0:
+        closeness = 1.0 - min(abs(distance) / threshold, 1.0)
+    elif closest_price:
+        closeness = 1.0 - min(abs(distance) / abs(closest_price) / 0.01, 1.0)
+    else:
+        return 0
+    return round(closeness * 100)
 
 
 @dataclass
@@ -145,6 +165,7 @@ class DashboardCache:
             pending_limit_ids or set(),
             tick_cache,
             config,
+            mt5_client,
         )
 
         total_profit = sum(p["profit"] for p in positions)
@@ -171,6 +192,7 @@ def _build_nearby_signals(
     pending_limit_ids: set[int],
     tick_cache: dict,
     config: Settings | None,
+    mt5_client,
 ) -> list[dict]:
     if not supabase_rows or config is None:
         return []
@@ -205,11 +227,20 @@ def _build_nearby_signals(
         distance_display = _format_distance(distance, asset_class)
         price_display = _format_price(closest_price, asset_class)
 
+        info = mt5_client.symbol_info(mt5_sym) if asset_class in _PIP_CLASSES else None
+        threshold = (
+            None
+            if asset_class in _PIP_CLASSES and info is None
+            else proximity_threshold(asset_class, info, config.proximity, db_sym)
+        )
+        proximity_pct = _proximity_pct(distance, closest_price, threshold)
+
         result.append(
             {
                 "signal_id": sig_id,
                 "distance_display": distance_display,
                 "closest_price_display": price_display,
+                "proximity_pct": proximity_pct,
                 "symbol": db_sym,
                 "mt5_symbol": mt5_sym,
                 "direction": first["direction"],

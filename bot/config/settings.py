@@ -77,6 +77,7 @@ class ProximityConfig(BaseModel):
         "USTEC": 50.0,
         "DAX": 50.0,
         "DE30": 50.0,
+        "US30": 50.0,
         "JP225": 100.0,
     }
     stock_overrides: dict[str, float] = {}

@@ -171,6 +171,7 @@ export interface NearbySignalData {
   current_price: number
   distance: number
   distance_display: string
+  proximity_pct: number
   placed: boolean
 }
 

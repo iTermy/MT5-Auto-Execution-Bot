@@ -23,6 +23,7 @@ from bot.trading.symbol_mapper import (
     detect_asset_class,
     map_symbol,
     needs_offset,
+    proximity_threshold,
 )
 from bot.utils.time_utils import MarketScheduler
 
@@ -34,37 +35,10 @@ _UNAVAILABLE_COOLDOWN = 300.0  # seconds before retrying a "not in terminal" sym
 def _within_proximity(
     limit_prices: list[float], mid: float, asset_class: AssetClass, info, prox, db_sym: str = ""
 ) -> bool:
-    min_dist = min(abs(p - mid) for p in limit_prices)
-
-    if asset_class == AssetClass.STOCKS:
-        s = db_sym.upper()
-        for sym, threshold in prox.stock_overrides.items():
-            if sym.upper() in s:
-                return min_dist <= threshold
-        return min_dist <= prox.stocks
-
-    if asset_class == AssetClass.INDICES:
-        s = db_sym.upper()
-        for keyword, threshold in prox.indices.items():
-            if keyword.upper() in s:
-                return min_dist <= threshold
-        return True  # unrecognized index → no filter
-
-    if asset_class == AssetClass.FOREX:
-        pip_sz = info.point * (10 if info.digits in (3, 5) else 1)
-        return (min_dist / pip_sz) <= prox.forex_pips if pip_sz > 0 else True
-
-    if asset_class == AssetClass.FOREX_JPY:
-        pip_sz = info.point * (10 if info.digits in (3, 5) else 1)
-        return (min_dist / pip_sz) <= prox.forex_jpy_pips if pip_sz > 0 else True
-
-    if asset_class == AssetClass.METALS:
-        return min_dist <= prox.metals
-
-    if asset_class == AssetClass.CRYPTO:
-        return min_dist <= prox.crypto
-
-    return True  # OIL and any other unhandled classes
+    threshold = proximity_threshold(asset_class, info, prox, db_sym)
+    if threshold is None:
+        return True
+    return min(abs(p - mid) for p in limit_prices) <= threshold
 
 
 @dataclass

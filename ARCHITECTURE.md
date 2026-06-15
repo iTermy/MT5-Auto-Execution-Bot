@@ -97,6 +97,52 @@ Standard:                              Scalp (roughly halved):
   oil:       $0.50 / $0.20 trail         oil:       $0.25 / $0.10 trail
 ```
 
+### TP Outcomes (Supabase `tp_outcomes` — write-only analytics)
+Append-only log for forward-test / backtest analysis. The unit of analysis is the **signal**
+(a set of limits sharing one stop loss). Each trade produces **two rows**, distinguished by `stage`:
+- `stage='trigger'` — written by `TPEngine` the moment TP fires. `realized_pnl`/`r_multiple` cover
+  only the closed portion at that instant (a trailing remainder is still open).
+- `stage='final'` — written by `TPFinalizer.sweep` once the signal's last position goes flat.
+  Carries the **whole-trade** result. Idempotent via the local SQLite `signal_finalized` guard
+  (exactly one final row per signal). For analysis, the `final` row is the source of truth for
+  outcome; the `trigger` row shows what was captured at the trigger instant.
+
+`r_multiple` is money-based: `realized_pnl / risk_money`, where
+`risk_money = |avg_entry − stop_loss| × (tick_value / tick_size) × total_volume`
+(`price_distance_to_money`, `bot/trading/lot_calculator.py`). Shared SL makes this exact for
+multi-limit signals. MFE/MAE are price-distance excursions from entry (always ≥ 0), sampled each
+TP cycle and aggregated as `MAX` across the signal's tickets.
+
+Column reference (key columns; remainder are self-explanatory):
+
+| Column | Meaning |
+| --- | --- |
+| `stage` | `'trigger'` or `'final'` — see above |
+| `signal_type`, `asset_class`, `symbol`, `direction` | trade classification (`direction`: long/short) |
+| `total_limits` / `limits_filled` / `limits_pending` / `limits_cancelled` | level counts; on the trigger row, `limits_filled` ≈ how many levels filled before the bounce |
+| `level_sequence` | `sequence_number` of the deepest filled limit — how deep price went before reacting |
+| `total_levels` | total limits on the signal |
+| `avg_entry_price`, `stop_loss` | volume-weighted entry; shared signal SL |
+| `risk_per_limit` | price distance `|avg_entry − stop_loss|` (risk in price units) |
+| `risk_percent_cfg` | configured risk % at the time (context for sizing) |
+| `r_multiple` | realized reward-to-risk in money terms (the headline metric on the `final` row) |
+| `realized_pnl` | account-currency P&L (closed portion on `trigger`; full trade on `final`) |
+| `others_pnl` | P&L of non-newest positions at trigger (`trigger` only) |
+| `mfe_price` / `mae_price` | max favorable / adverse excursion from entry, price units |
+| `mfe_r` / `mae_r` | the same expressed in R (`/ risk_per_limit`). `mfe_r` ≈ ceiling of capturable R; capture-efficiency ≈ realized R ÷ `mfe_r` |
+| `tp_trigger_price`, `move_at_trigger` | price and favorable move when TP fired (`trigger` only) |
+| `threshold_value`, `threshold_unit` | the TP threshold that fired (`pips`/`dollars`) |
+| `partial_close_pct`, `trailing_started` | close/trail behavior at trigger |
+| `seconds_to_trigger` | fill → trigger latency (`trigger` only) — impulse speed |
+| `hold_seconds` | first fill → final close duration (`final` only) |
+| `exit_reason` | `final` only: `trailing_stop` / `tp_full` / `stop_loss` (heuristic from row state — not a precise close-cause audit) |
+| `total_volume`, `partial_close_pct`, `bot_version`, `tp_strategy`, `notes` | execution context |
+| `mt5_account`, `channel_id`, `written_at` | account, source channel, insert time |
+
+Adding columns requires an owner-run `ALTER TABLE tp_outcomes ADD COLUMN IF NOT EXISTS ...` in the
+Supabase SQL editor — the bot only INSERTs. The local SQLite side (`order_mappings.sequence_number`
+/ `mfe_price` / `mae_price`, `signal_finalized` table) auto-migrates on startup.
+
 ## Spread Adjustment (order_placer.py)
 On every pending order placement, adjust price and SL for current spread:
 ```

@@ -4,7 +4,7 @@ _PRODUCTION_DSN: str = ""
 _PRODUCTION_LICENSE_URL: str = ""
 
 MAGIC_NUMBER: int = 20250001
-BOT_VERSION: str = "1.0.1"
+BOT_VERSION: str = "1.1.0"
 
 
 class AssetClass(str, Enum):

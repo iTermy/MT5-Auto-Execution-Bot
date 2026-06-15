@@ -14,6 +14,7 @@ from bot.db.supabase import SupabaseDB
 from bot.mt5.client import MT5Client
 from bot.mt5.connection import MT5Connection
 from bot.tp.engine import TPEngine
+from bot.trading.symbol_mapper import is_symbol_available
 from bot.utils.time_utils import MarketScheduler
 
 _RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
@@ -56,6 +57,10 @@ class Engine:
         # Broker symbol catalogue, refreshed on the engine thread for the Settings
         # symbol-mapping picker. The API reads this list; it never calls MT5 directly.
         self.broker_symbols: list[str] = []
+        # DB instruments that have a live signal but whose mapped MT5 symbol the broker
+        # doesn't carry. Recomputed each dashboard cycle; surfaced in Settings so users
+        # can add a manual mapping. Falls off the list once a mapping resolves.
+        self.not_found_symbols: list[str] = []
         # SSE consumers read from this queue
         self.status_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         # License teardown state
@@ -429,7 +434,19 @@ class Engine:
             orders = self._mt5.orders_get()
             active = await self._sqlite.get_all_active()
             # symbols_get() is cached in the client; refresh the API-facing copy cheaply.
-            self.broker_symbols = sorted(self._mt5.symbols_get())
+            catalogue = self._mt5.symbols_get()
+            self.broker_symbols = sorted(catalogue)
+            rows = self._sync_cycle.last_supabase_rows
+            if catalogue and rows:
+                self.not_found_symbols = sorted(
+                    {
+                        r["instrument"]
+                        for r in rows
+                        if not is_symbol_available(r["instrument"], catalogue, self._config)
+                    }
+                )
+            elif catalogue:
+                self.not_found_symbols = []
             self.dashboard_cache.update(
                 acct,
                 positions,
@@ -440,6 +457,7 @@ class Engine:
                 live_prices=self._sync_cycle.last_live_prices,
                 pending_limit_ids=self._sync_cycle.last_sqlite_pending_limit_ids,
                 config=self._config,
+                broker_symbols=catalogue,
             )
         except Exception:
             logger.error("Dashboard cache update failed", exc_info=True)

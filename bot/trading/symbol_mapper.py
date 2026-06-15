@@ -55,6 +55,18 @@ def needs_offset(db_symbol: str, config: Settings) -> bool:
     return db_symbol in config.offset_instruments
 
 
+def is_symbol_available(db_symbol: str, broker_symbols, config: Settings) -> bool:
+    """True if the broker carries the MT5 symbol this DB instrument maps to —
+    either directly, or via the bare stock symbol when the suffixed form is
+    absent (mirrors the stock-suffix fallback in the placement pre-check)."""
+    mt5_symbol = map_symbol(db_symbol, config)
+    if mt5_symbol in broker_symbols:
+        return True
+    if config.stock_suffix and mt5_symbol.endswith(config.stock_suffix):
+        return mt5_symbol[: -len(config.stock_suffix)] in broker_symbols
+    return False
+
+
 def _strip_to_base(mt5_symbol: str, config: Settings) -> str:
     for db_sym, mapped in config.symbol_map.items():
         if mapped == mt5_symbol:

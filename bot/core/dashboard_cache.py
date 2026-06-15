@@ -48,6 +48,7 @@ class DashboardCache:
         live_prices: dict | None = None,
         pending_limit_ids: set[int] | None = None,
         config: Settings | None = None,
+        broker_symbols: frozenset[str] | None = None,
     ) -> None:
         now_iso = datetime.now(UTC).isoformat()
 
@@ -70,11 +71,16 @@ class DashboardCache:
 
         all_symbols = {p.symbol for p in mt5_positions} | {o.symbol for o in mt5_orders}
         # Also fetch ticks for non-offset symbols that only appear in supabase_rows,
-        # so we can compute distance for unplaced "watching" signals.
+        # so we can compute distance for unplaced "watching" signals. Skip symbols the
+        # broker doesn't carry — otherwise symbol_info_tick spams "Not found" every cycle
+        # for instruments this broker simply doesn't offer.
         if supabase_rows and config is not None:
             for r in supabase_rows:
-                if not needs_offset(r["instrument"], config):
-                    all_symbols.add(map_symbol(r["instrument"], config))
+                if needs_offset(r["instrument"], config):
+                    continue
+                sym = map_symbol(r["instrument"], config)
+                if broker_symbols is None or sym in broker_symbols:
+                    all_symbols.add(sym)
         tick_cache = {}
         for sym in all_symbols:
             tick = mt5_client.symbol_info_tick(sym)

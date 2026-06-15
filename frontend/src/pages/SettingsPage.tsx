@@ -8,6 +8,7 @@ import {
   updateConfig,
   scanMt5Terminals,
   fetchMt5Symbols,
+  fetchNotFoundSymbols,
 } from '../api'
 import type {
   Config,
@@ -244,6 +245,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [oneToOneRows, setOneToOneRows] = useState<OneToOneOverrideRow[]>([])
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
   const [brokerSymbols, setBrokerSymbols] = useState<string[]>([])
+  const [notFoundSymbols, setNotFoundSymbols] = useState<string[]>([])
   const [stockSuffix, setStockSuffix] = useState('-24')
   const [suffixRules, setSuffixRules] = useState<SuffixRuleRow[]>([])
   const [dirty, setDirty] = useState(false)
@@ -434,6 +436,19 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     fetchMt5Symbols()
       .then(setBrokerSymbols)
       .catch(() => {})
+  }, [status?.mt5_connected])
+
+  // Symbols that have a signal but no matching MT5 symbol on this broker. Polled so
+  // the list drops entries as soon as a saved mapping resolves on the next cycle.
+  useEffect(() => {
+    if (!status?.mt5_connected) return
+    const load = () =>
+      fetchNotFoundSymbols()
+        .then(setNotFoundSymbols)
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 15000)
+    return () => clearInterval(id)
   }, [status?.mt5_connected])
 
   const brokerSymbolSet = useMemo(() => new Set(brokerSymbols), [brokerSymbols])
@@ -2010,6 +2025,26 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             + Add suffix
           </button>
         </div>
+      </div>
+
+      {/* NOT FOUND SYMBOLS */}
+      <div className="panel pad">
+        <div className="panel-head">
+          <h3>Not found symbols</h3>
+          <span className="sub">
+            signals whose instrument has no matching MT5 symbol on this broker · add a mapping above
+            to resolve
+          </span>
+        </div>
+        {notFoundSymbols.length > 0 ? (
+          <p className="mono" style={{ fontSize: 13, lineHeight: 1.7, margin: 0 }}>
+            {notFoundSymbols.join(', ')}
+          </p>
+        ) : (
+          <p className="faint" style={{ fontSize: 13, margin: 0 }}>
+            None — every signalled instrument maps to a symbol on this broker.
+          </p>
+        )}
       </div>
 
       {/* SAVE */}

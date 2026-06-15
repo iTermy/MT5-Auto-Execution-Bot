@@ -161,6 +161,12 @@ async def list_mt5_symbols(request: Request) -> dict:
     return {"symbols": request.app.state.engine.broker_symbols}
 
 
+@router.get("/api/mt5/not-found-symbols")
+async def list_not_found_symbols(request: Request) -> dict:
+    # DB instruments with a live signal but no matching MT5 symbol on this broker.
+    return {"symbols": request.app.state.engine.not_found_symbols}
+
+
 def _collect_mt5_terminals() -> list[str]:
     found: set[Path] = set()
     _scan_origin_files(found)

@@ -2,7 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 from bot.config.constants import AssetClass
-from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class, map_symbol
+from bot.trading.symbol_mapper import (
+    db_symbol_from_mt5,
+    detect_asset_class,
+    instrument_under_news,
+    map_symbol,
+    parse_news_symbols,
+)
 from tests.conftest import make_settings
 
 # ---------------------------------------------------------------------------
@@ -63,6 +69,85 @@ def test_stocks_beats_indices_for_nas_suffix() -> None:
 def test_btcusd_is_forex_not_crypto() -> None:
     # BTCUSD has len==6 so the crypto rule (len > 6) does not match
     assert detect_asset_class("BTCUSD") == AssetClass.FOREX
+
+
+# ---------------------------------------------------------------------------
+# parse_news_symbols
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (None, frozenset()),
+        ("", frozenset()),
+        ("USD", frozenset({"USD"})),
+        ("usd", frozenset({"USD"})),  # uppercased
+        ("USD, GOLD, EUR", frozenset({"USD", "GOLD", "EUR"})),
+        ("USD,GOLD", frozenset({"USD", "GOLD"})),  # no spaces
+        (" USD ,  JPY ", frozenset({"USD", "JPY"})),  # trimmed
+        ("ALL", frozenset({"ALL"})),
+    ],
+)
+def test_parse_news_symbols(raw, expected) -> None:
+    assert parse_news_symbols(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# instrument_under_news
+# ---------------------------------------------------------------------------
+
+
+def test_instrument_under_news_no_news() -> None:
+    assert instrument_under_news("EURUSD", frozenset()) is False
+
+
+def test_instrument_under_news_all_matches_everything() -> None:
+    assert instrument_under_news("EURUSD", frozenset({"ALL"})) is True
+    assert instrument_under_news("XAUUSD", frozenset({"ALL"})) is True
+    assert instrument_under_news("USOILSPOT", frozenset({"ALL"})) is True
+
+
+@pytest.mark.parametrize(
+    "instrument,expected",
+    [
+        # USD substring matches forex, gold, and USD-quoted indices
+        ("EURUSD", True),
+        ("USDJPY", True),
+        ("USDCAD", True),
+        ("XAUUSD", True),
+        ("SPX500USD", True),
+        ("NAS100USD", True),
+        ("US2000USD", True),
+        # Oil is USD-denominated but has no 'USD' substring → asset-class path
+        ("USOILSPOT", True),
+        # Not USD-related
+        ("EURGBP", False),
+        ("EURJPY", False),
+    ],
+)
+def test_instrument_under_usd_news(instrument: str, expected: bool) -> None:
+    assert instrument_under_news(instrument, frozenset({"USD"})) is expected
+
+
+def test_gold_token_aliases_to_xau() -> None:
+    # 'GOLD' news targets XAUUSD only, not arbitrary USD instruments
+    assert instrument_under_news("XAUUSD", frozenset({"GOLD"})) is True
+    assert instrument_under_news("EURUSD", frozenset({"GOLD"})) is False
+    assert instrument_under_news("USOILSPOT", frozenset({"GOLD"})) is False
+
+
+def test_news_currency_component_match() -> None:
+    assert instrument_under_news("EURUSD", frozenset({"EUR"})) is True
+    assert instrument_under_news("EURJPY", frozenset({"JPY"})) is True
+    assert instrument_under_news("EURJPY", frozenset({"GBP"})) is False
+
+
+def test_news_multiple_tokens() -> None:
+    news = frozenset({"GOLD", "EUR"})
+    assert instrument_under_news("XAUUSD", news) is True  # GOLD→XAU
+    assert instrument_under_news("EURJPY", news) is True  # EUR
+    assert instrument_under_news("USDCAD", news) is False
 
 
 # ---------------------------------------------------------------------------

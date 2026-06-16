@@ -2,7 +2,12 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.core.sync_cycle import SyncCycle
-from tests.conftest import make_account_info, make_order_result, make_symbol_info
+from tests.conftest import (
+    make_account_info,
+    make_order_result,
+    make_position,
+    make_symbol_info,
+)
 
 
 def _make_supabase_row(
@@ -22,7 +27,7 @@ def _make_supabase_row(
     }
 
 
-def _mock_supabase(signals=None, live_prices=None, news_mode=False):
+def _mock_supabase(signals=None, live_prices=None, news_mode=None):
     sb = AsyncMock()
     sb.fetch_active_signals.return_value = signals or []
     sb.fetch_live_prices.return_value = live_prices or {}
@@ -334,6 +339,191 @@ async def test_spread_hour_24h_stock_exempt_but_normal_stock_cancelled(
     mock_mt5.cancel_pending_order.assert_called_once_with(5002)
     pending = await sqlite_db.get_pending_orders()
     assert {r["mt5_ticket"] for r in pending} == {5001}
+
+
+# ---------------------------------------------------------------------------
+# Per-symbol news gate: cancel only pendings whose instrument is under news
+# ---------------------------------------------------------------------------
+
+
+async def test_news_cancels_only_matching_symbol(sqlite_db, mock_mt5, sample_config) -> None:
+    # USD news active: EURUSD pending is cancelled, GBPAUD pending survives.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=7001,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=2,
+        mt5_ticket=7002,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="GBPAUD",
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=7001)
+
+    eur = _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD")
+    gbp = _make_supabase_row(limit_id=2, signal_id=2, instrument="GBPAUD")
+    supabase = _mock_supabase(signals=[eur, gbp], news_mode="USD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(7001)
+    pending = await sqlite_db.get_pending_orders()
+    assert {r["mt5_ticket"] for r in pending} == {7002}
+
+
+async def test_news_all_cancels_every_pending(sqlite_db, mock_mt5, sample_config) -> None:
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=7101,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=2,
+        mt5_ticket=7102,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="GBPAUD",
+    )
+    mock_mt5.cancel_pending_order.side_effect = [
+        make_order_result(ticket=7101),
+        make_order_result(ticket=7102),
+    ]
+
+    eur = _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD")
+    gbp = _make_supabase_row(limit_id=2, signal_id=2, instrument="GBPAUD")
+    supabase = _mock_supabase(signals=[eur, gbp], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 2
+    pending = await sqlite_db.get_pending_orders()
+    assert pending == []
+
+
+async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) -> None:
+    # BTCUSDT pending survives even under ALL news (crypto is 24/7, exempt).
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=7201,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=60000.0,
+        signal_type="standard",
+        symbol="BTCUSD",
+    )
+    btc = _make_supabase_row(limit_id=1, signal_id=1, instrument="BTCUSDT")
+    btc["stop_loss"] = 60000.0
+    supabase = _mock_supabase(signals=[btc], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    pending = await sqlite_db.get_pending_orders()
+    assert {r["mt5_ticket"] for r in pending} == {7201}
+
+
+# ---------------------------------------------------------------------------
+# News force-exit: close filled positions whose instrument is under news
+# ---------------------------------------------------------------------------
+
+
+async def _insert_filled(sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_loss=1.08500):
+    await sqlite_db.insert_order(
+        limit_id=mt5_ticket,
+        signal_id=signal_id,
+        mt5_ticket=mt5_ticket,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=db_stop_loss,
+        signal_type="standard",
+        symbol=symbol,
+    )
+    await sqlite_db.mark_filled(mt5_ticket, "2026-01-01T00:01:00+00:00")
+
+
+async def test_news_force_exits_matching_filled_position(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=8001, signal_id=1, symbol="EURUSD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=8001, symbol="EURUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8001)
+
+    supabase = _mock_supabase(signals=[], news_mode="USD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_news"
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_news_does_not_exit_unrelated_filled_position(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=8101, signal_id=1, symbol="GBPAUD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=8101, symbol="GBPAUD")]
+
+    supabase = _mock_supabase(signals=[], news_mode="USD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8101}
+
+
+async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_config) -> None:
+    # Crypto stays live through news, mirroring the placement-gate exemption.
+    sample_config.symbol_map = {"BTCUSDT": "BTCUSD"}  # reverse-maps for asset-class detection
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8201, signal_id=1, symbol="BTCUSD", db_stop_loss=60000.0
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8201, symbol="BTCUSD")]
+
+    supabase = _mock_supabase(signals=[], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8201}
 
 
 # ---------------------------------------------------------------------------

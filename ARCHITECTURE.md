@@ -199,6 +199,11 @@ Pause placement + cancel pending during:
 
 Cancelled orders marked `spread_cancelled` in SQLite. Re-placed automatically when markets reopen (sync cycle sees DB limit still pending + no active SQLite mapping).
 
+## News Mode (per-symbol)
+`bot_mode_status.news_mode` is a comma-separated list of news tokens (NULL = no news). Tokens are currency codes (`USD`, `EUR`, `JPY`, …) plus named assets (`GOLD`), or the single token `ALL`. A token applies to an instrument when, aliased, it is a substring of the DB symbol — so `USD` gates EURUSD, USDJPY, XAUUSD, SPX500USD; `GOLD` aliases to `XAU` and gates XAUUSD only. Oil is USD-denominated but its symbol (e.g. USOILSPOT) has no `USD` substring, so `USD` news gates it via asset class. `ALL` gates everything. Crypto and 24h stocks are exempt (same as the spread gate). Parsing/matching live in `symbol_mapper.py` (`parse_news_symbols`, `instrument_under_news`).
+
+While a symbol is under news the bot (a) cancels its pending orders (same path as the spread gate) and (b) force-closes any filled positions on that symbol (`SyncCycle._check_news_exits`), mirroring the manual-cancel / breakeven force-exit.
+
 ## Polling Strategy
 | State | MT5 calls/min | Supabase queries/min |
 |-------|--------------|---------------------|

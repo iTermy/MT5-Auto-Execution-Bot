@@ -90,9 +90,9 @@ class SupabaseDB:
             for row in rows
         }
 
-    async def fetch_news_mode(self) -> bool:
+    async def fetch_news_mode(self) -> str | None:
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(FETCH_NEWS_MODE) or False
+            return await conn.fetchval(FETCH_NEWS_MODE)
 
     async def fetch_feed_health(self) -> dict[str, str]:
         """Return {feed_name: status} from the feed_health table."""

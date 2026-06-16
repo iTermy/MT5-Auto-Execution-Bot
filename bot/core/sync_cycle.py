@@ -21,8 +21,10 @@ from bot.trading.order_placer import OrderPlacer
 from bot.trading.symbol_mapper import (
     db_symbol_from_mt5,
     detect_asset_class,
+    instrument_under_news,
     map_symbol,
     needs_offset,
+    parse_news_symbols,
     proximity_threshold,
 )
 from bot.utils.time_utils import MarketScheduler
@@ -71,6 +73,19 @@ def _persist_stock_no_suffix(db_symbol: str, config: Settings) -> None:
         logger.error("Failed to persist stock_no_suffix", exc_info=True)
 
 
+def _gate_exempt(instr: str, config: Settings) -> bool:
+    """Crypto and 24h stocks (broker -24 suffix) trade around the clock, so they're
+    exempt from the spread-hour and news-mode gates."""
+    ac = detect_asset_class(instr)
+    if ac == AssetClass.CRYPTO:
+        return True
+    return (
+        ac == AssetClass.STOCKS
+        and bool(config.stock_suffix)
+        and map_symbol(instr, config).endswith(config.stock_suffix)
+    )
+
+
 def _feed_for_symbol(db_sym: str, config: Settings) -> str:
     """Return the TM feed name that serves this symbol."""
     if not needs_offset(db_sym, config):
@@ -102,6 +117,8 @@ class SyncCycle:
         self._sl_fail_target: dict[int, float] = {}  # ticket -> last failed target sl
         # M13: force-exit consecutive failure tracking
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
+        # News force-exit consecutive failure tracking (separate from status force-exit)
+        self._news_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         self._last_force_exit_status: dict[
             int, str
         ] = {}  # signal_id -> force-exit status at first detection
@@ -186,12 +203,14 @@ class SyncCycle:
             # shut; everything else uses the standard daily_start.
             now = datetime.now(UTC)
 
-            news_mode_active = False
-            if placement_active:
-                try:
-                    news_mode_active = await supabase.fetch_news_mode()
-                except Exception:
-                    logger.error("Failed to fetch news_mode", exc_info=True)
+            # news_mode is per-symbol: a comma-separated list of currency/asset tokens
+            # (or 'ALL'), NULL when there's no news. Fetched regardless of
+            # placement_active so news force-exits still fire while placement is paused.
+            news_symbols: frozenset[str] = frozenset()
+            try:
+                news_symbols = parse_news_symbols(await supabase.fetch_news_mode())
+            except Exception:
+                logger.error("Failed to fetch news_mode", exc_info=True)
 
             def _instr_of(row) -> str:
                 lid = row["limit_id"]
@@ -200,20 +219,11 @@ class SyncCycle:
                 return db_symbol_from_mt5(row["symbol"] or "", config)
 
             def _is_blocked(instr: str) -> bool:
-                ac = detect_asset_class(instr)
-                if ac == AssetClass.CRYPTO:
+                if _gate_exempt(instr, config):
                     return False
-                # 24h stocks carry the broker's -24 suffix (config.stock_suffix) and
-                # trade around the clock, so they're exempt like crypto.
-                is_stock = ac == AssetClass.STOCKS
-                if (
-                    is_stock
-                    and config.stock_suffix
-                    and map_symbol(instr, config).endswith(config.stock_suffix)
-                ):
-                    return False
-                if news_mode_active:
+                if instrument_under_news(instr, news_symbols):
                     return True
+                is_stock = detect_asset_class(instr) == AssetClass.STOCKS
                 return scheduler.should_cancel_pending(now, stock=is_stock)
 
             if placement_active:
@@ -695,6 +705,7 @@ class SyncCycle:
             await self._check_forced_exits(
                 supabase, sqlite, mt5_client, mt5_positions, scheduler, config
             )
+            await self._check_news_exits(news_symbols, sqlite, mt5_client, mt5_positions, config)
 
             # Snapshot for the dashboard's "Closest Signals" view. Re-query pending
             # so newly-placed orders from this cycle appear as placed=True.
@@ -954,6 +965,74 @@ class SyncCycle:
         self._last_signal_status = {
             sid: st for sid, st in self._last_signal_status.items() if sid in filled_sids
         }
+
+    async def _check_news_exits(
+        self,
+        news_symbols: frozenset[str],
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        mt5_positions: list,
+        config: Settings,
+    ) -> None:
+        """Force-close filled positions whose instrument is under active news. Mirrors
+        the manual-cancel / breakeven force-exit: stop trailing, close, mark closed.
+        Crypto and 24h stocks are exempt (same as the placement gate). Idempotent —
+        once a position is closed it's gone from MT5 and skipped next cycle."""
+        if not news_symbols:
+            return
+        filled = await sqlite.get_filled_positions()
+        if not filled:
+            return
+
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+
+        for row in filled:
+            ticket = row["mt5_ticket"]
+            pos = pos_by_ticket.get(ticket)
+            if pos is None:
+                continue
+
+            instr = db_symbol_from_mt5(row["symbol"] or "", config)
+            if _gate_exempt(instr, config) or not instrument_under_news(instr, news_symbols):
+                continue
+
+            if self._news_exit_fail_count.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
+                continue
+
+            await sqlite.set_trailing(ticket, 0)
+            res = mt5_client.close_position(
+                ticket=pos.ticket,
+                symbol=pos.symbol,
+                volume=pos.volume,
+                position_type=pos.type,
+                comment="force_news",
+            )
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                if realized_pnl is None:
+                    realized_pnl = pos.profit
+                await sqlite.mark_closed(ticket, realized_pnl)
+                self._news_exit_fail_count.pop(ticket, None)
+                logger.warning(
+                    "News exit closed ticket=%d signal=%d symbol=%s news=%s",
+                    ticket,
+                    row["signal_id"],
+                    instr,
+                    ",".join(sorted(news_symbols)),
+                )
+            else:
+                retcode = res.retcode if res else "None"
+                logger.error("News exit close failed ticket=%d retcode=%s", ticket, retcode)
+                new_count = self._news_exit_fail_count.get(ticket, 0) + 1
+                self._news_exit_fail_count[ticket] = new_count
+                if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
+                    logger.error(
+                        "News exit abandoned: ticket=%d signal=%d after %d attempts — "
+                        "manual intervention required",
+                        ticket,
+                        row["signal_id"],
+                        new_count,
+                    )
 
     async def _check_external_closes(
         self, sqlite: SQLiteDB, mt5_client: MT5Client, mt5_positions: list

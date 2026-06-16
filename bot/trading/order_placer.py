@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -14,10 +15,17 @@ logger = logging.getLogger(__name__)
 
 _ACTIVE_SIGNAL_STATUSES = frozenset({"active", "hit"})
 
+# Throttle repeated "market closed" notices so a closed session doesn't spam the
+# log every sync cycle. Per-limit, monotonic seconds.
+_MARKET_CLOSED_LOG_INTERVAL = 300.0
+
 PlacementOutcome = Literal["placed", "skipped", "error"]
 
 
 class OrderPlacer:
+    def __init__(self) -> None:
+        self._market_closed_log_ts: dict[int, float] = {}
+
     async def place_order(
         self,
         signal_id: int,
@@ -127,9 +135,24 @@ class OrderPlacer:
         result = mt5_client.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             retcode = result.retcode if result else "None"
-            logger.error(
-                "Placement failed: signal=%d limit=%d retcode=%s", signal_id, limit_id, retcode
-            )
+            if result is not None and result.retcode == mt5.TRADE_RETCODE_MARKET_CLOSED:
+                # Market closed — retries when the session reopens. Expected, not a hard
+                # error; log at most once per interval per limit instead of every cycle.
+                now = time.monotonic()
+                if (
+                    now - self._market_closed_log_ts.get(limit_id, 0.0)
+                    >= _MARKET_CLOSED_LOG_INTERVAL
+                ):
+                    self._market_closed_log_ts[limit_id] = now
+                    logger.warning(
+                        "Placement deferred (market closed): signal=%d limit=%d",
+                        signal_id,
+                        limit_id,
+                    )
+            else:
+                logger.error(
+                    "Placement failed: signal=%d limit=%d retcode=%s", signal_id, limit_id, retcode
+                )
             await sqlite.delete_claimed_order(limit_id)
             return "error"
 

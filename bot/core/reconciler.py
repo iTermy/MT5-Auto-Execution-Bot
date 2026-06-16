@@ -1,4 +1,5 @@
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -9,6 +10,10 @@ from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
 
 logger = logging.getLogger(__name__)
+
+# Throttle repeated "market closed" notices so a closed session (hours/weekend)
+# doesn't spam the log every sync cycle. Per-order, monotonic seconds.
+_MARKET_CLOSED_LOG_INTERVAL = 300.0
 
 
 def _parse_comment(comment: str) -> tuple[int, int] | None:
@@ -34,6 +39,9 @@ class ReconciliationResult:
 
 
 class Reconciler:
+    def __init__(self) -> None:
+        self._market_closed_log_ts: dict[int, float] = {}
+
     async def reconcile(self, mt5_client: MT5Client, sqlite: SQLiteDB) -> ReconciliationResult:
         result = ReconciliationResult()
 
@@ -162,6 +170,22 @@ class Reconciler:
             res = mt5_client.cancel_pending_order(order.ticket)
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 logger.info("Orphan cancelled: ticket=%d symbol=%s", order.ticket, order.symbol)
+                self._market_closed_log_ts.pop(order.ticket, None)
+            elif res and res.retcode == mt5.TRADE_RETCODE_MARKET_CLOSED:
+                # Can't cancel a closed market; it clears when the session reopens.
+                # Expected and self-resolving — log at most once per interval per order.
+                now = time.monotonic()
+                if (
+                    now - self._market_closed_log_ts.get(order.ticket, 0.0)
+                    >= _MARKET_CLOSED_LOG_INTERVAL
+                ):
+                    self._market_closed_log_ts[order.ticket] = now
+                    logger.warning(
+                        "Orphan cancel deferred (market closed): ticket=%d symbol=%s comment=%s",
+                        order.ticket,
+                        order.symbol,
+                        order.comment,
+                    )
             else:
                 retcode = res.retcode if res else "None"
                 logger.warning(

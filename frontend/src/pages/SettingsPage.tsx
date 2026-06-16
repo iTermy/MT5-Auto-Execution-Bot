@@ -1258,7 +1258,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>Exceptions</h3>
           <span className="sub">
-            override mode and value for specific MT5 symbols · optionally scoped to one signal type
+            override mode and value for specific MT5 symbols
           </span>
         </div>
         {lotExceptions.length > 0 && (
@@ -2116,8 +2116,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>By symbol</h3>
           <span className="sub">
-            DB instrument · optionally scoped to one signal type (e.g. XAUUSD + Scalp drops gold
-            scalps only)
+            Use DB instrument (e.g. "SPX500USD" not "US500") 
           </span>
         </div>
         {excludedTrades.length > 0 && (
@@ -2173,7 +2172,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
         <div className="panel-head" style={{ marginBottom: 10 }}>
           <h3 style={{ fontSize: 14 }}>By signal type</h3>
-          <span className="sub">unchecked types are skipped entirely</span>
+          <span className="sub">unchecked types are skipped</span>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 26px' }}>
           {SIGNAL_TYPES.map(t => (
@@ -2200,7 +2199,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
         <div className="panel-head" style={{ marginBottom: 10 }}>
           <h3 style={{ fontSize: 14 }}>By channel</h3>
-          <span className="sub">unchecked channels are skipped entirely</span>
+          <span className="sub">unchecked channels are skipped</span>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 26px' }}>
           {CHANNELS.map(c => (

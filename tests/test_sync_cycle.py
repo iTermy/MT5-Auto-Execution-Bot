@@ -290,6 +290,52 @@ async def test_spread_hour_skips_crypto_cancellation(sqlite_db, mock_mt5, sample
     assert {r["mt5_ticket"] for r in pending} == {4002}
 
 
+async def test_spread_hour_24h_stock_exempt_but_normal_stock_cancelled(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # 24h stocks carry the broker -24 suffix → exempt like crypto. A normal stock
+    # (listed bare, in stock_no_suffix) is cancelled when the gate fires.
+    sample_config.stock_no_suffix = ["AAPL.NAS"]  # AAPL listed bare → non-24h stock
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=5001,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=200.0,
+        signal_type="standard",
+        symbol="TSLA.NAS-24",
+    )
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=2,
+        mt5_ticket=5002,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=150.0,
+        signal_type="standard",
+        symbol="AAPL.NAS",
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=5002)
+
+    tsla = _make_supabase_row(limit_id=1, signal_id=1, instrument="TSLA.NAS")
+    tsla["stop_loss"] = 200.0  # match SQLite to avoid the SL-change cancel path
+    aapl = _make_supabase_row(limit_id=2, signal_id=2, instrument="AAPL.NAS")
+    aapl["stop_loss"] = 150.0
+    supabase = _mock_supabase(signals=[tsla, aapl])
+    scheduler = _mock_scheduler(cancel_pending=True)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(5002)
+    pending = await sqlite_db.get_pending_orders()
+    assert {r["mt5_ticket"] for r in pending} == {5001}
+
+
 # ---------------------------------------------------------------------------
 # Offset drift interval throttle: skip re-evaluation within 30 min window
 # ---------------------------------------------------------------------------

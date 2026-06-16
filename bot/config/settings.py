@@ -63,6 +63,7 @@ class PollingConfig(BaseModel):
 
 class SpreadHourConfig(BaseModel):
     daily_start: str = "16:45"
+    stock_daily_start: str = "15:45"  # stocks close at 16:00 — cancel 15 min before
     daily_end: str = "18:00"
     timezone: str = "US/Eastern"
     weekend_start_day: str = "Friday"

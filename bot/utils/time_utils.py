@@ -31,17 +31,19 @@ class MarketScheduler:
     def __init__(self, config: SpreadHourConfig) -> None:
         self._tz = pytz.timezone(config.timezone)
         self._start = _parse_time(config.daily_start)
+        self._stock_start = _parse_time(config.stock_daily_start)
         self._end = _parse_time(config.daily_end)
         self._weekend_start = _DAY_MAP[config.weekend_start_day.lower()]
         self._weekend_end = _DAY_MAP[config.weekend_end_day.lower()]
 
-    def is_spread_hour(self, now: datetime | None = None) -> bool:
+    def is_spread_hour(self, now: datetime | None = None, stock: bool = False) -> bool:
+        start = self._stock_start if stock else self._start
         now_local = (now or datetime.now(UTC)).astimezone(self._tz)
         t = now_local.time()
         day = now_local.weekday()  # 0=Mon ... 4=Fri, 5=Sat, 6=Sun
 
-        # Weekend closure: Fri 16:45 through Sun 18:00 (continuous)
-        if day == self._weekend_start and t >= self._start:
+        # Weekend closure: Fri start through Sun 18:00 (continuous)
+        if day == self._weekend_start and t >= start:
             return True
         if self._weekend_start < day < self._weekend_end:  # all day Saturday
             return True
@@ -49,16 +51,16 @@ class MarketScheduler:
             return True
 
         # Daily spread hour Mon–Thu
-        if day < self._weekend_start and self._start <= t < self._end:
+        if day < self._weekend_start and start <= t < self._end:
             return True
 
         return False
 
-    def should_cancel_pending(self, now: datetime | None = None) -> bool:
-        return self.is_spread_hour(now)
+    def should_cancel_pending(self, now: datetime | None = None, stock: bool = False) -> bool:
+        return self.is_spread_hour(now, stock)
 
-    def should_block_placement(self, now: datetime | None = None) -> bool:
-        return self.is_spread_hour(now)
+    def should_block_placement(self, now: datetime | None = None, stock: bool = False) -> bool:
+        return self.is_spread_hour(now, stock)
 
     def is_weekend_window(self, now: datetime | None = None) -> bool:
         """Forex weekend window: Friday >=16:45 EST through Sunday <18:00 EST.

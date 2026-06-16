@@ -180,58 +180,61 @@ class SyncCycle:
             supabase_limit_ids = set(supabase_by_limit)
             sqlite_limit_ids = {r["limit_id"] for r in sqlite_active}
 
-            # Crypto is exempt from spread-hour and news-mode gates: these are
-            # forex/index liquidity events that don't apply to 24/7 crypto markets.
-            def _row_is_crypto(row) -> bool:
+            # Per-symbol spread-hour / news-mode gate. Crypto and 24h stocks are exempt
+            # (24/7 markets). Stocks use an earlier cutoff because they close at 16:00 EST
+            # — the cancel must land before then or MT5 rejects it once the session is
+            # shut; everything else uses the standard daily_start.
+            now = datetime.now(UTC)
+
+            news_mode_active = False
+            if placement_active:
+                try:
+                    news_mode_active = await supabase.fetch_news_mode()
+                except Exception:
+                    logger.error("Failed to fetch news_mode", exc_info=True)
+
+            def _instr_of(row) -> str:
                 lid = row["limit_id"]
                 if lid in supabase_by_limit:
-                    instr = supabase_by_limit[lid]["instrument"]
-                else:
-                    instr = db_symbol_from_mt5(row["symbol"] or "", config)
-                return detect_asset_class(instr) == AssetClass.CRYPTO
+                    return supabase_by_limit[lid]["instrument"]
+                return db_symbol_from_mt5(row["symbol"] or "", config)
 
-            non_crypto_blocked = False
+            def _is_blocked(instr: str) -> bool:
+                ac = detect_asset_class(instr)
+                if ac == AssetClass.CRYPTO:
+                    return False
+                # 24h stocks carry the broker's -24 suffix (config.stock_suffix) and
+                # trade around the clock, so they're exempt like crypto.
+                is_stock = ac == AssetClass.STOCKS
+                if (
+                    is_stock
+                    and config.stock_suffix
+                    and map_symbol(instr, config).endswith(config.stock_suffix)
+                ):
+                    return False
+                if news_mode_active:
+                    return True
+                return scheduler.should_cancel_pending(now, stock=is_stock)
 
-            # Spread hour gate: cancel non-crypto pending orders and block non-crypto placement
-            if placement_active and scheduler.should_cancel_pending():
+            if placement_active:
+                blocked = 0
                 for row in sqlite_pending:
-                    if _row_is_crypto(row):
+                    if not _is_blocked(_instr_of(row)):
                         continue
                     ok = await self._canceller.cancel_order(
                         row["mt5_ticket"], mt5_client, sqlite, spread=True
                     )
                     result.cancelled += ok
                     result.errors += not ok
-                non_crypto_blocked = True
-                logger.info("Placement blocked: reason=spread_hour (non-crypto only)")
+                    blocked += 1
+                if blocked:
+                    logger.info("Spread/news gate cancelled %d pending order(s)", blocked)
 
-            # News mode gate: same behavior as spread hour, also crypto-exempt.
-            # Skip if the spread-hour gate already fired (don't double-cancel).
-            if placement_active and not non_crypto_blocked:
-                news_mode_active = False
-                try:
-                    news_mode_active = await supabase.fetch_news_mode()
-                except Exception:
-                    logger.error("Failed to fetch news_mode", exc_info=True)
-                if news_mode_active:
-                    for row in sqlite_pending:
-                        if _row_is_crypto(row):
-                            continue
-                        ok = await self._canceller.cancel_order(
-                            row["mt5_ticket"], mt5_client, sqlite, spread=True
-                        )
-                        result.cancelled += ok
-                        result.errors += not ok
-                    non_crypto_blocked = True
-                    logger.info("Placement blocked: reason=news_mode (non-crypto only)")
-
-            # When a gate fired, the non-crypto rows in sqlite_pending have been cancelled
-            # but the snapshot was captured pre-gate. Filter them out so downstream loops
-            # (stale-pending, SL change, offset drift) only consider crypto rows.
-            # sqlite_limit_ids is intentionally NOT refreshed: the cancelled limits should
-            # still be treated as 'known' (not as new placement candidates).
-            if non_crypto_blocked:
-                sqlite_pending = [r for r in sqlite_pending if _row_is_crypto(r)]
+                # Drop blocked rows from the pre-gate snapshot so downstream loops
+                # (stale-pending, SL change, offset drift) skip the just-cancelled orders.
+                # sqlite_limit_ids is intentionally NOT refreshed: the cancelled limits
+                # should still be treated as 'known' (not as new placement candidates).
+                sqlite_pending = [r for r in sqlite_pending if not _is_blocked(_instr_of(r))]
 
             # Always fetch live_prices for every offset symbol in the active signal
             # set — used for placement, drift checks, SL sync, and the dashboard's
@@ -285,17 +288,14 @@ class SyncCycle:
 
                 new_limit_ids = supabase_limit_ids - sqlite_limit_ids
 
-                # When non-crypto is blocked (spread hour / weekend / news mode), drop
-                # non-crypto from the pre-check phase entirely — otherwise tick/proximity
-                # /live-price-staleness checks fire (and spam WARN logs) for symbols the
-                # placement loop is about to skip anyway.
-                if non_crypto_blocked:
-                    new_limit_ids = {
-                        lid
-                        for lid in new_limit_ids
-                        if detect_asset_class(supabase_by_limit[lid]["instrument"])
-                        == AssetClass.CRYPTO
-                    }
+                # Drop blocked symbols (spread hour / weekend / news mode) from the
+                # pre-check phase — otherwise tick/proximity/live-price-staleness checks
+                # fire (and spam WARN logs) for symbols the placement loop would skip.
+                new_limit_ids = {
+                    lid
+                    for lid in new_limit_ids
+                    if not _is_blocked(supabase_by_limit[lid]["instrument"])
+                }
 
                 stale_feeds: set[str] = set()
                 if not self._feed_health_failed:
@@ -526,7 +526,7 @@ class SyncCycle:
                             continue
 
                         db_sym = row["instrument"]
-                        if non_crypto_blocked and detect_asset_class(db_sym) != AssetClass.CRYPTO:
+                        if _is_blocked(db_sym):
                             continue
                         mt5_sym = map_symbol(db_sym, config)
                         lot = signal_lots[sig_id]

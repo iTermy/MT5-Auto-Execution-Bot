@@ -47,6 +47,7 @@
   "feed_max_staleness_seconds": 3600,
   "spread_hour": {
     "daily_start": "16:45",
+    "stock_daily_start": "15:45",
     "daily_end": "18:00",
     "timezone": "US/Eastern",
     "weekend_start_day": "Friday",

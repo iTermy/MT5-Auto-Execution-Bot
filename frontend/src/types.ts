@@ -90,6 +90,7 @@ export interface PollingConfig {
 
 export interface SpreadHourConfig {
   daily_start: string
+  stock_daily_start: string
   daily_end: string
   timezone: string
   weekend_start_day: string

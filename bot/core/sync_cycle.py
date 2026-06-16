@@ -200,6 +200,19 @@ class SyncCycle:
             supabase_limit_ids = set(supabase_by_limit)
             sqlite_limit_ids = {r["limit_id"] for r in sqlite_active}
 
+            # Limits the TM marked 'hit' while their signal is still live. Their
+            # local pending order is held by the stale-pending sweep below — the
+            # feed reached the level but our broker hasn't filled (sub-pip
+            # mismatch). Defaults empty on failure, reverting to plain stale-cancel.
+            try:
+                hit_limit_ids = await supabase.fetch_hit_limit_ids()
+            except Exception:
+                logger.error(
+                    "Hit-limit fetch failed — stale-pending will not spare hit limits",
+                    exc_info=True,
+                )
+                hit_limit_ids = set()
+
             # Per-symbol spread-hour / news-mode gate. Crypto and 24h stocks are exempt
             # (24/7 markets). Stocks use an earlier cutoff because they close at 16:00 EST
             # — the cancel must land before then or MT5 rejects it once the session is
@@ -263,14 +276,19 @@ class SyncCycle:
                     logger.error("Live prices fetch failed", exc_info=True)
 
             if placement_active:
-                # Cancel stale pending (limit gone from Supabase)
+                # Cancel stale pending (limit gone from Supabase). A limit the TM
+                # marked 'hit' on a still-live signal is spared: hold the order so a
+                # sub-pip price mismatch still fills. Genuine cancels/closes drop the
+                # signal out of hit_limit_ids, so those orders are still cancelled.
                 for row in sqlite_pending:
-                    if row["limit_id"] not in supabase_limit_ids:
-                        ok = await self._canceller.cancel_order(
-                            row["mt5_ticket"], mt5_client, sqlite, spread=False
-                        )
-                        result.cancelled += ok
-                        result.errors += not ok
+                    lid = row["limit_id"]
+                    if lid in supabase_limit_ids or lid in hit_limit_ids:
+                        continue
+                    ok = await self._canceller.cancel_order(
+                        row["mt5_ticket"], mt5_client, sqlite, spread=False
+                    )
+                    result.cancelled += ok
+                    result.errors += not ok
 
                 # Cancel pending orders whose signal SL changed (re-places next cycle)
                 for row in sqlite_pending:

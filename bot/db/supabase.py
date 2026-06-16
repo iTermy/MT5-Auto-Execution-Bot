@@ -6,6 +6,7 @@ import asyncpg
 from bot.db.queries import (
     FETCH_ACTIVE_SIGNALS_WITH_LIMITS,
     FETCH_FEED_HEALTH,
+    FETCH_HIT_LIMIT_IDS,
     FETCH_LIVE_PRICES,
     FETCH_NEWS_MODE,
     FETCH_SIGNAL_STATUS,
@@ -72,6 +73,11 @@ class SupabaseDB:
     async def fetch_active_signals(self) -> list[asyncpg.Record]:
         async with self._pool.acquire() as conn:
             return await conn.fetch(FETCH_ACTIVE_SIGNALS_WITH_LIMITS)
+
+    async def fetch_hit_limit_ids(self) -> set[int]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(FETCH_HIT_LIMIT_IDS)
+        return {row["limit_id"] for row in rows}
 
     async def fetch_live_prices(self, symbols: list[str]) -> dict[str, asyncpg.Record]:
         async with self._pool.acquire() as conn:

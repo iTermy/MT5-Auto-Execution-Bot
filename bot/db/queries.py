@@ -20,6 +20,18 @@ WHERE s.status IN ('active', 'hit')
 ORDER BY s.id, l.sequence_number
 """
 
+# Limits the TM has marked 'hit' on a still-live signal. Their local pending
+# order is held (not stale-cancelled) — the feed reached the level but our
+# broker hasn't filled yet, usually a sub-pip mismatch. A final signal status
+# drops the signal out of this set, so genuine cancels/closes still cancel.
+FETCH_HIT_LIMIT_IDS = """
+SELECT l.id AS limit_id
+FROM signals s
+JOIN limits l ON l.signal_id = s.id
+WHERE s.status IN ('active', 'hit')
+  AND l.status = 'hit'
+"""
+
 FETCH_LIVE_PRICES = """
 SELECT symbol, bid, ask, feed, updated_at
 FROM live_prices

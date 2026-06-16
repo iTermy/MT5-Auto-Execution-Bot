@@ -28,9 +28,10 @@ def _make_supabase_row(
     }
 
 
-def _mock_supabase(signals=None, live_prices=None, news_mode=None):
+def _mock_supabase(signals=None, live_prices=None, news_mode=None, hit_limit_ids=None):
     sb = AsyncMock()
     sb.fetch_active_signals.return_value = signals or []
+    sb.fetch_hit_limit_ids.return_value = set(hit_limit_ids or [])
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
     sb.fetch_news_mode.return_value = news_mode
@@ -247,6 +248,63 @@ async def test_offset_drift_skipped_when_signal_marked_hit(
 
     rows = await sqlite_db.get_pending_orders()
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# Stale-pending sweep: hit limits are held, genuinely-gone limits are cancelled
+# ---------------------------------------------------------------------------
+
+
+async def test_stale_pending_kept_when_limit_marked_hit(sqlite_db, mock_mt5, sample_config) -> None:
+    # The TM marked the limit 'hit', so it drops out of the pending Supabase
+    # query — but it's still in hit_limit_ids (signal alive). Our pending order
+    # must be held, not stale-cancelled: usually a sub-pip price mismatch.
+    await sqlite_db.insert_order(
+        limit_id=10,
+        signal_id=1,
+        mt5_ticket=3001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+    )
+    supabase = _mock_supabase(signals=[], hit_limit_ids={10})
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    rows = await sqlite_db.get_pending_orders()
+    assert len(rows) == 1
+
+
+async def test_stale_pending_cancelled_when_signal_gone(sqlite_db, mock_mt5, sample_config) -> None:
+    # Limit is gone from Supabase and NOT in hit_limit_ids (signal cancelled /
+    # closed) → the pending order is still stale-cancelled.
+    await sqlite_db.insert_order(
+        limit_id=10,
+        signal_id=1,
+        mt5_ticket=3001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=3001)
+    supabase = _mock_supabase(signals=[], hit_limit_ids=set())
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(3001)
+    rows = await sqlite_db.get_pending_orders()
+    assert len(rows) == 0
 
 
 # ---------------------------------------------------------------------------

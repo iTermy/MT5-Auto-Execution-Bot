@@ -77,3 +77,38 @@ def test_stock_friday_weekend_starts_at_stock_cutoff() -> None:
     s = _scheduler()
     assert s.is_spread_hour(_est(2026, 3, 6, 15, 45), stock=True) is True
     assert s.is_spread_hour(_est(2026, 3, 6, 15, 45), stock=False) is False
+
+
+# ---------------------------------------------------------------------------
+# SL strip window: opens ~5 min before the spread spike, closes at daily_end
+# ---------------------------------------------------------------------------
+
+
+def test_sl_strip_window_forex_opens_at_1655() -> None:
+    s = _scheduler()
+    # 16:54 — not yet; 16:55 — stripped (forex)
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 16, 54), stock=False) is False
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 16, 55), stock=False) is True
+
+
+def test_sl_strip_window_stock_opens_at_1555() -> None:
+    s = _scheduler()
+    # Stocks strip 5 min before their 16:00 close; forex isn't stripped yet
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 54), stock=True) is False
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 55), stock=True) is True
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 55), stock=False) is False
+
+
+def test_sl_strip_window_closes_at_daily_end() -> None:
+    s = _scheduler()
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 17, 59), stock=False) is True
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 18, 0), stock=False) is False
+
+
+def test_sl_strip_window_spans_weekend() -> None:
+    s = _scheduler()
+    # Friday after the strip open through Sunday before the 18:00 reopen
+    assert s.is_sl_strip_window(_est(2026, 3, 6, 17, 0), stock=False) is True
+    assert s.is_sl_strip_window(_est(2026, 3, 7, 12, 0), stock=False) is True
+    assert s.is_sl_strip_window(_est(2026, 3, 8, 17, 59), stock=False) is True
+    assert s.is_sl_strip_window(_est(2026, 3, 8, 18, 0), stock=False) is False

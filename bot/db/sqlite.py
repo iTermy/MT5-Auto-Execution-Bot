@@ -27,6 +27,7 @@ from bot.db.queries import (
     MARK_FILLED,
     MARK_SIGNAL_FINALIZED,
     PROMOTE_CLAIMED_TO_PENDING,
+    SET_SL_STRIPPED,
     SET_TRAILING,
     SIGNAL_SUMMARY,
     UPDATE_DB_STOP_LOSS,
@@ -73,6 +74,7 @@ class SQLiteDB:
             "sequence_number INTEGER",
             "mfe_price REAL NOT NULL DEFAULT 0",
             "mae_price REAL NOT NULL DEFAULT 0",
+            "sl_stripped INTEGER NOT NULL DEFAULT 0",
         ):
             name = col.split()[0]
             try:
@@ -180,6 +182,10 @@ class SQLiteDB:
 
     async def set_trailing(self, mt5_ticket: int, is_trailing: int = 1) -> None:
         await self._db.execute(SET_TRAILING, (is_trailing, mt5_ticket))
+        await self._db.commit()
+
+    async def set_sl_stripped(self, mt5_ticket: int, stripped: int) -> None:
+        await self._db.execute(SET_SL_STRIPPED, (stripped, mt5_ticket))
         await self._db.commit()
 
     async def get_pending_orders(self) -> list[aiosqlite.Row]:

@@ -49,6 +49,8 @@
     "daily_start": "16:45",
     "stock_daily_start": "15:45",
     "daily_end": "18:00",
+    "sl_strip_start": "16:55",
+    "sl_strip_stock_start": "15:55",
     "timezone": "US/Eastern",
     "weekend_start_day": "Friday",
     "weekend_end_day": "Sunday"

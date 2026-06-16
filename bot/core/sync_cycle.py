@@ -119,6 +119,9 @@ class SyncCycle:
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # News force-exit consecutive failure tracking (separate from status force-exit)
         self._news_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
+        # Spread-hour SL strip/restore consecutive failure tracking (log suppression)
+        self._sl_strip_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
+        self._sl_restore_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         self._last_force_exit_status: dict[
             int, str
         ] = {}  # signal_id -> force-exit status at first detection
@@ -691,6 +694,10 @@ class SyncCycle:
         # M2: mark positions closed if they disappeared from MT5 externally
         await self._check_external_closes(sqlite, mt5_client, mt5_positions)
 
+        # Strip/restore SLs around spread hour. Runs unconditionally (even on a
+        # Supabase outage) so a stripped position always gets its SL back.
+        await self._manage_spread_hour_sls(sqlite, mt5_client, mt5_positions, scheduler, config)
+
         if supabase_rows is not None:
             # Build signal-level lookup from supabase rows for SL sync and forced exit
             supabase_by_signal: dict[int, dict] = {}
@@ -733,6 +740,10 @@ class SyncCycle:
 
         for row in filled:
             if row["is_trailing"]:
+                continue
+            # SL deliberately removed for spread-hour protection — don't re-apply it
+            # here even if the signal's DB stop-loss changed mid-window.
+            if row["sl_stripped"]:
                 continue
 
             ticket = row["mt5_ticket"]
@@ -825,6 +836,131 @@ class SyncCycle:
                         mt5_sl,
                         retcode,
                     )
+
+    async def _manage_spread_hour_sls(
+        self,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        mt5_positions: list,
+        scheduler: MarketScheduler,
+        config: Settings,
+    ) -> None:
+        """Strip the stop-loss from every hit position ~5 min before spread hour so a
+        spread-driven spike can't stop it out, then restore it once the window ends.
+        On restore, if price has genuinely moved past the stop, close at market (a
+        bigger but rare loss). Crypto and 24h (-suffix) instruments are exempt — their
+        markets stay liquid through these windows. The sl_stripped flag persists in
+        SQLite so a restart mid-window never leaves a position unprotected and the TP
+        loop / SL-sync both skip a stripped position."""
+        filled = await sqlite.get_filled_positions()
+        if not filled:
+            return
+
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+
+        for row in filled:
+            ticket = row["mt5_ticket"]
+            pos = pos_by_ticket.get(ticket)
+            if pos is None:
+                continue
+            instr = db_symbol_from_mt5(row["symbol"] or pos.symbol, config)
+            if _gate_exempt(instr, config):
+                continue
+            is_stock = detect_asset_class(instr) == AssetClass.STOCKS
+            in_window = scheduler.is_sl_strip_window(stock=is_stock)
+            stripped = bool(row["sl_stripped"])
+
+            if in_window and not stripped and pos.sl != 0.0:
+                await sqlite.update_sl(ticket, pos.sl)  # remember pre-strip SL for restore
+                res = mt5_client.modify_position_sl(ticket, pos.symbol, 0.0)
+                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    await sqlite.set_sl_stripped(ticket, 1)
+                    self._sl_strip_fail_count.pop(ticket, None)
+                    logger.info(
+                        "Spread-hour SL strip: ticket=%d signal=%d symbol=%s prev_sl=%.5f",
+                        ticket,
+                        row["signal_id"],
+                        pos.symbol,
+                        pos.sl,
+                    )
+                else:
+                    self._log_sl_action_fail("strip", ticket, res, self._sl_strip_fail_count)
+            elif not in_window and stripped:
+                await self._restore_spread_hour_sl(row, pos, mt5_client, sqlite)
+
+    async def _restore_spread_hour_sl(
+        self, row, pos, mt5_client: MT5Client, sqlite: SQLiteDB
+    ) -> None:
+        ticket = row["mt5_ticket"]
+        target = row["last_known_mt5_sl"]
+        if target is None or target == 0.0:
+            # No stored SL to restore — clear the flag so we stop retrying.
+            await sqlite.set_sl_stripped(ticket, 0)
+            return
+
+        tick = mt5_client.symbol_info_tick(pos.symbol)
+        if tick is None:
+            return  # market likely closed (e.g. stock overnight) — retry next cycle
+
+        breached = (pos.type == 0 and tick.bid <= target) or (pos.type != 0 and tick.ask >= target)
+        if breached:
+            res = mt5_client.close_position(
+                ticket=pos.ticket,
+                symbol=pos.symbol,
+                volume=pos.volume,
+                position_type=pos.type,
+                comment="spread_sl_restore",
+            )
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                if realized_pnl is None:
+                    realized_pnl = pos.profit
+                await sqlite.mark_closed(ticket, realized_pnl)
+                self._sl_restore_fail_count.pop(ticket, None)
+                logger.warning(
+                    "Spread-hour SL restore: price past stop — closed ticket=%d signal=%d "
+                    "sl=%.5f pnl=%s",
+                    ticket,
+                    row["signal_id"],
+                    target,
+                    f"{realized_pnl:.2f}" if realized_pnl is not None else "?",
+                )
+            else:
+                self._log_sl_action_fail("restore-close", ticket, res, self._sl_restore_fail_count)
+            return
+
+        res = mt5_client.modify_position_sl(ticket, pos.symbol, target)
+        if res and res.retcode in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_NO_CHANGES):
+            await sqlite.set_sl_stripped(ticket, 0)
+            self._sl_restore_fail_count.pop(ticket, None)
+            logger.info(
+                "Spread-hour SL restore: ticket=%d signal=%d symbol=%s sl=%.5f",
+                ticket,
+                row["signal_id"],
+                pos.symbol,
+                target,
+            )
+        else:
+            self._log_sl_action_fail("restore", ticket, res, self._sl_restore_fail_count)
+
+    def _log_sl_action_fail(self, action: str, ticket: int, res, counter: dict[int, int]) -> None:
+        """Log a strip/restore failure once, then again at the cap, then suppress —
+        a stock whose market is shut overnight would otherwise spam every cycle."""
+        retcode = res.retcode if res else "None"
+        count = counter.get(ticket, 0) + 1
+        counter[ticket] = count
+        if count == 1:
+            logger.warning(
+                "Spread-hour SL %s failed: ticket=%d retcode=%s", action, ticket, retcode
+            )
+        elif count == _SL_FAIL_MAX:
+            logger.error(
+                "Spread-hour SL %s persistently failing: ticket=%d retcode=%s "
+                "(suppressing further logs)",
+                action,
+                ticket,
+                retcode,
+            )
 
     async def _check_forced_exits(
         self,

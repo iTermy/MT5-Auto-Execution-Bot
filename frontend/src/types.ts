@@ -92,6 +92,8 @@ export interface SpreadHourConfig {
   daily_start: string
   stock_daily_start: string
   daily_end: string
+  sl_strip_start: string
+  sl_strip_stock_start: string
   timezone: string
   weekend_start_day: string
   weekend_end_day: string

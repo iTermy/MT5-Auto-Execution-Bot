@@ -32,12 +32,13 @@ class MarketScheduler:
         self._tz = pytz.timezone(config.timezone)
         self._start = _parse_time(config.daily_start)
         self._stock_start = _parse_time(config.stock_daily_start)
+        self._strip_start = _parse_time(config.sl_strip_start)
+        self._stock_strip_start = _parse_time(config.sl_strip_stock_start)
         self._end = _parse_time(config.daily_end)
         self._weekend_start = _DAY_MAP[config.weekend_start_day.lower()]
         self._weekend_end = _DAY_MAP[config.weekend_end_day.lower()]
 
-    def is_spread_hour(self, now: datetime | None = None, stock: bool = False) -> bool:
-        start = self._stock_start if stock else self._start
+    def _in_session(self, start: time, now: datetime | None) -> bool:
         now_local = (now or datetime.now(UTC)).astimezone(self._tz)
         t = now_local.time()
         day = now_local.weekday()  # 0=Mon ... 4=Fri, 5=Sat, 6=Sun
@@ -50,11 +51,19 @@ class MarketScheduler:
         if day == self._weekend_end and t < self._end:
             return True
 
-        # Daily spread hour Mon–Thu
+        # Daily window Mon–Thu
         if day < self._weekend_start and start <= t < self._end:
             return True
 
         return False
+
+    def is_spread_hour(self, now: datetime | None = None, stock: bool = False) -> bool:
+        return self._in_session(self._stock_start if stock else self._start, now)
+
+    def is_sl_strip_window(self, now: datetime | None = None, stock: bool = False) -> bool:
+        """Window in which filled positions' stop-losses are stripped (spread-spike
+        protection). Same shape as is_spread_hour but opens ~5 min before the spike."""
+        return self._in_session(self._stock_strip_start if stock else self._strip_start, now)
 
     def should_cancel_pending(self, now: datetime | None = None, stock: bool = False) -> bool:
         return self.is_spread_hour(now, stock)

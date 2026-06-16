@@ -68,6 +68,10 @@ class TPEngine:
         for row in sqlite_rows:
             if row["mt5_ticket"] not in mt5_pos_map:
                 continue
+            # SL stripped for spread-hour protection — leave it untouched (the sync
+            # cycle owns stripping/restoring). Trailing would otherwise re-arm an SL.
+            if row["sl_stripped"]:
+                continue
             if crypto_only:
                 pos = mt5_pos_map[row["mt5_ticket"]]
                 db_sym = db_symbol_from_mt5(pos.symbol, config)

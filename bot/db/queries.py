@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     last_known_mt5_sl       REAL,
     signal_type             TEXT NOT NULL DEFAULT 'standard',
     is_trailing             INTEGER NOT NULL DEFAULT 0,
+    sl_stripped             INTEGER NOT NULL DEFAULT 0,
     symbol                  TEXT,
     realized_pnl            REAL,
     channel_id              INTEGER,
@@ -87,6 +88,10 @@ UPDATE order_mappings SET status = 'closed', cancelled_at = datetime('now'), rea
 
 SET_TRAILING = """
 UPDATE order_mappings SET is_trailing = ? WHERE mt5_ticket = ?
+"""
+
+SET_SL_STRIPPED = """
+UPDATE order_mappings SET sl_stripped = ? WHERE mt5_ticket = ?
 """
 
 GET_PENDING_ORDERS = """

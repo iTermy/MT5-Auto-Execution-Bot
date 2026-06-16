@@ -7,6 +7,7 @@ from tests.conftest import (
     make_order_result,
     make_position,
     make_symbol_info,
+    make_tick,
 )
 
 
@@ -678,3 +679,98 @@ async def test_catalogued_symbol_is_selected(sqlite_db, mock_mt5, sample_config)
 
     mock_mt5.symbol_select.assert_any_call("EURUSD")
     assert "EURUSD" not in cycle._logged_unmapped
+
+
+# ---------------------------------------------------------------------------
+# Spread-hour SL strip / restore
+# ---------------------------------------------------------------------------
+
+
+def _strip_scheduler(in_window: bool) -> MagicMock:
+    sched = MagicMock()
+    sched.is_sl_strip_window.return_value = in_window
+    return sched
+
+
+async def test_sl_strip_removes_sl_in_window(sqlite_db, mock_mt5, sample_config) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=3001, signal_id=1, symbol="EURUSD")
+    pos = make_position(ticket=3001, sl=1.08500)
+    mock_mt5.modify_position_sl.return_value = make_order_result(ticket=3001)
+
+    cycle = SyncCycle()
+    await cycle._manage_spread_hour_sls(
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config
+    )
+
+    mock_mt5.modify_position_sl.assert_called_once_with(3001, "EURUSD", 0.0)
+    row = await sqlite_db.get_order_by_ticket(3001)
+    assert row["sl_stripped"] == 1
+    assert row["last_known_mt5_sl"] == 1.08500  # pre-strip SL persisted for restore
+
+
+async def test_sl_strip_exempts_crypto(sqlite_db, mock_mt5, sample_config) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=3002, signal_id=1, symbol="BTCUSD")
+    pos = make_position(ticket=3002, symbol="BTCUSD", sl=60000.0)
+
+    cycle = SyncCycle()
+    await cycle._manage_spread_hour_sls(
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config
+    )
+
+    mock_mt5.modify_position_sl.assert_not_called()
+    row = await sqlite_db.get_order_by_ticket(3002)
+    assert row["sl_stripped"] == 0
+
+
+async def test_sl_strip_idempotent_when_already_stripped(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=3005, signal_id=1, symbol="EURUSD")
+    await sqlite_db.set_sl_stripped(3005, 1)
+    pos = make_position(ticket=3005, sl=0.0)
+
+    cycle = SyncCycle()
+    await cycle._manage_spread_hour_sls(
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config
+    )
+
+    mock_mt5.modify_position_sl.assert_not_called()
+
+
+async def test_sl_restore_resets_sl_after_window(sqlite_db, mock_mt5, sample_config) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=3003, signal_id=1, symbol="EURUSD")
+    await sqlite_db.update_sl(3003, 1.08500)  # pre-strip SL in last_known_mt5_sl
+    await sqlite_db.set_sl_stripped(3003, 1)
+    pos = make_position(ticket=3003, sl=0.0)
+    mock_mt5.symbol_info_tick.return_value = make_tick(bid=1.10000, ask=1.10002)
+    mock_mt5.modify_position_sl.return_value = make_order_result(ticket=3003)
+
+    cycle = SyncCycle()
+    await cycle._manage_spread_hour_sls(
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(False), sample_config
+    )
+
+    mock_mt5.modify_position_sl.assert_called_once_with(3003, "EURUSD", 1.08500)
+    mock_mt5.close_position.assert_not_called()
+    row = await sqlite_db.get_order_by_ticket(3003)
+    assert row["sl_stripped"] == 0
+
+
+async def test_sl_restore_closes_when_price_past_stop(sqlite_db, mock_mt5, sample_config) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=3004, signal_id=1, symbol="EURUSD")
+    await sqlite_db.update_sl(3004, 1.08500)
+    await sqlite_db.set_sl_stripped(3004, 1)
+    pos = make_position(ticket=3004, sl=0.0, profit=-50.0)
+    # bid below the stored stop → price moved past it while unprotected
+    mock_mt5.symbol_info_tick.return_value = make_tick(bid=1.08000, ask=1.08002)
+    mock_mt5.close_position.return_value = make_order_result(ticket=3004)
+
+    cycle = SyncCycle()
+    await cycle._manage_spread_hour_sls(
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(False), sample_config
+    )
+
+    mock_mt5.close_position.assert_called_once()
+    mock_mt5.modify_position_sl.assert_not_called()
+    row = await sqlite_db.get_order_by_ticket(3004)
+    assert row["status"] == "closed"

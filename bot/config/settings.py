@@ -65,6 +65,11 @@ class SpreadHourConfig(BaseModel):
     daily_start: str = "16:45"
     stock_daily_start: str = "15:45"  # stocks close at 16:00 — cancel 15 min before
     daily_end: str = "18:00"
+    # Filled positions have their SL stripped from here to daily_end so a spread spike
+    # can't stop them out, then it's restored. Starts ~5 min before the spread spike
+    # (forex 17:00, stocks' 16:00 close).
+    sl_strip_start: str = "16:55"
+    sl_strip_stock_start: str = "15:55"
     timezone: str = "US/Eastern"
     weekend_start_day: str = "Friday"
     weekend_end_day: str = "Sunday"

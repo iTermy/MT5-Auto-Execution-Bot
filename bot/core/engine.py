@@ -79,6 +79,8 @@ class Engine:
         self._engine_started: bool = False
         # monotonic timestamp of last successful user-snapshot upsert
         self._last_user_snapshot: float = 0.0
+        # last logged sync summary; suppress repeat lines when nothing changes
+        self._last_sync_summary: tuple[int, int, int, int, int] | None = None
 
     def start(self) -> None:
         self._trading_active = True
@@ -314,22 +316,22 @@ class Engine:
                     self._scheduler,
                     placement_active=placement_active,
                 )
-                if (
-                    result.placed
-                    or result.cancelled
-                    or result.filled
-                    or result.new_trailing
-                    or result.errors
-                ):
+                # Dedupe on actionable counts only — skipped jitters with price and
+                # shouldn't re-trigger an otherwise-identical line every cycle.
+                key = (
+                    result.placed,
+                    result.cancelled,
+                    result.filled,
+                    result.new_trailing,
+                    result.errors,
+                )
+                if any(key) and key != self._last_sync_summary:
                     logger.info(
                         "Sync: placed=%d cancelled=%d filled=%d trailing=%d errors=%d skipped=%d",
-                        result.placed,
-                        result.cancelled,
-                        result.filled,
-                        result.new_trailing,
-                        result.errors,
+                        *key,
                         result.skipped,
                     )
+                self._last_sync_summary = key
                 await self._broadcast_status()
                 await self._update_dashboard()
                 await self._maybe_upsert_user_snapshot()

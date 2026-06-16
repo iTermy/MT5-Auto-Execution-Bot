@@ -19,12 +19,12 @@ _PIP_CLASSES = (AssetClass.FOREX, AssetClass.FOREX_JPY)
 
 
 def _proximity_pct(distance: float, closest_price: float, threshold: float | None) -> int:
-    """0–100 fill heuristic. Scaled by the instrument's placement-proximity threshold
-    when one is configured (100% = at the limit, 0% = at/beyond the threshold the bot
-    uses to decide a limit is worth placing). Falls back to distance-as-fraction-of-price
-    (1% → 0%) for asset classes with no configured threshold."""
+    """0–100 fill heuristic. Scaled to 3× the instrument's placement-proximity threshold
+    when one is configured (100% = at the limit, ~66% = at the placement threshold, 0% =
+    at/beyond 3× the threshold the bot uses to decide a limit is worth placing). Falls back
+    to distance-as-fraction-of-price (1% → 0%) for asset classes with no configured threshold."""
     if threshold and threshold > 0:
-        closeness = 1.0 - min(abs(distance) / threshold, 1.0)
+        closeness = 1.0 - min(abs(distance) / (3 * threshold), 1.0)
     elif closest_price:
         closeness = 1.0 - min(abs(distance) / abs(closest_price) / 0.01, 1.0)
     else:

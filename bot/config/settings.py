@@ -33,6 +33,11 @@ class LotExceptionConfig(BaseModel):
     value: float  # percent for risk_percent, lots for fixed
 
 
+class ExcludedTradeConfig(BaseModel):
+    symbol: str
+    signal_type: str = "all"  # "all" excludes every signal type for this symbol
+
+
 class LotSizingConfig(BaseModel):
     mode: str = "risk_percent"
     risk_percent: float | dict[str, float] = 1.0
@@ -141,6 +146,11 @@ class Settings(BaseModel):
     symbol_suffixes: list[SymbolSuffixRule] = []
     stock_no_suffix: list[str] = []
     excluded_symbols: list[str] = []
+    # Per-(symbol, signal_type) exclusions. signal_type "all" drops every type.
+    excluded_trades: list[ExcludedTradeConfig] = []
+    # Signal types and channel ids that are skipped wholesale (empty = none skipped).
+    disabled_signal_types: list[str] = []
+    disabled_channels: list[str] = []
     offset_instruments: list[str] = [
         "SPX500USD",
         "NAS100USD",

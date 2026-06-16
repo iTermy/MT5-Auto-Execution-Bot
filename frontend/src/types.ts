@@ -27,6 +27,11 @@ export interface LotExceptionConfig {
   value: number
 }
 
+export interface ExcludedTradeConfig {
+  symbol: string
+  signal_type: string
+}
+
 export interface LotSizingConfig {
   mode: string
   risk_percent: number | Record<string, number>
@@ -102,6 +107,9 @@ export interface Config {
   symbol_suffixes: SymbolSuffixRule[]
   stock_no_suffix: string[]
   excluded_symbols: string[]
+  excluded_trades: ExcludedTradeConfig[]
+  disabled_signal_types: string[]
+  disabled_channels: string[]
   offset_instruments: string[]
   offset_drift_threshold_pips: number
   feed_max_staleness_seconds: number

@@ -112,6 +112,44 @@ class SyncCycle:
         self.last_live_prices: dict = {}
         self.last_sqlite_pending_limit_ids: set[int] = set()
 
+    def _apply_exclusions(self, rows: list, config: Settings) -> list:
+        excluded_syms = {s.upper() for s in config.excluded_symbols}
+        disabled_types = set(config.disabled_signal_types)
+        disabled_channels = set(config.disabled_channels)
+
+        filtered = []
+        for r in rows:
+            sym = r["instrument"].upper()
+            stype = r["signal_type"]
+            chan = None if r["channel_id"] is None else str(r["channel_id"])
+            reason = None
+            if stype in disabled_types:
+                reason = f"signal type '{stype}' disabled"
+            elif chan is not None and chan in disabled_channels:
+                reason = f"channel {chan} disabled"
+            elif sym in excluded_syms:
+                reason = "symbol excluded"
+            else:
+                for rule in config.excluded_trades:
+                    if rule.symbol.upper() == sym and rule.signal_type in ("all", stype):
+                        reason = f"excluded trade {rule.symbol}/{rule.signal_type}"
+                        break
+
+            if reason is None:
+                filtered.append(r)
+                continue
+            lid = r["limit_id"]
+            if lid not in self._logged_excluded:
+                logger.info(
+                    "Excluded: signal_id=%d limit_id=%d symbol=%s — %s",
+                    r["signal_id"],
+                    lid,
+                    r["instrument"],
+                    reason,
+                )
+                self._logged_excluded.add(lid)
+        return filtered
+
     async def run(
         self,
         supabase: SupabaseDB,
@@ -133,23 +171,7 @@ class SyncCycle:
             supabase_rows = None
 
         if supabase_rows is not None:
-            if config.excluded_symbols:
-                excluded = {s.upper() for s in config.excluded_symbols}
-                filtered = []
-                for r in supabase_rows:
-                    if r["instrument"].upper() in excluded:
-                        lid = r["limit_id"]
-                        if lid not in self._logged_excluded:
-                            logger.info(
-                                "Excluded symbol: signal_id=%d limit_id=%d symbol=%s",
-                                r["signal_id"],
-                                lid,
-                                r["instrument"],
-                            )
-                            self._logged_excluded.add(lid)
-                    else:
-                        filtered.append(r)
-                supabase_rows = filtered
+            supabase_rows = self._apply_exclusions(supabase_rows, config)
 
             sqlite_active = await sqlite.get_all_active()
             sqlite_pending = [r for r in sqlite_active if r["status"] == "pending"]

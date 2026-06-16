@@ -16,9 +16,11 @@ import type {
   AssetTPConfig,
   ScalpOverrideConfig,
   LotExceptionConfig,
+  ExcludedTradeConfig,
   SymbolSuffixRule,
 } from '../types'
 import { detectAssetClass } from '../utils/assetClass'
+import { CHANNELS } from '../utils/channels'
 
 const ASSET_CLASSES = [
   'forex',
@@ -44,6 +46,9 @@ const LOT_SIGNAL_TYPES: { value: string; label: string }[] = [
   { value: 'pa', label: 'PA' },
   { value: '1-1', label: '1-1' },
 ]
+
+// Concrete signal types (no "all") — used for the wholesale skip checkboxes.
+const SIGNAL_TYPES = LOT_SIGNAL_TYPES.filter(t => t.value !== 'all')
 
 // Trailing % is the inverse of partial_close_percent (storage unchanged).
 const partialToTrailing = (p: number) => Math.max(0, Math.min(100, 100 - p))
@@ -85,6 +90,11 @@ interface LotExceptionRow {
 interface SuffixRuleRow {
   suffix: string
   classes: AssetKey[]
+}
+
+interface ExcludedTradeRow {
+  symbol: string
+  signalType: string
 }
 
 interface InstrumentOverrideRow {
@@ -248,6 +258,9 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [notFoundSymbols, setNotFoundSymbols] = useState<string[]>([])
   const [stockSuffix, setStockSuffix] = useState('-24')
   const [suffixRules, setSuffixRules] = useState<SuffixRuleRow[]>([])
+  const [excludedTrades, setExcludedTrades] = useState<ExcludedTradeRow[]>([])
+  const [disabledSignalTypes, setDisabledSignalTypes] = useState<string[]>([])
+  const [disabledChannels, setDisabledChannels] = useState<string[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(false)
@@ -421,6 +434,20 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             classes: (r.asset_classes as AssetKey[]).filter(c => ASSET_CLASSES.includes(c)),
           }))
     )
+
+    // Excluded trades — new structured list plus any legacy flat excluded_symbols.
+    const trades: ExcludedTradeRow[] = (cfg.excluded_trades ?? []).map(t => ({
+      symbol: t.symbol,
+      signalType: t.signal_type || 'all',
+    }))
+    for (const sym of cfg.excluded_symbols ?? []) {
+      if (!trades.some(t => t.symbol === sym && t.signalType === 'all')) {
+        trades.push({ symbol: sym, signalType: 'all' })
+      }
+    }
+    setExcludedTrades(trades)
+    setDisabledSignalTypes(cfg.disabled_signal_types ?? [])
+    setDisabledChannels(cfg.disabled_channels ?? [])
   }, [])
 
   useEffect(() => {
@@ -578,6 +605,34 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         mode: r.mode,
         value: parseFloat(r.value) || 0,
       }))
+  }
+
+  function updateExcludedTrade(i: number, field: 'symbol' | 'signalType', value: string) {
+    setExcludedTrades(prev => prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)))
+    touch()
+  }
+
+  function addExcludedTrade() {
+    setExcludedTrades(prev => [...prev, { symbol: '', signalType: 'all' }])
+    touch()
+  }
+
+  function removeExcludedTrade(i: number) {
+    setExcludedTrades(prev => prev.filter((_, j) => j !== i))
+    touch()
+  }
+
+  function buildExcludedTrades(): ExcludedTradeConfig[] {
+    return excludedTrades
+      .filter(r => r.symbol.trim())
+      .map(r => ({ symbol: r.symbol.trim(), signal_type: r.signalType }))
+  }
+
+  // Checkboxes store the *disabled* set (default empty = all enabled), so a toggle
+  // adds/removes the item from that list.
+  function toggleDisabled(list: string[], setList: (v: string[]) => void, key: string) {
+    setList(list.includes(key) ? list.filter(k => k !== key) : [...list, key])
+    touch()
   }
 
   function updateInstrumentOverride(
@@ -748,6 +803,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         symbol_map: buildSymbolMap(),
         stock_suffix: stockSuffix,
         symbol_suffixes: buildSuffixRules(),
+        excluded_trades: buildExcludedTrades(),
+        excluded_symbols: [], // migrated into excluded_trades
+        disabled_signal_types: disabledSignalTypes,
+        disabled_channels: disabledChannels,
       }
       await updateConfig(updated)
       onConfigSaved(updated)
@@ -2045,6 +2104,122 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             None — every signalled instrument maps to a symbol on this broker.
           </p>
         )}
+      </div>
+
+      {/* EXCLUDED TRADES */}
+      <div className="panel pad">
+        <div className="panel-head">
+          <h3>Excluded trades</h3>
+          <span className="sub">skip signals before they are ever placed</span>
+        </div>
+
+        <div className="panel-head" style={{ marginBottom: 6 }}>
+          <h3 style={{ fontSize: 14 }}>By symbol</h3>
+          <span className="sub">
+            DB instrument · optionally scoped to one signal type (e.g. XAUUSD + Scalp drops gold
+            scalps only)
+          </span>
+        </div>
+        {excludedTrades.length > 0 && (
+          <table className="tbl" style={{ maxWidth: 520 }}>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Signal type</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {excludedTrades.map((r, i) => (
+                <tr key={i}>
+                  <td>
+                    <input
+                      className="inp mono"
+                      value={r.symbol}
+                      onChange={e => updateExcludedTrade(i, 'symbol', e.target.value)}
+                      placeholder="XAUUSD, BTCUSDT, …"
+                      style={{ width: 180 }}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      className="inp"
+                      value={r.signalType}
+                      onChange={e => updateExcludedTrade(i, 'signalType', e.target.value)}
+                      style={{ width: 130 }}
+                    >
+                      {LOT_SIGNAL_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ width: 40 }}>
+                    <button className="btn sm ghost" onClick={() => removeExcludedTrade(i)}>
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addExcludedTrade}>
+          + Add exclusion
+        </button>
+
+        <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
+
+        <div className="panel-head" style={{ marginBottom: 10 }}>
+          <h3 style={{ fontSize: 14 }}>By signal type</h3>
+          <span className="sub">unchecked types are skipped entirely</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 26px' }}>
+          {SIGNAL_TYPES.map(t => (
+            <label
+              key={t.value}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+            >
+              <span className="mono" style={{ fontSize: 13 }}>
+                {t.label}
+              </span>
+              <input
+                type="checkbox"
+                checked={!disabledSignalTypes.includes(t.value)}
+                onChange={() =>
+                  toggleDisabled(disabledSignalTypes, setDisabledSignalTypes, t.value)
+                }
+                style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+              />
+            </label>
+          ))}
+        </div>
+
+        <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
+
+        <div className="panel-head" style={{ marginBottom: 10 }}>
+          <h3 style={{ fontSize: 14 }}>By channel</h3>
+          <span className="sub">unchecked channels are skipped entirely</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 26px' }}>
+          {CHANNELS.map(c => (
+            <label
+              key={c.id}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+            >
+              <span className="mono" style={{ fontSize: 13 }}>
+                {c.name}
+              </span>
+              <input
+                type="checkbox"
+                checked={!disabledChannels.includes(c.id)}
+                onChange={() => toggleDisabled(disabledChannels, setDisabledChannels, c.id)}
+                style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+              />
+            </label>
+          ))}
+        </div>
       </div>
 
       {/* SAVE */}

@@ -29,26 +29,25 @@ cd frontend && npm run format       # prettier
 cd frontend && npx tsc --noEmit     # type-check
 ```
 
-### Production exe (owner only)
+### Production exe + auto-update release (owner only)
 
-1. Bump `BOT_VERSION` in `bot/config/constants.py` and set the real values for `_PRODUCTION_DSN`, `_PRODUCTION_LICENSE_URL`, and `_PRODUCTION_UPDATE_MANIFEST_URL`.
-2. Build the frontend: `cd frontend && npm install && npm run build && cd ..` — produces `frontend/dist/`.
-3. Build the binary: `pyinstaller bot.spec` — output is `dist/MT5Bot.exe` (single-file Windows executable, frontend bundled).
-4. Revert constants before committing: `git checkout bot/config/constants.py`. **Never commit the filled DSN, license URL, or manifest URL.**
+**`python release.py [VERSION] [--notes "..."]` does the whole build.** It bakes `SUPABASE_DSN`, `LICENSE_API_URL`, and `UPDATE_MANIFEST_URL` from `.env` into `bot/config/constants.py`, builds the frontend and the one-file exe, then restores `constants.py` to blank secrets (keeping the version) in a `finally` — so secrets never linger and `git checkout` is never needed. Output:
 
-### Release an auto-update (owner only)
+- `dist/MT5Bot.exe` — **distribute this to users** (version-agnostic name; the filename stays correct after the bot self-updates).
+- `dist/releases/MT5Bot-<version>.exe` and `dist/releases/latest.json` — **upload both to the Supabase `releases` bucket**.
 
-The running bot polls `_PRODUCTION_UPDATE_MANIFEST_URL` hourly; when it points at a newer `version` than the running `BOT_VERSION`, the dashboard surfaces an "Update and restart" prompt that downloads, verifies SHA-256, self-replaces, and relaunches (`bot/update/`). To ship a build:
+One-time prerequisites: fill `.env` (`SUPABASE_DSN`, `LICENSE_API_URL`, `UPDATE_MANIFEST_URL` — the public URL of `releases/latest.json`); `cd frontend && npm install`.
 
-1. Build `dist/MT5Bot.exe` as above (with `BOT_VERSION` bumped).
-2. Hash it: `CertUtil -hashfile dist/MT5Bot.exe SHA256` (or `sha256sum`).
-3. Upload the exe as `MT5Bot-<version>.exe` to the public Supabase Storage `releases` bucket.
-4. **Last**, update `releases/latest.json` so users never pull a manifest pointing at a not-yet-uploaded binary:
-   ```json
-   { "version": "1.3.0", "url": "https://<proj>.supabase.co/storage/v1/object/public/releases/MT5Bot-1.3.0.exe", "sha256": "<hex>", "notes": "...", "min_supported": "1.0.0" }
-   ```
+Per release:
 
-Test against a scratch bucket without rebuilding the constant via the `MT5BOT_UPDATE_URL` env override (`bot/config/settings.py:load_update_manifest_url`). The updater is frozen-only — in dev (`python main.py`) the install path raises a clear "packaged build only" error.
+1. `python release.py 1.3.3 --notes "what changed"` (omit the version to keep the current `BOT_VERSION`; passing it rewrites `BOT_VERSION` in `constants.py`).
+2. Commit the version bump: `git add bot/config/constants.py && git commit -m "Bump version to 1.3.3"` (secrets are already blanked).
+3. In the public Supabase Storage `releases` bucket, **delete the previous `MT5Bot-*.exe` + `latest.json`**, upload the new `dist/releases/MT5Bot-<version>.exe`, then upload `latest.json` **last** (so users never pull a manifest pointing at a not-yet-uploaded binary). When overwriting, set a low Cache-Control or the CDN may serve a stale manifest.
+4. Ship `dist/MT5Bot.exe` to any new users (served/renamed as `MT5Bot.exe`).
+
+How it reaches users: the running bot polls `UPDATE_MANIFEST_URL` hourly; when `version` exceeds the running `BOT_VERSION` it shows the banner "Update available" button → downloads, verifies SHA-256, self-replaces via a detached updater script, and relaunches (`bot/update/`). A fix to the updater itself only takes effect for users already running a build that contains it. The updater is frozen-only — in dev (`python main.py`) the install path raises a clear "packaged build only" error; test the *check* side against a scratch bucket via the `MT5BOT_UPDATE_URL` env override (`bot/config/settings.py:load_update_manifest_url`).
+
+`dist/` is gitignored, so none of these artifacts get committed. Manual builds (`pyinstaller bot.spec`) still default to `dist/MT5Bot.exe`; only `release.py` produces the versioned `dist/releases/` artifacts.
 
 ### Edge Function deploy (owner only)
 

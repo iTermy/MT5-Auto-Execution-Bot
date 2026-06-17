@@ -15,11 +15,13 @@ from bot.mt5.client import MT5Client
 from bot.mt5.connection import MT5Connection
 from bot.tp.engine import TPEngine
 from bot.trading.symbol_mapper import is_symbol_available
+from bot.update.installer import UpdateInstaller
 from bot.utils.time_utils import MarketScheduler
 
 _RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
 _MARGIN_MODE_HEDGING = 2  # mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
 _USER_SNAPSHOT_INTERVAL = 300.0  # 5 min between user-table upserts
+_UPDATE_CHECK_INTERVAL = 3600.0  # 1h between release-manifest checks
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ class Engine:
         tp_engine: TPEngine,
         tp_finalizer: Any | None = None,
         license_validator: Any | None = None,
+        update_checker: Any | None = None,
     ) -> None:
         self._mt5 = mt5_client
         self._mt5_conn = mt5_connection
@@ -44,6 +47,8 @@ class Engine:
         self._tp = tp_engine
         self._tp_finalizer = tp_finalizer
         self._license = license_validator
+        self._update_checker = update_checker
+        self._update_installer = UpdateInstaller()
         self._scheduler = MarketScheduler(config.spread_hour)
         self._sync_cycle = SyncCycle()
         self._reconciler = Reconciler()
@@ -81,6 +86,13 @@ class Engine:
         self._last_user_snapshot: float = 0.0
         # last logged sync summary; suppress repeat lines when nothing changes
         self._last_sync_summary: tuple[int, int, int, int, int] | None = None
+        # Self-update progress state, surfaced via the status broadcast.
+        self._update_in_progress: bool = False
+        self._update_progress: int = 0
+        self._update_error: str | None = None
+        # (pending, open, trailing, mt5_connected) from the last status build; lets the
+        # sync update-progress callback rebuild status without re-querying SQLite.
+        self._last_counts: tuple[int, int, int, bool] = (0, 0, 0, False)
 
     def start(self) -> None:
         self._trading_active = True
@@ -184,6 +196,8 @@ class Engine:
                         name="license_heartbeat",
                     )
                 )
+            if self._update_checker is not None:
+                tasks.append(asyncio.create_task(self._update_loop(), name="update_loop"))
             if api_task is not None:
                 tasks.append(api_task)
             self._tasks = tasks
@@ -395,6 +409,49 @@ class Engine:
                     logger.error("Periodic reconcile failed", exc_info=True)
                 last_full = now
 
+    async def _update_loop(self) -> None:
+        """Poll the release manifest so the UI can offer 'Update and restart' when a
+        newer build ships. Non-fatal — the checker swallows its own errors."""
+        await asyncio.sleep(30.0)
+        while True:
+            await self._update_checker.check()
+            await self._broadcast_status()
+            await asyncio.sleep(_UPDATE_CHECK_INTERVAL)
+
+    def start_update(self) -> None:
+        """Kick off download + self-replace from the API handler (engine event loop)."""
+        if self._update_in_progress or not self._update_checker.info.available:
+            return
+        asyncio.create_task(self._run_update(), name="run_update")
+
+    async def _run_update(self) -> None:
+        self._update_in_progress = True
+        self._update_progress = 0
+        self._update_error = None
+        await self._broadcast_status()
+        try:
+            info = self._update_checker.info
+
+            def on_progress(pct: int) -> None:
+                # Only emit on a whole-percent change so a large download can't flood
+                # the bounded status queue; drop the tick if the queue is momentarily full.
+                if pct == self._update_progress:
+                    return
+                self._update_progress = pct
+                try:
+                    self.status_queue.put_nowait(self._status_snapshot())
+                except asyncio.QueueFull:
+                    pass
+
+            staged = await self._update_installer.download(info, on_progress)
+            self._update_installer.apply_and_restart(staged)
+            self.shutdown()
+        except Exception as e:
+            logger.error("Self-update failed", exc_info=True)
+            self._update_error = str(e)
+            self._update_in_progress = False
+            await self._broadcast_status()
+
     @staticmethod
     def _teardown_decision(
         armed: bool, license_valid: bool, confirmed_rejected: bool
@@ -561,7 +618,18 @@ class Engine:
         open_count = sum(1 for r in active if r["status"] == "filled")
         trailing_count = sum(1 for r in active if r["status"] == "filled" and r["is_trailing"])
         mt5_connected = self._mt5.ensure_connected()
-        status = {
+        self._last_counts = (pending_count, open_count, trailing_count, mt5_connected)
+        try:
+            self.status_queue.put_nowait(self._status_snapshot())
+        except asyncio.QueueFull:
+            pass
+
+    def _status_snapshot(self) -> dict:
+        """Build the status dict from the last cached counts. Sync so the update
+        progress callback can refresh it without re-querying SQLite."""
+        pending_count, open_count, trailing_count, mt5_connected = self._last_counts
+        info = self._update_checker.info if self._update_checker is not None else None
+        return {
             "engine_running": self._running,
             "trading_active": self._trading_active,
             "license_valid": getattr(self._license, "license_valid", True),
@@ -575,8 +643,10 @@ class Engine:
             "trailing_count": trailing_count,
             "bot_version": BOT_VERSION,
             "shutdown_reason": self.shutdown_reason,
+            "update_available": info.available if info else False,
+            "update_version": info.version if info else None,
+            "update_notes": info.notes if info else "",
+            "update_in_progress": self._update_in_progress,
+            "update_progress": self._update_progress,
+            "update_error": self._update_error,
         }
-        try:
-            self.status_queue.put_nowait(status)
-        except asyncio.QueueFull:
-            pass

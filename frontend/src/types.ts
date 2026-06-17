@@ -12,6 +12,12 @@ export interface StatusData {
   trailing_count: number
   bot_version?: string
   shutdown_reason?: string | null
+  update_available?: boolean
+  update_version?: string | null
+  update_notes?: string
+  update_in_progress?: boolean
+  update_progress?: number
+  update_error?: string | null
 }
 
 export interface LogEntry {

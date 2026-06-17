@@ -10,6 +10,7 @@ interface Props {
   engineRunning: boolean
   onEngineToggle: () => void
   onShutdown: () => void
+  onUpdate: () => void
 }
 
 export function TopBar({
@@ -19,6 +20,7 @@ export function TopBar({
   engineRunning,
   onEngineToggle,
   onShutdown,
+  onUpdate,
 }: Props) {
   const acct = dashboard?.account
   const totalProfit = dashboard?.summary?.total_profit ?? 0
@@ -58,6 +60,13 @@ export function TopBar({
     onShutdown()
   }
 
+  function handleUpdateClick() {
+    setStopMenuOpen(false)
+    onUpdate()
+  }
+
+  const updateAvailable = status?.update_available ?? false
+
   return (
     <header className="topbar">
       <div className="tb-title">
@@ -94,6 +103,15 @@ export function TopBar({
             {acct ? money(totalProfit) : '—'}
           </span>
         </div>
+        {updateAvailable && (
+          <button
+            className="tb-update-cta"
+            onClick={onUpdate}
+            title={`Version ${status?.update_version} available — click to update`}
+          >
+            <span className="d" /> Update available
+          </button>
+        )}
       </div>
       <div className="tb-right">
         <div className="conns">
@@ -144,6 +162,15 @@ export function TopBar({
                 >
                   Shutdown
                 </button>
+                {updateAvailable && (
+                  <button
+                    className="item accent"
+                    onClick={handleUpdateClick}
+                    title="Download the latest version and restart"
+                  >
+                    Update and restart
+                  </button>
+                )}
               </div>
             )}
           </div>

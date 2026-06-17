@@ -31,10 +31,24 @@ cd frontend && npx tsc --noEmit     # type-check
 
 ### Production exe (owner only)
 
-1. Edit `bot/config/constants.py` and set the real values for `_PRODUCTION_DSN` and `_PRODUCTION_LICENSE_URL`.
+1. Bump `BOT_VERSION` in `bot/config/constants.py` and set the real values for `_PRODUCTION_DSN`, `_PRODUCTION_LICENSE_URL`, and `_PRODUCTION_UPDATE_MANIFEST_URL`.
 2. Build the frontend: `cd frontend && npm install && npm run build && cd ..` — produces `frontend/dist/`.
 3. Build the binary: `pyinstaller bot.spec` — output is `dist/MT5Bot.exe` (single-file Windows executable, frontend bundled).
-4. Revert constants before committing: `git checkout bot/config/constants.py`. **Never commit the filled DSN or license URL.**
+4. Revert constants before committing: `git checkout bot/config/constants.py`. **Never commit the filled DSN, license URL, or manifest URL.**
+
+### Release an auto-update (owner only)
+
+The running bot polls `_PRODUCTION_UPDATE_MANIFEST_URL` hourly; when it points at a newer `version` than the running `BOT_VERSION`, the dashboard surfaces an "Update and restart" prompt that downloads, verifies SHA-256, self-replaces, and relaunches (`bot/update/`). To ship a build:
+
+1. Build `dist/MT5Bot.exe` as above (with `BOT_VERSION` bumped).
+2. Hash it: `CertUtil -hashfile dist/MT5Bot.exe SHA256` (or `sha256sum`).
+3. Upload the exe as `MT5Bot-<version>.exe` to the public Supabase Storage `releases` bucket.
+4. **Last**, update `releases/latest.json` so users never pull a manifest pointing at a not-yet-uploaded binary:
+   ```json
+   { "version": "1.3.0", "url": "https://<proj>.supabase.co/storage/v1/object/public/releases/MT5Bot-1.3.0.exe", "sha256": "<hex>", "notes": "...", "min_supported": "1.0.0" }
+   ```
+
+Test against a scratch bucket without rebuilding the constant via the `MT5BOT_UPDATE_URL` env override (`bot/config/settings.py:load_update_manifest_url`). The updater is frozen-only — in dev (`python main.py`) the install path raises a clear "packaged build only" error.
 
 ### Edge Function deploy (owner only)
 
@@ -115,6 +129,7 @@ The bot's UPSERT pulls `license_id` from `licenses` via the `license_key`, so ea
 - **Weekend force-close window**: when a signal's status flips to `cancelled`, the bot only force-closes filled positions if `MarketScheduler.is_weekend_window()` is True (Fri ≥16:45 EST through Sun <18:00 EST) **or** the position is on BTCUSD/crypto. Weekday cancellations on signals with fills are expected (Supabase extends expiry) so positions stay open. `breakeven` status closes unconditionally.
 - **Spread-hour SL strip**: `SyncCycle._manage_spread_hour_sls` clears the broker-side stop-loss off every filled position (trailing included) during `MarketScheduler.is_sl_strip_window()` — opens ~5 min before the spread spike (`sl_strip_start` 16:55 forex / `sl_strip_stock_start` 15:55 stocks, before their 16:00 close) and closes at `daily_end` — so a spread-driven spike can't stop it out. When the window ends the SL is restored to the persisted `last_known_mt5_sl`; if price has genuinely moved past that level the position is closed at market instead (a bigger but rare loss). State lives in the SQLite `sl_stripped` flag (restart-safe); while set, both the TP loop and `_sync_filled_sls` skip the position so neither re-arms the stop. Crypto and `-24` 24h stocks are exempt (`_gate_exempt`).
 - **Offset-drift throttle**: drift checks are gated per-order by `last_offset_check` and `config.offset_drift_check_interval_seconds` (default 1800s = 30 min). Prevents feed-mid jitter from churning the same order every sync cycle.
+- **Auto-update** (`bot/update/`): owner-driven and manual-confirm only — the bot detects a newer release from the HTTPS manifest and flags availability, but installs solely on explicit user click. Integrity is the mandatory SHA-256 from the manifest (we don't code-sign); a mismatch aborts and the old exe keeps running. Self-replace works only in the frozen build and needs write access to the exe's own folder (fine for a user-owned folder; Program Files would need elevation, out of scope). `_update_loop` and `_run_update` are catch-and-log — they never crash the main loop. The Supabase `releases` bucket is read over plain HTTPS, not the asyncpg pool.
 - **TP `instrument_overrides`** key by **DB symbol** (e.g. `SPX500USD`, `NAS100USD`, `BTCUSDT`), not MT5 symbol. Note this differs from `lot_sizing.*` per-instrument dicts which key by MT5 symbol (e.g. `US500`). Each entry can be either flat (applies to all signal types) or nested per-signal-type:
   ```json
   "instrument_overrides": {

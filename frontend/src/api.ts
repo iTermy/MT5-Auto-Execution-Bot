@@ -36,6 +36,11 @@ export async function shutdownEngine(): Promise<void> {
   if (!r.ok) throw new Error(`POST /api/engine/shutdown ${r.status}`)
 }
 
+export async function installUpdate(): Promise<void> {
+  const r = await fetch('/api/update/install', { method: 'POST' })
+  if (!r.ok) throw new Error(`POST /api/update/install ${r.status}`)
+}
+
 export async function fetchDashboard(): Promise<DashboardData> {
   const r = await fetch('/api/dashboard')
   if (!r.ok) throw new Error(`GET /api/dashboard ${r.status}`)

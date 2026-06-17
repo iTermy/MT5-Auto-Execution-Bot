@@ -15,7 +15,7 @@ import pystray
 from PIL import Image
 
 from bot.api.app import create_app
-from bot.config.settings import load_config, load_dsn, load_license_url
+from bot.config.settings import load_config, load_dsn, load_license_url, load_update_manifest_url
 from bot.core.engine import Engine
 from bot.db.sqlite import SQLiteDB
 from bot.db.supabase import SupabaseDB
@@ -25,6 +25,7 @@ from bot.mt5.client import MT5Client
 from bot.mt5.connection import MT5Connection
 from bot.tp.engine import TPEngine
 from bot.tp.finalizer import TPFinalizer
+from bot.update.checker import UpdateChecker
 from bot.utils.logging import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ def main() -> None:
 
     dsn = load_dsn()
     license_url = load_license_url()
+    update_manifest_url = load_update_manifest_url()
 
     conn = MT5Connection(config.mt5_terminal_path)
     mt5_client = MT5Client(conn)
@@ -124,6 +126,7 @@ def main() -> None:
     tp_engine = TPEngine(outcomes_writer=tp_outcomes_writer)
     tp_finalizer = TPFinalizer(tp_outcomes_writer)
     license_validator = LicenseValidator(license_url)
+    update_checker = UpdateChecker(update_manifest_url)
 
     engine = Engine(
         mt5_client=mt5_client,
@@ -134,6 +137,7 @@ def main() -> None:
         tp_engine=tp_engine,
         tp_finalizer=tp_finalizer,
         license_validator=license_validator,
+        update_checker=update_checker,
     )
     engine.app = create_app(engine)
 

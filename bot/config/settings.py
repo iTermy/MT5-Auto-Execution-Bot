@@ -1,10 +1,16 @@
 import json
 import logging
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
-from bot.config.constants import _PRODUCTION_DSN, _PRODUCTION_LICENSE_URL, AssetClass
+from bot.config.constants import (
+    _PRODUCTION_DSN,
+    _PRODUCTION_LICENSE_URL,
+    _PRODUCTION_UPDATE_MANIFEST_URL,
+    AssetClass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,3 +232,8 @@ def load_dsn() -> str:
 
 def load_license_url() -> str:
     return _PRODUCTION_LICENSE_URL
+
+
+def load_update_manifest_url() -> str:
+    # Env override eases testing against a scratch bucket without rebuilding the constant.
+    return os.environ.get("MT5BOT_UPDATE_URL") or _PRODUCTION_UPDATE_MANIFEST_URL

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { fetchConfig, startEngine, stopEngine, shutdownEngine } from './api'
+import { fetchConfig, startEngine, stopEngine, shutdownEngine, installUpdate } from './api'
 import { useSSE } from './hooks/useSSE'
 import { useDashboard } from './hooks/useDashboard'
 import { useHistory } from './hooks/useHistory'
 import { NavSidebar } from './components/NavSidebar'
 import { TopBar } from './components/TopBar'
+import { UpdateModal } from './components/UpdateModal'
 import { LogDrawer } from './components/LogDrawer'
 import { DashboardPage } from './pages/DashboardPage'
 import { HistoryPage } from './pages/HistoryPage'
@@ -15,6 +16,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [logOpen, setLogOpen] = useState(false)
   const [config, setConfig] = useState<Config | null>(null)
+  const [updateModalOpen, setUpdateModalOpen] = useState(false)
   const { logs, status, connected } = useSSE()
   const dashboard = useDashboard()
   const history = useHistory(5000)
@@ -44,6 +46,17 @@ export default function App() {
     }
   }
 
+  async function handleConfirmUpdate() {
+    try {
+      await installUpdate()
+    } catch {
+      /* progress/errors arrive over the status SSE */
+    }
+  }
+
+  // Keep the modal up while an install is mid-flight even if the user didn't open it.
+  const showUpdateModal = updateModalOpen || (status?.update_in_progress ?? false)
+
   return (
     <div className="app">
       <TopBar
@@ -53,7 +66,16 @@ export default function App() {
         engineRunning={engineRunning}
         onEngineToggle={handleEngineToggle}
         onShutdown={handleShutdown}
+        onUpdate={() => setUpdateModalOpen(true)}
       />
+      {showUpdateModal && (
+        <UpdateModal
+          status={status}
+          connected={connected}
+          onConfirm={handleConfirmUpdate}
+          onClose={() => setUpdateModalOpen(false)}
+        />
+      )}
       {status?.shutdown_reason === 'netting_account' && (
         <div
           style={{

@@ -533,6 +533,116 @@ button {
 .tb-stop-menu .item.danger:hover {
   background: var(--neg-tint);
 }
+.tb-stop-menu .item.accent {
+  color: var(--accent);
+}
+.tb-stop-menu .item.accent:hover {
+  background: var(--accent-tint);
+}
+
+/* ── Update-available CTA (banner, right of Unrealized P&L) ── */
+.tb-update-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  border: 1px solid var(--accent-tint2);
+  border-radius: 10px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: 0.14s;
+}
+.tb-update-cta:hover {
+  background: var(--accent-tint2);
+}
+.tb-update-cta .d {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 var(--accent);
+  animation: tb-update-pulse 2s ease-out infinite;
+}
+@keyframes tb-update-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-tint2);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(232, 130, 74, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 130, 74, 0);
+  }
+}
+
+/* ── Modal (update prompt) ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+.modal {
+  width: 440px;
+  max-width: calc(100vw - 40px);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: 22px 24px;
+}
+.modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.modal-notes {
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: pre-line;
+  margin: 0 0 12px;
+}
+.modal-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin: 12px 0 0;
+}
+.modal-warn {
+  font-size: 12.5px;
+  color: var(--warn);
+  background: rgba(224, 162, 60, 0.1);
+  border: 1px solid rgba(224, 162, 60, 0.28);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin-bottom: 4px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.modal-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.modal-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s;
+}
 
 /* ── Panels ── */
 .panel {

@@ -31,6 +31,12 @@ _STATUS_DEFAULTS: dict = {
     "open_count": 0,
     "trailing_count": 0,
     "bot_version": BOT_VERSION,
+    "update_available": False,
+    "update_version": None,
+    "update_notes": "",
+    "update_in_progress": False,
+    "update_progress": 0,
+    "update_error": None,
 }
 
 
@@ -69,6 +75,21 @@ async def engine_stop(request: Request) -> dict:
 @router.post("/api/engine/shutdown")
 async def engine_shutdown(request: Request) -> dict:
     request.app.state.engine.shutdown()
+    return {"ok": True}
+
+
+@router.post("/api/update/install")
+async def update_install(request: Request) -> dict:
+    request.app.state.engine.start_update()
+    return {"ok": True}
+
+
+@router.post("/api/update/check")
+async def update_check(request: Request) -> dict:
+    engine = request.app.state.engine
+    if engine._update_checker is not None:
+        await engine._update_checker.check()
+        await engine._broadcast_status()
     return {"ok": True}
 
 

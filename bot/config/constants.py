@@ -2,9 +2,10 @@ from enum import Enum
 
 _PRODUCTION_DSN: str = ""
 _PRODUCTION_LICENSE_URL: str = ""
+_PRODUCTION_UPDATE_MANIFEST_URL: str = ""
 
 MAGIC_NUMBER: int = 20250001
-BOT_VERSION: str = "1.2.0"
+BOT_VERSION: str = "1.3.1"
 
 
 class AssetClass(str, Enum):

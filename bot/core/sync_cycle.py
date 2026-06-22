@@ -702,7 +702,8 @@ class SyncCycle:
             mt5_client, sqlite, mt5_positions
         )
         for evt in new_tickets:
-            await sqlite.mark_closed(evt.original_ticket)
+            closed_pnl = mt5_client.get_position_realized_pnl(evt.original_ticket)
+            await sqlite.mark_closed(evt.original_ticket, closed_pnl)
             remainder_pos = pos_by_ticket.get(evt.new_ticket)
             await sqlite.insert_order(
                 limit_id=-evt.new_ticket,
@@ -719,10 +720,11 @@ class SyncCycle:
             await sqlite.set_trailing(evt.new_ticket)
             result.new_trailing += 1
             logger.info(
-                "Partial close remainder: new_ticket=%d signal=%d (original=%d closed)",
+                "Partial close remainder: new_ticket=%d signal=%d (original=%d closed pnl=%s)",
                 evt.new_ticket,
                 evt.signal_id,
                 evt.original_ticket,
+                f"{closed_pnl:.2f}" if closed_pnl is not None else "?",
             )
 
         # M2: mark positions closed if they disappeared from MT5 externally

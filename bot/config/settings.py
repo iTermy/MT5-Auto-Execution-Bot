@@ -18,6 +18,27 @@ _CONFIG_PATH = Path("config.json")
 
 _VALID_ASSET_CLASSES = frozenset(a.value for a in AssetClass)
 
+# Feed-offset instruments: DB symbols whose Supabase price comes from an external
+# feed (OANDA indices/oil, Binance crypto), so the bot derives a broker-vs-feed
+# offset before placing. Forex and gold are direct-feed (broker price) and absent.
+DEFAULT_OFFSET_INSTRUMENTS = [
+    "SPX500USD",
+    "NAS100USD",
+    "BTCUSDT",
+    "ETHUSDT",
+    "US30USD",
+    "US2000USD",
+    "USOILSPOT",
+    "DE30EUR",
+    "JP225",
+]
+
+# Symbols every existing install should carry as offset-feed after updating. Applied
+# once per install via `migrate_config` (tracked in `config_migrations`), so a user
+# may still remove them afterwards without the migration re-adding them.
+_OFFSET_BACKFILL_SYMBOLS = ("USOILSPOT", "DE30EUR", "US2000USD")
+_MIGRATION_OFFSET_BACKFILL = "offset_feed_backfill_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -101,6 +122,29 @@ class ProximityConfig(BaseModel):
     stock_overrides: dict[str, float] = {}
 
 
+class OffsetDriftConfig(BaseModel):
+    """Drift thresholds in the instrument's own price units (dollars/points), never
+    pips. A still-pending offset order is cancelled for re-placement when its
+    broker-vs-feed offset has drifted beyond this since placement. Offset
+    instruments are all non-forex, so a pip has no meaning here."""
+
+    indices: dict[str, float] = {
+        "SPX": 3.0,
+        "US500": 3.0,
+        "NAS": 8.0,
+        "USTEC": 8.0,
+        "DAX": 8.0,
+        "DE30": 8.0,
+        "US30": 5.0,
+        "US2000": 2.0,
+        "JP225": 15.0,
+    }
+    crypto: float = 25.0
+    oil: float = 0.15
+    metals: float = 2.0
+    default: float = 5.0
+
+
 class AssetTPConfig(BaseModel):
     profit_threshold: float
     threshold_unit: str
@@ -163,25 +207,20 @@ class Settings(BaseModel):
     # Signal types and channel ids that are skipped wholesale (empty = none skipped).
     disabled_signal_types: list[str] = []
     disabled_channels: list[str] = []
-    offset_instruments: list[str] = [
-        "SPX500USD",
-        "NAS100USD",
-        "BTCUSDT",
-        "ETHUSDT",
-        "US30USD",
-        "US2000USD",
-        "JP225",
-    ]
-    offset_drift_threshold_pips: float = 5.0
+    offset_instruments: list[str] = list(DEFAULT_OFFSET_INSTRUMENTS)
+    offset_drift: OffsetDriftConfig = OffsetDriftConfig()
     offset_drift_check_interval_seconds: int = 1800
     # Offset is a slow-moving broker-vs-feed property — recompute at most this often
     # per symbol and serve the cached value in between (the feed itself refreshes ~5s).
     offset_recompute_interval_seconds: int = 300
-    # Dead-feed bound: while a signal is active the feed refreshes ~5s, so a stale
-    # updated_at means the feed updater has stalled — skip placement past this age.
+    # Dead-feed bound: while a signal is active the feed refreshes every few seconds,
+    # so a stale updated_at means the feed updater has stalled — skip placement past
+    # this age.
     feed_max_staleness_seconds: int = 120
     spread_hour: SpreadHourConfig = SpreadHourConfig()
     proximity: ProximityConfig = ProximityConfig()
+    # One-time config migrations already applied to this install (see migrate_config).
+    config_migrations: list[str] = []
     tp_config: TPConfig
 
     @model_validator(mode="before")
@@ -209,6 +248,41 @@ class Settings(BaseModel):
                     raise ValueError(f"asset class '{ac}' assigned to multiple suffix rules")
                 seen.add(ac)
         return v
+
+
+def migrate_config(path: Path = _CONFIG_PATH) -> None:
+    """Apply one-time, idempotent config rewrites that must survive an update. Each
+    migration is recorded in `config_migrations` so it runs at most once per install
+    — a user who later removes a backfilled symbol keeps it removed. Runs before
+    load_config at startup; silently no-ops if config.json is missing or unparseable
+    (load_config surfaces those)."""
+    try:
+        data = json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+
+    applied = data.get("config_migrations")
+    if not isinstance(applied, list):
+        applied = []
+
+    changed = False
+    if _MIGRATION_OFFSET_BACKFILL not in applied:
+        offset = data.get("offset_instruments")
+        if not isinstance(offset, list):
+            offset = list(DEFAULT_OFFSET_INSTRUMENTS)
+        for sym in _OFFSET_BACKFILL_SYMBOLS:
+            if sym not in offset:
+                offset.append(sym)
+        data["offset_instruments"] = offset
+        applied.append(_MIGRATION_OFFSET_BACKFILL)
+        data["config_migrations"] = applied
+        changed = True
+
+    if changed:
+        path.write_text(json.dumps(data, indent=2))
+        logger.info("Applied config migration(s): %s", ", ".join(applied))
 
 
 def load_config(path: Path = _CONFIG_PATH) -> Settings | None:

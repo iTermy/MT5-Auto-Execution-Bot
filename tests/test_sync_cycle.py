@@ -142,6 +142,43 @@ async def test_spread_hour_skips_new_placements(sqlite_db, mock_mt5, sample_conf
 
 
 # ---------------------------------------------------------------------------
+# Proximity gate uses the feed frame (not the broker frame) for offset symbols
+# ---------------------------------------------------------------------------
+
+
+async def test_proximity_uses_feed_mid_for_offset_symbol(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # SPX500USD limit at the feed price 4590.5; the feed mid is right on it (within the
+    # 20-pt index proximity), but the BROKER mid is 4650.5 — 60 pts away. Comparing the
+    # feed price to the broker mid (the old bug) would skip this as "outside proximity".
+    # With the fix it passes proximity and proceeds to offset (which fails here, with no
+    # mocked history → an error, not a proximity skip), proving the gate used the feed mid.
+    mock_mt5.symbol_info.return_value = make_symbol_info(name="US500", digits=1, point=0.1)
+    mock_mt5.symbol_info_tick.return_value = make_tick(
+        bid=4650.0, ask=4651.0, time=int(datetime.now(UTC).timestamp())
+    )
+    mock_mt5.account_info.return_value = make_account_info()
+
+    row = _make_supabase_row(limit_id=50, instrument="SPX500USD")
+    row["stop_loss"] = 4585.0
+    row["price_level"] = 4590.5
+    supabase = _mock_supabase(
+        signals=[row],
+        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},
+    )
+    supabase.fetch_signal_status.return_value = "active"
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.skipped == 0  # not proximity-rejected
+    assert result.errors == 1  # reached offset compute, which had no broker history
+    mock_mt5.order_send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Offset drift: drifted pending orders are cancelled for re-placement
 # ---------------------------------------------------------------------------
 

@@ -24,6 +24,7 @@ from bot.trading.symbol_mapper import (
     instrument_under_news,
     map_symbol,
     needs_offset,
+    offset_drift_threshold,
     parse_news_symbols,
     proximity_threshold,
 )
@@ -511,7 +512,24 @@ class SyncCycle:
                                 len(lids),
                             )
                             continue
-                        mid = (tick.bid + tick.ask) / 2
+                        # Proximity is a feed-frame question: the limit prices are feed
+                        # prices, so compare against the feed mid for offset symbols. Using
+                        # the broker mid here would be off by the whole offset.
+                        if needs_offset(db_sym, config):
+                            live_row = live_prices.get(db_sym)
+                            if live_row is None:
+                                rejection_reason[sig_id] = "no live price"
+                                result.errors += len(lids)
+                                logger.warning(
+                                    "Signal %d (%s): no live price for proximity — skipping %d limit(s)",
+                                    sig_id,
+                                    db_sym,
+                                    len(lids),
+                                )
+                                continue
+                            mid = (float(live_row["bid"]) + float(live_row["ask"])) / 2
+                        else:
+                            mid = (tick.bid + tick.ask) / 2
                         new_prices = [float(supabase_by_limit[lid]["price_level"]) for lid in lids]
                         if _within_proximity(
                             new_prices,
@@ -647,12 +665,10 @@ class SyncCycle:
                     )
                     if current_offset is None:
                         continue
-                    sym = mt5_client.symbol_info(mt5_symbol)
-                    if sym is None:
-                        continue
                     await sqlite.update_last_offset_check(row["mt5_ticket"], now_drift.isoformat())
-                    pip_sz = sym.point * (10 if sym.digits in (3, 5) else 1)
-                    threshold = config.offset_drift_threshold_pips * pip_sz
+                    threshold = offset_drift_threshold(
+                        detect_asset_class(instrument), config.offset_drift, instrument
+                    )
                     if self._offset_calc.check_drift(
                         current_offset, float(row["offset_at_placement"]), threshold
                     ):

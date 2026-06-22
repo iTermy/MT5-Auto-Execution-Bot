@@ -15,7 +15,13 @@ import pystray
 from PIL import Image
 
 from bot.api.app import create_app
-from bot.config.settings import load_config, load_dsn, load_license_url, load_update_manifest_url
+from bot.config.settings import (
+    load_config,
+    load_dsn,
+    load_license_url,
+    load_update_manifest_url,
+    migrate_config,
+)
 from bot.core.engine import Engine
 from bot.db.sqlite import SQLiteDB
 from bot.db.supabase import SupabaseDB
@@ -108,6 +114,7 @@ def main() -> None:
         sys.exit(0)
 
     _ensure_config_exists()
+    migrate_config()
 
     config = load_config()
     if config is None:

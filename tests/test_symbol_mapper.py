@@ -2,11 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 from bot.config.constants import AssetClass
+from bot.config.settings import OffsetDriftConfig
 from bot.trading.symbol_mapper import (
     db_symbol_from_mt5,
     detect_asset_class,
     instrument_under_news,
     map_symbol,
+    offset_drift_threshold,
     parse_news_symbols,
 )
 from tests.conftest import make_settings
@@ -43,7 +45,9 @@ from tests.conftest import make_settings
             AssetClass.INDICES,
         ),  # contains NAS keyword; NOT crypto (len>6 check comes after)
         ("DAX40", AssetClass.INDICES),
+        ("DE30EUR", AssetClass.INDICES),  # German index — DE30 keyword
         ("JP225", AssetClass.INDICES),
+        ("USOILSPOT", AssetClass.OIL),  # offset-fed oil instrument
         # Crypto — ends USD/USDT and len > 6
         ("BTCUSDT", AssetClass.CRYPTO),  # len 7
         ("ETHUSDT", AssetClass.CRYPTO),  # len 7
@@ -69,6 +73,23 @@ def test_stocks_beats_indices_for_nas_suffix() -> None:
 def test_btcusd_is_forex_not_crypto() -> None:
     # BTCUSD has len==6 so the crypto rule (len > 6) does not match
     assert detect_asset_class("BTCUSD") == AssetClass.FOREX
+
+
+# ---------------------------------------------------------------------------
+# offset_drift_threshold — price units (dollars/points), never pips
+# ---------------------------------------------------------------------------
+
+
+def test_offset_drift_threshold_resolves_per_asset_class() -> None:
+    drift = OffsetDriftConfig()
+    # Index keyword match (NAS), then the per-class scalars, then default for an
+    # unrecognised index keyword.
+    assert offset_drift_threshold(AssetClass.INDICES, drift, "NAS100USD") == drift.indices["NAS"]
+    assert offset_drift_threshold(AssetClass.INDICES, drift, "DE30EUR") == drift.indices["DE30"]
+    assert offset_drift_threshold(AssetClass.INDICES, drift, "FTSE100GBP") == drift.default
+    assert offset_drift_threshold(AssetClass.CRYPTO, drift, "BTCUSDT") == drift.crypto
+    assert offset_drift_threshold(AssetClass.OIL, drift, "USOILSPOT") == drift.oil
+    assert offset_drift_threshold(AssetClass.METALS, drift, "XAUUSD") == drift.metals
 
 
 # ---------------------------------------------------------------------------

@@ -43,8 +43,24 @@
     "US2000USD",
     "DE30EUR"
   ],
-  "offset_drift_threshold_pips": 5.0,
-  "feed_max_staleness_seconds": 3600,
+  "offset_drift": {
+    "indices": {
+      "SPX": 3.0,
+      "US500": 3.0,
+      "NAS": 8.0,
+      "USTEC": 8.0,
+      "DAX": 8.0,
+      "DE30": 8.0,
+      "US30": 5.0,
+      "US2000": 2.0,
+      "JP225": 15.0
+    },
+    "crypto": 25.0,
+    "oil": 0.15,
+    "metals": 2.0,
+    "default": 5.0
+  },
+  "feed_max_staleness_seconds": 120,
   "spread_hour": {
     "daily_start": "16:45",
     "stock_daily_start": "15:45",
@@ -108,13 +124,13 @@
   "tp_config": {
     "partial_close_percent": 75,
     "forex": {
-      "profit_threshold": 7.0,
+      "profit_threshold": 10.0,
       "threshold_unit": "pips",
       "trailing_distance": 7.0,
       "partial_close_percent": 75
     },
     "forex_jpy": {
-      "profit_threshold": 7.0,
+      "profit_threshold": 10.0,
       "threshold_unit": "pips",
       "trailing_distance": 7.0,
       "partial_close_percent": 50
@@ -150,8 +166,8 @@
       "partial_close_percent": 75
     },
     "scalp_overrides": {
-      "forex": { "profit_threshold": 4.0, "trailing_distance": 4.0 },
-      "forex_jpy": { "profit_threshold": 4.0, "trailing_distance": 4.0, "partial_close_percent": 75 },
+      "forex": { "profit_threshold": 5.0, "trailing_distance": 4.0 },
+      "forex_jpy": { "profit_threshold": 5.0, "trailing_distance": 4.0, "partial_close_percent": 75 },
       "metals": { "profit_threshold": 5.0, "trailing_distance": 5.0 },
       "indices": { "profit_threshold": 15.0, "trailing_distance": 15.0 },
       "stocks": { "profit_threshold": 5.0, "trailing_distance": 5.0 },

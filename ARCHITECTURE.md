@@ -296,8 +296,8 @@ CREATE TABLE IF NOT EXISTS order_mappings (
   "symbol_suffixes": [{ "suffix": "m", "asset_classes": ["forex", "forex_jpy", "metals", "crypto"] }],
 
   "offset_instruments": ["SPX500USD", "NAS100USD", "BTCUSDT", "ETHUSDT"],
-  "offset_drift_threshold_pips": 5,
-  "feed_max_staleness_seconds": 30,
+  "offset_drift": { "indices": { "NAS": 8.0 }, "crypto": 25.0, "oil": 0.15, "default": 5.0 },
+  "feed_max_staleness_seconds": 120,
 
   "spread_hour": {
     "daily_start": "16:45",
@@ -399,7 +399,8 @@ Static files: FastAPI serves `frontend/dist/` at `/`. In dev, Vite dev server on
   once at startup before any other SQLiteDB method.
 
 - **OffsetCalculator.check_drift()** threshold parameter is in absolute price units, not pips.
-  Caller converts `offset_drift_threshold_pips * pip_size` before calling.
+  Caller resolves it per asset class via `offset_drift_threshold(asset_class, config.offset_drift,
+  db_sym)` — offset instruments are all non-forex, so the threshold is a dollar/point distance.
 
 - **MarketScheduler** is defined in `bot/utils/time_utils.py`. `bot/core/scheduler.py` (step 28)
   imports it directly — no logic is duplicated there.

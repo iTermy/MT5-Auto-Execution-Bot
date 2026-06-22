@@ -416,13 +416,19 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
     }
 
     const offsetInst = cfg.offset_instruments ?? []
-    setSymbolRows(
-      Object.entries(cfg.symbol_map ?? {}).map(([db, mt5]) => ({
-        db,
-        mt5: String(mt5),
-        feed: offsetInst.includes(db),
-      }))
-    )
+    const mapped = new Set(Object.keys(cfg.symbol_map ?? {}))
+    const rows: SymbolRow[] = Object.entries(cfg.symbol_map ?? {}).map(([db, mt5]) => ({
+      db,
+      mt5: String(mt5),
+      feed: offsetInst.includes(db),
+    }))
+    // Offset instruments without a symbol_map entry (e.g. JP225, USOILSPOT) still
+    // belong in the table so their feed type can be edited and they aren't dropped on
+    // save — they map to themselves on the broker.
+    for (const db of offsetInst) {
+      if (!mapped.has(db)) rows.push({ db, mt5: db, feed: true })
+    }
+    setSymbolRows(rows)
     setStockSuffix(cfg.stock_suffix ?? '-24')
     const rawSuffixes = cfg.symbol_suffixes ?? []
     const legacyUniversal = (cfg as { universal_suffix?: string }).universal_suffix
@@ -521,6 +527,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
   function updateSymbolRow(i: number, field: 'db' | 'mt5', value: string) {
     setSymbolRows(prev => prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)))
+    touch()
+  }
+
+  function updateSymbolFeed(i: number, feed: boolean) {
+    setSymbolRows(prev => prev.map((r, j) => (j === i ? { ...r, feed } : r)))
     touch()
   }
 
@@ -778,9 +789,18 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   }
 
   function buildSymbolMap(): Record<string, string> {
+    // Skip identity rows (mt5 === db): they're no-op mappings, used only to surface an
+    // offset-only instrument in the table. Their feed type is persisted via
+    // offset_instruments, not symbol_map.
     return Object.fromEntries(
-      symbolRows.filter(r => r.db.trim() && r.mt5.trim()).map(r => [r.db.trim(), r.mt5.trim()])
+      symbolRows
+        .filter(r => r.db.trim() && r.mt5.trim() && r.db.trim() !== r.mt5.trim())
+        .map(r => [r.db.trim(), r.mt5.trim()])
     )
+  }
+
+  function buildOffsetInstruments(): string[] {
+    return symbolRows.filter(r => r.feed && r.db.trim()).map(r => r.db.trim())
   }
 
   async function handleSave() {
@@ -801,6 +821,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         },
         tp_config: buildTpConfig(),
         symbol_map: buildSymbolMap(),
+        offset_instruments: buildOffsetInstruments(),
         stock_suffix: stockSuffix,
         symbol_suffixes: buildSuffixRules(),
         excluded_trades: buildExcludedTrades(),
@@ -1257,9 +1278,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>Exceptions</h3>
-          <span className="sub">
-            override mode and value for specific MT5 symbols
-          </span>
+          <span className="sub">override mode and value for specific MT5 symbols</span>
         </div>
         {lotExceptions.length > 0 && (
           <table className="tbl" style={{ maxWidth: 720 }}>
@@ -1989,14 +2008,22 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                   />
                 </td>
                 <td>
-                  {isUnknownSymbol(m.mt5) ? (
-                    <span className="tag ghost" style={{ color: 'var(--neg, #c0392b)' }}>
+                  <select
+                    className="inp"
+                    value={m.feed ? 'offset' : 'direct'}
+                    onChange={e => updateSymbolFeed(i, e.target.value === 'offset')}
+                    style={{ width: 130 }}
+                  >
+                    <option value="offset">offset feed</option>
+                    <option value="direct">direct feed</option>
+                  </select>
+                  {isUnknownSymbol(m.mt5) && (
+                    <span
+                      className="tag ghost"
+                      style={{ color: 'var(--neg, #c0392b)', marginLeft: 6 }}
+                    >
                       not found
                     </span>
-                  ) : m.feed ? (
-                    <span className="tag long">offset feed</span>
-                  ) : (
-                    <span className="tag ghost">direct</span>
                   )}
                 </td>
                 <td style={{ width: 40 }}>
@@ -2115,9 +2142,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>By symbol</h3>
-          <span className="sub">
-            Use DB instrument (e.g. "SPX500USD" not "US500") 
-          </span>
+          <span className="sub">Use DB instrument (e.g. "SPX500USD" not "US500")</span>
         </div>
         {excludedTrades.length > 0 && (
           <table className="tbl" style={{ maxWidth: 520 }}>

@@ -120,8 +120,8 @@ export interface Config {
   disabled_signal_types: string[]
   disabled_channels: string[]
   offset_instruments: string[]
-  offset_drift_threshold_pips: number
   feed_max_staleness_seconds: number
+  config_migrations?: string[]
   spread_hour: SpreadHourConfig
   tp_config: TPConfig
 }

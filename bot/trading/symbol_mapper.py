@@ -1,5 +1,5 @@
 from bot.config.constants import AssetClass
-from bot.config.settings import ProximityConfig, Settings
+from bot.config.settings import OffsetDriftConfig, ProximityConfig, Settings
 from bot.mt5.types import SymbolInfo
 
 _METALS = frozenset({"XAUUSD", "XAGUSD", "GOLD", "SILVER"})
@@ -131,6 +131,25 @@ def proximity_threshold(
         return prox.crypto
 
     return None  # OIL and any other unhandled classes
+
+
+def offset_drift_threshold(asset_class: AssetClass, drift: OffsetDriftConfig, db_sym: str) -> float:
+    """Max offset drift (in the instrument's own price units) tolerated before a
+    pending offset order is re-placed. Offset instruments are non-forex, so this is
+    always a dollar/point distance, never pips."""
+    if asset_class == AssetClass.INDICES:
+        s = db_sym.upper()
+        for keyword, threshold in drift.indices.items():
+            if keyword.upper() in s:
+                return threshold
+        return drift.default
+    if asset_class == AssetClass.CRYPTO:
+        return drift.crypto
+    if asset_class == AssetClass.OIL:
+        return drift.oil
+    if asset_class == AssetClass.METALS:
+        return drift.metals
+    return drift.default
 
 
 def is_symbol_available(db_symbol: str, broker_symbols, config: Settings) -> bool:

@@ -1,6 +1,6 @@
 interface SegOption {
   value: string
-  label: string
+  label: React.ReactNode
 }
 
 interface SegProps {

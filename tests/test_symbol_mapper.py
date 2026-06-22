@@ -142,6 +142,9 @@ def test_instrument_under_news_all_matches_everything() -> None:
         ("US2000USD", True),
         # Oil is USD-denominated but has no 'USD' substring → asset-class path
         ("USOILSPOT", True),
+        # US stocks are USD-denominated but have no 'USD' substring → asset-class path
+        ("AMD.NAS", True),
+        ("AAPL.NYSE", True),
         # Not USD-related
         ("EURGBP", False),
         ("EURJPY", False),

@@ -1225,7 +1225,20 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               value={lotMode}
               options={[
                 { value: 'risk_percent', label: 'Risk %' },
-                { value: 'fixed', label: 'Fixed lot' },
+                {
+                  value: 'fixed',
+                  label: (
+                    <>
+                      Fixed lot
+                      <span
+                        style={{ color: 'var(--pos)', marginLeft: 4 }}
+                        title="This lot-sizing method is recommended as it ensures more consistent results. Please find an appropriate fixed lot for all symbol types, and add overrides where necessary."
+                      >
+                        ★
+                      </span>
+                    </>
+                  ),
+                },
               ]}
               onChange={v => {
                 setLotMode(v)

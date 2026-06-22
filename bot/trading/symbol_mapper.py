@@ -36,8 +36,9 @@ def parse_news_symbols(news_mode: str | None) -> frozenset[str]:
 def instrument_under_news(db_symbol: str, news_symbols: frozenset[str]) -> bool:
     """True if any active news token applies to this DB instrument. A token matches
     when (aliased) it is a substring of the symbol — so 'USD' hits EURUSD, USDJPY,
-    XAUUSD, SPX500USD, and 'GOLD' (→XAU) hits XAUUSD only. Oil is USD-denominated
-    but its symbol (e.g. USOILSPOT) has no 'USD' substring, so USD news gates it too."""
+    XAUUSD, SPX500USD, and 'GOLD' (→XAU) hits XAUUSD only. Oil and US stocks are
+    USD-denominated but their symbols (e.g. USOILSPOT, AMD.NAS) have no 'USD'
+    substring, so USD news gates them via the asset-class path too."""
     if not news_symbols:
         return False
     if "ALL" in news_symbols:
@@ -45,7 +46,10 @@ def instrument_under_news(db_symbol: str, news_symbols: frozenset[str]) -> bool:
     s = db_symbol.upper()
     if any(_NEWS_ALIASES.get(token, token) in s for token in news_symbols):
         return True
-    return "USD" in news_symbols and detect_asset_class(db_symbol) == AssetClass.OIL
+    return "USD" in news_symbols and detect_asset_class(db_symbol) in (
+        AssetClass.OIL,
+        AssetClass.STOCKS,
+    )
 
 
 def detect_asset_class(db_symbol: str) -> AssetClass:

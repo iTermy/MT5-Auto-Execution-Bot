@@ -16,6 +16,16 @@ _BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", "."))
 _DIST = _BUNDLE_DIR / "frontend" / "dist"
 
 
+class _SPAStaticFiles(StaticFiles):
+    # Force revalidation of the HTML entrypoint so a self-update can't leave the
+    # browser on a stale index.html that points at hashed assets no longer present.
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.media_type == "text/html":
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(engine: Engine) -> FastAPI:
     log_broadcaster = SSEBroadcaster()
     status_broadcaster = SSEBroadcaster()
@@ -45,6 +55,6 @@ def create_app(engine: Engine) -> FastAPI:
 
     # Serve bundled frontend in production; skipped when dist/ doesn't exist (dev mode)
     if _DIST.exists():
-        app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")
+        app.mount("/", _SPAStaticFiles(directory=_DIST, html=True), name="static")
 
     return app

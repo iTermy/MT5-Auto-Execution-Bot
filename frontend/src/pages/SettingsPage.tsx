@@ -50,6 +50,21 @@ const LOT_SIGNAL_TYPES: { value: string; label: string }[] = [
 // Concrete signal types (no "all") — used for the wholesale skip checkboxes.
 const SIGNAL_TYPES = LOT_SIGNAL_TYPES.filter(t => t.value !== 'all')
 
+// Built-in offset-feed instruments. Their feed type and presence are fixed — users
+// can only re-map the broker symbol, not change the feed or remove the row. Must
+// stay in sync with DEFAULT_OFFSET_INSTRUMENTS in bot/config/settings.py.
+const LOCKED_OFFSET_INSTRUMENTS = new Set([
+  'SPX500USD',
+  'NAS100USD',
+  'BTCUSDT',
+  'ETHUSDT',
+  'US30USD',
+  'US2000USD',
+  'USOILSPOT',
+  'DE30EUR',
+  'JP225',
+])
+
 // Trailing % is the inverse of partial_close_percent (storage unchanged).
 const partialToTrailing = (p: number) => Math.max(0, Math.min(100, 100 - p))
 const trailingToPartial = (t: number) => Math.max(0, Math.min(100, 100 - t))
@@ -800,7 +815,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   }
 
   function buildOffsetInstruments(): string[] {
-    return symbolRows.filter(r => r.feed && r.db.trim()).map(r => r.db.trim())
+    // Locked built-in defaults are always offset feeds regardless of the (disabled) toggle.
+    return symbolRows
+      .filter(r => r.db.trim() && (r.feed || LOCKED_OFFSET_INSTRUMENTS.has(r.db.trim())))
+      .map(r => r.db.trim())
   }
 
   async function handleSave() {
@@ -1978,8 +1996,13 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       {/* SYMBOL MAPPING */}
       <div className="panel pad">
         <div className="panel-head">
-          <h3>Symbol mapping</h3>
-          <span className="sub">DB instrument → your broker's MT5 symbol</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <h3>Symbol mapping</h3>
+            <span className="sub">DB instrument → your broker's MT5 symbol</span>
+            <span className="sub">
+              Offset feed for indices, oil &amp; crypto · direct feed for forex, metals &amp; stocks
+            </span>
+          </div>
         </div>
         <table className="tbl" style={{ maxWidth: 680 }}>
           <thead>
@@ -1992,60 +2015,75 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             </tr>
           </thead>
           <tbody>
-            {symbolRows.map((m, i) => (
-              <tr key={i}>
-                <td>
-                  <input
-                    className="inp mono"
-                    value={m.db}
-                    onChange={e => updateSymbolRow(i, 'db', e.target.value)}
-                    style={{ width: 150 }}
-                  />
-                </td>
-                <td className="faint" style={{ width: 24, textAlign: 'center' }}>
-                  →
-                </td>
-                <td>
-                  <input
-                    className="inp mono"
-                    list="broker-symbols"
-                    value={m.mt5}
-                    onChange={e => updateSymbolRow(i, 'mt5', e.target.value)}
-                    style={{
-                      width: 150,
-                      borderColor: isUnknownSymbol(m.mt5) ? 'var(--neg, #c0392b)' : undefined,
-                    }}
-                    title={
-                      isUnknownSymbol(m.mt5) ? 'Not found in this broker’s symbol list' : undefined
-                    }
-                  />
-                </td>
-                <td>
-                  <select
-                    className="inp"
-                    value={m.feed ? 'offset' : 'direct'}
-                    onChange={e => updateSymbolFeed(i, e.target.value === 'offset')}
-                    style={{ width: 130 }}
-                  >
-                    <option value="offset">offset feed</option>
-                    <option value="direct">direct feed</option>
-                  </select>
-                  {isUnknownSymbol(m.mt5) && (
-                    <span
-                      className="tag ghost"
-                      style={{ color: 'var(--neg, #c0392b)', marginLeft: 6 }}
+            {symbolRows.map((m, i) => {
+              const locked = LOCKED_OFFSET_INSTRUMENTS.has(m.db.trim())
+              return (
+                <tr key={i}>
+                  <td>
+                    <input
+                      className="inp mono"
+                      value={m.db}
+                      onChange={e => updateSymbolRow(i, 'db', e.target.value)}
+                      disabled={locked}
+                      style={{ width: 150 }}
+                    />
+                  </td>
+                  <td className="faint" style={{ width: 24, textAlign: 'center' }}>
+                    →
+                  </td>
+                  <td>
+                    <input
+                      className="inp mono"
+                      list="broker-symbols"
+                      value={m.mt5}
+                      onChange={e => updateSymbolRow(i, 'mt5', e.target.value)}
+                      style={{
+                        width: 150,
+                        borderColor: isUnknownSymbol(m.mt5) ? 'var(--neg, #c0392b)' : undefined,
+                      }}
+                      title={
+                        isUnknownSymbol(m.mt5)
+                          ? 'Not found in this broker’s symbol list'
+                          : undefined
+                      }
+                    />
+                  </td>
+                  <td>
+                    <select
+                      className="inp"
+                      value={locked || m.feed ? 'offset' : 'direct'}
+                      onChange={e => updateSymbolFeed(i, e.target.value === 'offset')}
+                      disabled={locked}
+                      title={locked ? 'Built-in default — feed type is fixed' : undefined}
+                      style={{ width: 130 }}
                     >
-                      not found
-                    </span>
-                  )}
-                </td>
-                <td style={{ width: 40 }}>
-                  <button className="btn sm ghost" onClick={() => removeSymbolRow(i)}>
-                    ×
-                  </button>
-                </td>
-              </tr>
-            ))}
+                      <option value="offset">offset feed</option>
+                      <option value="direct">direct feed</option>
+                    </select>
+                    {locked && (
+                      <span className="tag ghost faint" style={{ marginLeft: 6 }}>
+                        default
+                      </span>
+                    )}
+                    {isUnknownSymbol(m.mt5) && (
+                      <span
+                        className="tag ghost"
+                        style={{ color: 'var(--neg, #c0392b)', marginLeft: 6 }}
+                      >
+                        not found
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ width: 40 }}>
+                    {!locked && (
+                      <button className="btn sm ghost" onClick={() => removeSymbolRow(i)}>
+                        ×
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         <datalist id="broker-symbols">

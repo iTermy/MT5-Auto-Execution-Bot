@@ -39,6 +39,11 @@ DEFAULT_OFFSET_INSTRUMENTS = [
 _OFFSET_BACKFILL_SYMBOLS = ("USOILSPOT", "DE30EUR", "US2000USD")
 _MIGRATION_OFFSET_BACKFILL = "offset_feed_backfill_v1"
 
+# Wider placement proximity for existing installs: forex/JPY → 15 pips, metals →
+# $25, indices doubled. Applied once per install via `migrate_config`, so a user may
+# still re-tune any value afterwards without the migration re-applying.
+_MIGRATION_PROXIMITY_BUMP = "proximity_bump_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -103,21 +108,21 @@ class SpreadHourConfig(BaseModel):
 
 
 class ProximityConfig(BaseModel):
-    forex_pips: float = 10.0
-    forex_jpy_pips: float = 10.0
-    metals: float = 15.0
+    forex_pips: float = 15.0
+    forex_jpy_pips: float = 15.0
+    metals: float = 25.0
     crypto: float = 1000.0
     stocks: float = 5.0
     indices: dict[str, float] = {
-        "SPX": 20.0,
-        "US500": 20.0,
-        "NAS": 50.0,
-        "USTEC": 50.0,
-        "DAX": 50.0,
-        "DE30": 50.0,
-        "US30": 50.0,
-        "US2000": 10.0,
-        "JP225": 100.0,
+        "SPX": 40.0,
+        "US500": 40.0,
+        "NAS": 100.0,
+        "USTEC": 100.0,
+        "DAX": 100.0,
+        "DE30": 100.0,
+        "US30": 100.0,
+        "US2000": 20.0,
+        "JP225": 200.0,
     }
     stock_overrides: dict[str, float] = {}
 
@@ -277,6 +282,22 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
                 offset.append(sym)
         data["offset_instruments"] = offset
         applied.append(_MIGRATION_OFFSET_BACKFILL)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_PROXIMITY_BUMP not in applied:
+        prox = data.get("proximity")
+        if isinstance(prox, dict):
+            prox["forex_pips"] = 15.0
+            prox["forex_jpy_pips"] = 15.0
+            prox["metals"] = 25.0
+            indices = prox.get("indices")
+            if isinstance(indices, dict):
+                for sym, value in indices.items():
+                    if isinstance(value, (int, float)):
+                        indices[sym] = value * 2
+            data["proximity"] = prox
+        applied.append(_MIGRATION_PROXIMITY_BUMP)
         data["config_migrations"] = applied
         changed = True
 

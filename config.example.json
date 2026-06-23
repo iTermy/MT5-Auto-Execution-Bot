@@ -72,21 +72,21 @@
     "weekend_end_day": "Sunday"
   },
   "proximity": {
-    "forex_pips": 10.0,
-    "forex_jpy_pips": 10.0,
-    "metals": 15.0,
+    "forex_pips": 15.0,
+    "forex_jpy_pips": 15.0,
+    "metals": 25.0,
     "crypto": 1000.0,
     "stocks": 5.0,
     "indices": {
-      "SPX": 20.0,
-      "US500": 20.0,
-      "NAS": 50.0,
-      "USTEC": 50.0,
-      "DAX": 50.0,
-      "DE30": 50.0,
-      "US30": 50.0,
-      "US2000": 10.0,
-      "JP225": 100.0
+      "SPX": 40.0,
+      "US500": 40.0,
+      "NAS": 100.0,
+      "USTEC": 100.0,
+      "DAX": 100.0,
+      "DE30": 100.0,
+      "US30": 100.0,
+      "US2000": 20.0,
+      "JP225": 200.0
     },
     "stock_overrides": {
       "AAPL":  0.64,

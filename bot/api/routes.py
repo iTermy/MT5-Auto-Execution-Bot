@@ -14,6 +14,7 @@ else:
 
 from bot.config.constants import BOT_VERSION
 from bot.config.settings import Settings
+from bot.trading.approx_lot import compute_recommendations
 
 router = APIRouter()
 
@@ -180,6 +181,30 @@ async def list_mt5_terminals() -> dict:
 async def list_mt5_symbols(request: Request) -> dict:
     # Served from the engine's cached catalogue — never calls MT5 from the handler.
     return {"symbols": request.app.state.engine.broker_symbols}
+
+
+@router.get("/api/lot-sizing/approximate")
+async def approximate_lot_sizes(request: Request) -> dict:
+    """Fixed-lot-per-limit suggestions that put a median signal near 5% account risk,
+    one per supported broker symbol. Computed from cached specs + balance — no MT5 call."""
+    engine = request.app.state.engine
+    acct = engine.dashboard_cache.data.account
+    if not acct or not acct.get("balance"):
+        raise HTTPException(409, "Account balance unavailable — connect MT5 and let a sync run")
+    recs = compute_recommendations(
+        engine._config,
+        float(acct["balance"]),
+        engine.lot_specs,
+        engine._config.lot_sizing.max_lot_per_order,
+    )
+    return {
+        "balance": acct["balance"],
+        "currency": acct.get("currency"),
+        "exceptions": [
+            {"symbol": r.symbol, "signal_type": r.signal_type, "mode": r.mode, "value": r.value}
+            for r in recs
+        ],
+    }
 
 
 @router.get("/api/mt5/not-found-symbols")

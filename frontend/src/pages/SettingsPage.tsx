@@ -10,6 +10,7 @@ import {
   scanMt5Terminals,
   fetchMt5Symbols,
   fetchNotFoundSymbols,
+  fetchApproximateLots,
 } from '../api'
 import type {
   Config,
@@ -293,6 +294,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [fixedLotDefault, setFixedLotDefault] = useState('0.01')
   const [maxLot, setMaxLot] = useState('5.0')
   const [lotExceptions, setLotExceptions] = useState<LotExceptionRow[]>([])
+  const [approxLoading, setApproxLoading] = useState(false)
+  const [approxMsg, setApproxMsg] = useState<{ kind: 'success' | 'error'; text: string } | null>(
+    null
+  )
   const [licenseKey, setLicenseKey] = useState('')
   const [mt5TerminalPath, setMt5TerminalPath] = useState('')
   const [tpRows, setTpRows] = useState<TpRow[]>([])
@@ -693,6 +698,42 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         mode: r.mode,
         value: parseFloat(r.value) || 0,
       }))
+  }
+
+  // Fetch per-instrument fixed lots sized for ~5% average risk and upsert them into
+  // the exceptions table (by symbol + signal type), leaving unrelated rows untouched.
+  async function handleCalculateApproxLots() {
+    setApproxLoading(true)
+    setApproxMsg(null)
+    try {
+      const data = await fetchApproximateLots()
+      if (data.exceptions.length === 0) {
+        setApproxMsg({ kind: 'error', text: 'No supported instruments found on this broker.' })
+        return
+      }
+      setLotExceptions(prev => {
+        const next = [...prev]
+        for (const ex of data.exceptions) {
+          const value = String(ex.value)
+          const i = next.findIndex(
+            r => r.symbol.trim() === ex.symbol && r.signalType === ex.signal_type
+          )
+          if (i >= 0) next[i] = { ...next[i], mode: 'fixed', value }
+          else next.push({ symbol: ex.symbol, signalType: ex.signal_type, mode: 'fixed', value })
+        }
+        return next
+      })
+      touch()
+      const bal = data.balance.toLocaleString(undefined, { maximumFractionDigits: 0 })
+      setApproxMsg({
+        kind: 'success',
+        text: `Set ${data.exceptions.length} fixed lots for ~5% avg risk on ${data.currency ?? ''} ${bal} balance. Review and save.`,
+      })
+    } catch (e) {
+      setApproxMsg({ kind: 'error', text: e instanceof Error ? e.message : 'Calculation failed' })
+    } finally {
+      setApproxLoading(false)
+    }
   }
 
   function updateExcludedTrade(i: number, field: 'symbol' | 'signalType', value: string) {
@@ -1366,7 +1407,39 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               style={{ width: 100 }}
             />
           </div>
+          {lotMode === 'fixed' && (
+            <div
+              className="field"
+              style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}
+            >
+              <label>&nbsp;</label>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleCalculateApproxLots}
+                disabled={approxLoading || !mt5Ok}
+                title={
+                  mt5Ok
+                    ? 'Suggest fixed lots per instrument that put a typical signal near 5% account risk, and add them as exceptions below'
+                    : 'Connect MT5 first — sizing needs your account balance'
+                }
+              >
+                {approxLoading ? 'Calculating…' : 'Calculate approximate sizes'}
+              </button>
+            </div>
+          )}
         </div>
+        {lotMode === 'fixed' && approxMsg && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 12.5,
+              color: approxMsg.kind === 'success' ? 'var(--pos)' : 'var(--neg)',
+            }}
+          >
+            {approxMsg.text}
+          </div>
+        )}
 
         <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
 

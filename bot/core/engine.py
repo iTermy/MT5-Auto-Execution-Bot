@@ -14,7 +14,8 @@ from bot.db.supabase import SupabaseDB
 from bot.mt5.client import MT5Client
 from bot.mt5.connection import MT5Connection
 from bot.tp.engine import TPEngine
-from bot.trading.symbol_mapper import is_symbol_available
+from bot.trading import approx_lot
+from bot.trading.symbol_mapper import is_symbol_available, map_symbol
 from bot.update.installer import UpdateInstaller
 from bot.utils.time_utils import MarketScheduler
 
@@ -68,6 +69,9 @@ class Engine:
         # doesn't carry. Recomputed each dashboard cycle; surfaced in Settings so users
         # can add a manual mapping. Falls off the list once a mapping resolves.
         self.not_found_symbols: list[str] = []
+        # Broker SymbolInfo for the approximate-lot calculator's target instruments,
+        # refreshed each dashboard cycle so the API can size lots without touching MT5.
+        self.lot_specs: dict = {}
         # SSE consumers read from this queue
         self.status_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         # License teardown state
@@ -526,6 +530,7 @@ class Engine:
             # symbols_get() is cached in the client; refresh the API-facing copy cheaply.
             catalogue = self._mt5.symbols_get()
             self.broker_symbols = sorted(catalogue)
+            self._refresh_lot_specs(catalogue)
             rows = self._sync_cycle.last_supabase_rows
             if catalogue and rows:
                 self.not_found_symbols = sorted(
@@ -551,6 +556,20 @@ class Engine:
             )
         except Exception:
             logger.error("Dashboard cache update failed", exc_info=True)
+
+    def _refresh_lot_specs(self, catalogue: frozenset[str]) -> None:
+        """Cache SymbolInfo for the approximate-lot target instruments the broker
+        carries. symbol_info is cached in the client, so this is near-free after the
+        first cycle and keeps MT5 off the API request path."""
+        specs: dict = {}
+        for db in approx_lot.target_db_symbols():
+            mt5_sym = map_symbol(db, self._config)
+            if mt5_sym not in catalogue:
+                continue
+            info = self._mt5.symbol_info(mt5_sym)
+            if info is not None:
+                specs[mt5_sym] = info
+        self.lot_specs = specs
 
     async def _maybe_upsert_user_snapshot(self) -> None:
         """Push a per-user account snapshot to Supabase every 5 min for leaderboard

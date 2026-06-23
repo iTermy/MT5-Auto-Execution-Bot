@@ -1,4 +1,10 @@
-import type { Config, DashboardData, HistoryData, StatusData } from './types'
+import type { Config, DashboardData, HistoryData, LotExceptionConfig, StatusData } from './types'
+
+export interface ApproximateLots {
+  balance: number
+  currency: string | null
+  exceptions: LotExceptionConfig[]
+}
 
 export async function fetchStatus(): Promise<StatusData> {
   const r = await fetch('/api/status')
@@ -66,6 +72,21 @@ export async function fetchNotFoundSymbols(): Promise<string[]> {
   if (!r.ok) throw new Error(`GET /api/mt5/not-found-symbols ${r.status}`)
   const data = (await r.json()) as { symbols: string[] }
   return data.symbols
+}
+
+export async function fetchApproximateLots(): Promise<ApproximateLots> {
+  const r = await fetch('/api/lot-sizing/approximate')
+  if (!r.ok) {
+    let detail = `GET /api/lot-sizing/approximate ${r.status}`
+    try {
+      const body = (await r.json()) as { detail?: string }
+      if (body.detail) detail = body.detail
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail)
+  }
+  return r.json()
 }
 
 export async function fetchHistory(fromDate?: string, toDate?: string): Promise<HistoryData> {

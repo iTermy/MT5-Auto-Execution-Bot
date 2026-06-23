@@ -113,6 +113,9 @@ class SyncCycle:
         self._logged_unmapped: set[str] = set()
         # signal_ids whose proximity rejection has been logged (logged once per lifetime)
         self._logged_proximity: set[int] = set()
+        # limit_ids skipped from re-placement because they already filled on our end
+        # (logged once per lifetime — flags a DB desync without spamming each cycle)
+        self._logged_already_filled: set[int] = set()
         # C8: SL sync consecutive failure tracking
         self._sl_fail_count: dict[int, int] = {}  # ticket -> consecutive fail count
         self._sl_fail_target: dict[int, float] = {}  # ticket -> last failed target sl
@@ -319,6 +322,28 @@ class SyncCycle:
                         result.errors += not ok
 
                 new_limit_ids = supabase_limit_ids - sqlite_limit_ids
+
+                # Never re-place a limit that has already filled on our end. A limit can
+                # fill on our broker while the TM still shows it pending (sub-pip mismatch,
+                # or the TM bot was down); once our position TPs/closes its SQLite row goes
+                # to 'closed', drops out of get_all_active(), and would otherwise reappear
+                # here as a "new" limit — re-entering the exact same level on a loop. The
+                # 'closed' row is the durable, restart-safe marker that the limit hit.
+                already_filled = new_limit_ids & await sqlite.get_filled_limit_ids()
+                if already_filled:
+                    new_limit_ids -= already_filled
+                    for lid in already_filled:
+                        if lid in self._logged_already_filled:
+                            continue
+                        self._logged_already_filled.add(lid)
+                        row = supabase_by_limit[lid]
+                        logger.warning(
+                            "Skipping re-placement of limit_id=%d signal_id=%d (%s) — already "
+                            "filled on our end but still active in DB (TM/DB out of sync)",
+                            lid,
+                            row["signal_id"],
+                            row["instrument"],
+                        )
 
                 # Drop blocked symbols (spread hour / weekend / news mode) from the
                 # pre-check phase — otherwise tick/proximity/live-price-staleness checks

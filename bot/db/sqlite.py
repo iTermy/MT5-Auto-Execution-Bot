@@ -9,6 +9,7 @@ from bot.db.queries import (
     GET_ALL_ACTIVE,
     GET_CLAIMED_BY_SIGNAL_LIMIT,
     GET_CLAIMED_ORDERS,
+    GET_FILLED_LIMIT_IDS,
     GET_FILLED_POSITIONS,
     GET_FILLED_SIGNAL_IDS,
     GET_ORDER_BY_TICKET,
@@ -308,6 +309,11 @@ class SQLiteDB:
         async with self._db.execute(GET_FILLED_SIGNAL_IDS) as cursor:
             rows = await cursor.fetchall()
         return {row["signal_id"] for row in rows}
+
+    async def get_filled_limit_ids(self) -> set[int]:
+        async with self._db.execute(GET_FILLED_LIMIT_IDS) as cursor:
+            rows = await cursor.fetchall()
+        return {row["limit_id"] for row in rows}
 
     async def get_signals_with_fills(self) -> set[int]:
         async with self._db.execute(GET_SIGNALS_WITH_FILLS) as cursor:

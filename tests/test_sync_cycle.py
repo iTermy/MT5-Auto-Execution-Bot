@@ -98,6 +98,71 @@ async def test_idempotency_second_run_is_noop(sqlite_db, mock_mt5, sample_config
 
 
 # ---------------------------------------------------------------------------
+# Re-placement guard: a limit that already filled on our end is never re-placed
+# ---------------------------------------------------------------------------
+
+
+async def test_filled_then_closed_limit_not_replaced(sqlite_db, mock_mt5, sample_config) -> None:
+    # Limit filled on our broker, TP'd, and closed → SQLite row is 'closed'. The TM
+    # never marked the limit hit, so Supabase still lists it pending. It must NOT be
+    # placed a second time (the dangerous loop).
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=9001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_filled(9001, "2026-01-01T00:01:00+00:00")
+    await sqlite_db.mark_closed(9001, 12.50)
+
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1)])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert 1 in cycle._logged_already_filled
+
+
+async def test_cancelled_limit_still_replaceable(sqlite_db, mock_mt5, sample_config) -> None:
+    # A never-filled limit that was cancelled (e.g. spread hour / offset drift) must
+    # still re-place — the guard only blocks limits that actually filled.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=9101,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_cancelled(9101, "2026-01-01T00:01:00+00:00", spread=True)
+
+    mock_mt5.account_info.return_value = make_account_info()
+    mock_mt5.order_send.return_value = make_order_result(ticket=9102)
+    mock_mt5.order_get_by_ticket.return_value = None
+    row = _make_supabase_row(limit_id=1)
+    row["price_level"] = 1.09950  # within proximity of mid and below ask → valid buy_limit
+    supabase = _mock_supabase(signals=[row])
+    supabase.fetch_signal_status.return_value = "active"
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 1
+    mock_mt5.order_send.assert_called_once()
+    assert 1 not in cycle._logged_already_filled
+
+
+# ---------------------------------------------------------------------------
 # Spread hour: pending orders are cancelled, placement is skipped
 # ---------------------------------------------------------------------------
 

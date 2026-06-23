@@ -174,6 +174,16 @@ GET_FILLED_SIGNAL_IDS = """
 SELECT DISTINCT signal_id FROM order_mappings WHERE status = 'filled'
 """
 
+# Limits that have filled on our end at least once — currently open ('filled') or
+# already closed after TP / SL / force-exit ('closed'). Once a limit has filled it
+# must never be re-placed, even if the upstream signal/limit is still marked active
+# in Supabase: a stale or out-of-sync DB row would otherwise make the bot re-enter
+# the exact same level on a loop. Never-filled cancellations ('cancelled' /
+# 'spread_cancelled') are intentionally excluded so they still re-place as before.
+GET_FILLED_LIMIT_IDS = """
+SELECT DISTINCT limit_id FROM order_mappings WHERE status IN ('filled', 'closed')
+"""
+
 # Signals where at least one limit has ever filled (currently open or already closed).
 # Used by the offset-drift gate to avoid cancelling pending siblings of a signal
 # whose other limits already hit.

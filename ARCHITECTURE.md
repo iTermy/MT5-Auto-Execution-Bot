@@ -43,6 +43,18 @@ MT5 calls are sync but <50ms. Called directly in the async loop (no executor). S
 6. For price drift on offset instruments: modify MT5 order price
 ```
 
+**Re-placement guard (no duplicate entries).** A "new" limit is `supabase_limit_ids -
+sqlite_active_limit_ids` (active = pending/filled), but a limit that has *ever filled*
+on our broker (`order_mappings.status IN ('filled','closed')`) is also subtracted, so it
+is never placed again — even after its position TPs/closes and the SQLite row goes to
+`closed`. This stops the dangerous loop where a limit fills on our end while the TM/DB
+still shows it `pending` (sub-pip mismatch, or the TM bot was down / signal went stale):
+the position TPs, the `closed` row drops out of `get_all_active()`, and the still-pending
+DB limit would otherwise reappear as "new" and re-enter the same level forever. The
+`closed` row is the durable, restart-safe marker. Never-filled `cancelled` /
+`spread_cancelled` rows are deliberately *excluded* from the guard so legitimate
+re-placement (spread hour, news, offset drift, SL change) still works.
+
 ## TP Engine (tp/)
 ```
 TPStrategy (Protocol)

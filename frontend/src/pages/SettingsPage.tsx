@@ -1527,9 +1527,19 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       {tpRows.length > 0 && (
         <CollapsibleSection
           head={
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div
+              style={{
+                display: 'flex',
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
               <h3>Take-profit &amp; trailing</h3>
-              <span className="sub">per asset class · per signal type</span>
+              <span className="sub">
+                Use the instrument name as shown in the Discord alert channel
+              </span>
             </div>
           }
           open={openSections.tp}

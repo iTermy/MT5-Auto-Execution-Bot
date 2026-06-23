@@ -224,6 +224,7 @@ def _build_nearby_signals(
         placed = any(r["limit_id"] in pending_limit_ids for r in rows)
         ch = first["channel_id"]
         asset_class = detect_asset_class(db_sym)
+        distance_magnitude = _distance_magnitude(distance, asset_class)
         distance_display = _format_distance(distance, asset_class)
         price_display = _format_price(closest_price, asset_class)
 
@@ -250,24 +251,34 @@ def _build_nearby_signals(
                 "closest_price": closest_price,
                 "current_price": round(current_price, 5),
                 "distance": round(distance, 5),
+                "distance_magnitude": distance_magnitude,
                 "placed": placed,
             }
         )
 
-    result.sort(key=lambda x: abs(x["distance"]))
+    result.sort(key=lambda x: x["distance_magnitude"])
     return result
 
 
-def _format_distance(distance: float, asset_class: AssetClass) -> str:
+def _distance_magnitude(distance: float, asset_class: AssetClass) -> float:
+    """The displayed proximity number (pips for forex, dollars otherwise), so the
+    Closest Signals list sorts pips and dollars on one scale instead of by raw price."""
     abs_d = abs(distance)
     if asset_class == AssetClass.FOREX:
-        return f"{abs_d * 10000:.1f} pips"
+        return abs_d * 10000
     if asset_class == AssetClass.FOREX_JPY:
-        return f"{abs_d * 100:.1f} pips"
+        return abs_d * 100
+    return abs_d
+
+
+def _format_distance(distance: float, asset_class: AssetClass) -> str:
+    mag = _distance_magnitude(distance, asset_class)
+    if asset_class in (AssetClass.FOREX, AssetClass.FOREX_JPY):
+        return f"{mag:.1f} pips"
     # metals/indices/stocks/crypto/oil — quoted in dollars per unit price
-    if abs_d >= 100:
-        return f"${abs_d:,.2f}"
-    return f"${abs_d:.2f}"
+    if mag >= 100:
+        return f"${mag:,.2f}"
+    return f"${mag:.2f}"
 
 
 def _format_price(price: float, asset_class: AssetClass) -> str:

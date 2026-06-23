@@ -1098,6 +1098,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
   return (
     <div className="page">
+      <datalist id="broker-symbols">
+        {brokerSymbols.map(s => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
       <div>
         <div className="eyebrow">Configuration</div>
         <h2 style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' }}>
@@ -1464,6 +1469,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
                   <td>
                     <input
                       className="inp mono"
+                      list="broker-symbols"
                       value={r.symbol}
                       onChange={e => updateLotException(i, 'symbol', e.target.value)}
                       placeholder="BTCUSD, XAUUSD, …"
@@ -2237,11 +2243,6 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             })}
           </tbody>
         </table>
-        <datalist id="broker-symbols">
-          {brokerSymbols.map(s => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
         <div style={{ marginTop: 14 }}>
           <button className="btn sm ghost" onClick={addSymbolRow}>
             + Add mapping

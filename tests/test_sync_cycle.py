@@ -688,6 +688,71 @@ async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_co
 
 
 # ---------------------------------------------------------------------------
+# Profit-weekend force-exit: flatten profit-marked signals before the weekend
+# ---------------------------------------------------------------------------
+
+
+async def test_profit_marked_position_closed_in_weekend_window(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=9001, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9001, symbol="USDCAD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9001)
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {1: {"status": "profit"}}
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = True
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_profit_weekend"
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_profit_marked_position_kept_open_on_weekday(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=9101, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9101, symbol="USDCAD")]
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {1: {"status": "profit"}}
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9101}
+
+
+async def test_profit_marked_crypto_kept_open_in_weekend_window(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Crypto trades 24/7 through the weekend, mirroring the gate exemptions.
+    sample_config.symbol_map = {"BTCUSDT": "BTCUSD"}  # reverse-maps for asset-class detection
+    await _insert_filled(
+        sqlite_db, mt5_ticket=9201, signal_id=1, symbol="BTCUSD", db_stop_loss=60000.0
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=9201, symbol="BTCUSD")]
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {1: {"status": "profit"}}
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = True
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9201}
+
+
+# ---------------------------------------------------------------------------
 # Offset drift interval throttle: skip re-evaluation within 30 min window
 # ---------------------------------------------------------------------------
 

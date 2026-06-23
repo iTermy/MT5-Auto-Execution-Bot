@@ -123,6 +123,8 @@ class SyncCycle:
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # News force-exit consecutive failure tracking (separate from status force-exit)
         self._news_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
+        # Profit-weekend force-exit consecutive failure tracking (separate from the above)
+        self._profit_weekend_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # Spread-hour SL strip/restore consecutive failure tracking (log suppression)
         self._sl_strip_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         self._sl_restore_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
@@ -774,6 +776,9 @@ class SyncCycle:
                 supabase, sqlite, mt5_client, mt5_positions, scheduler, config
             )
             await self._check_news_exits(news_symbols, sqlite, mt5_client, mt5_positions, config)
+            await self._check_profit_weekend_exits(
+                supabase, sqlite, mt5_client, mt5_positions, scheduler, config
+            )
 
             # Snapshot for the dashboard's "Closest Signals" view. Re-query pending
             # so newly-placed orders from this cycle appear as placed=True.
@@ -1225,6 +1230,84 @@ class SyncCycle:
                 if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
                     logger.error(
                         "News exit abandoned: ticket=%d signal=%d after %d attempts — "
+                        "manual intervention required",
+                        ticket,
+                        row["signal_id"],
+                        new_count,
+                    )
+
+    async def _check_profit_weekend_exits(
+        self,
+        supabase: SupabaseDB,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        mt5_positions: list,
+        scheduler: MarketScheduler,
+        config: Settings,
+    ) -> None:
+        """Flatten profit-marked signals before the forex weekend. A 'profit' status keeps
+        positions open for the TP engine during the week (see _check_forced_exits), but we
+        don't carry them across the weekend gap. Once the weekend window opens we close every
+        non-crypto filled position on a profit-marked signal at market — the same flatten an
+        expired ('cancelled') hit trade gets. Crypto trades through the weekend and is exempt.
+        Idempotent: closed positions are gone from MT5 and skipped next cycle; fail counts cap
+        retries so a shut market (Fri after close) doesn't spam the log all weekend."""
+        if not scheduler.is_weekend_window():
+            self._profit_weekend_fail_count.clear()
+            return
+        filled_sids = await sqlite.get_filled_signal_ids()
+        if not filled_sids:
+            return
+
+        status_map = await supabase.fetch_signal_statuses(list(filled_sids))
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+
+        for row in await sqlite.get_filled_positions():
+            ticket = row["mt5_ticket"]
+            pos = pos_by_ticket.get(ticket)
+            if pos is None:
+                continue
+
+            entry = status_map.get(row["signal_id"])
+            if entry is None or entry["status"] != "profit":
+                continue
+
+            instr = db_symbol_from_mt5(row["symbol"] or "", config)
+            if detect_asset_class(instr) == AssetClass.CRYPTO:
+                continue
+
+            if self._profit_weekend_fail_count.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
+                continue
+
+            await sqlite.set_trailing(ticket, 0)
+            res = mt5_client.close_position(
+                ticket=pos.ticket,
+                symbol=pos.symbol,
+                volume=pos.volume,
+                position_type=pos.type,
+                comment="force_profit_weekend",
+            )
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                if realized_pnl is None:
+                    realized_pnl = pos.profit
+                await sqlite.mark_closed(ticket, realized_pnl)
+                self._profit_weekend_fail_count.pop(ticket, None)
+                logger.warning(
+                    "Profit-weekend exit closed ticket=%d signal=%d symbol=%s pnl=%.2f",
+                    ticket,
+                    row["signal_id"],
+                    instr,
+                    realized_pnl,
+                )
+            else:
+                retcode = res.retcode if res else "None"
+                logger.error("Profit-weekend exit close failed ticket=%d retcode=%s", ticket, retcode)
+                new_count = self._profit_weekend_fail_count.get(ticket, 0) + 1
+                self._profit_weekend_fail_count[ticket] = new_count
+                if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
+                    logger.error(
+                        "Profit-weekend exit abandoned: ticket=%d signal=%d after %d attempts — "
                         "manual intervention required",
                         ticket,
                         row["signal_id"],

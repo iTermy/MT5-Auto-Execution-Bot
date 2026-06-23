@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
+import type { ReactNode } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
 import {
@@ -233,6 +234,46 @@ function MultiClassPicker({
   )
 }
 
+// Collapsible settings panel. The header bar toggles; when collapsed only the
+// header shows, so the page stays short once a section is configured.
+function CollapsibleSection({
+  head,
+  open,
+  onToggle,
+  children,
+}: {
+  head: ReactNode
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="panel pad">
+      <div
+        className="panel-head"
+        onClick={onToggle}
+        style={{ cursor: 'pointer', userSelect: 'none', marginBottom: open ? 16 : 0 }}
+      >
+        {head}
+        <Icon
+          name="chevDown"
+          size={18}
+          strokeWidth={2.2}
+          style={{
+            flexShrink: 0,
+            opacity: 0.55,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 120ms ease',
+          }}
+        />
+      </div>
+      {open && children}
+    </div>
+  )
+}
+
+type SectionKey = 'lot' | 'tp' | 'oneToOne' | 'symbols' | 'excluded'
+
 interface Props {
   config: Config | null
   status: {
@@ -276,6 +317,27 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
   const [excludedTrades, setExcludedTrades] = useState<ExcludedTradeRow[]>([])
   const [disabledSignalTypes, setDisabledSignalTypes] = useState<string[]>([])
   const [disabledChannels, setDisabledChannels] = useState<string[]>([])
+  const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(() => {
+    const defaults: Record<SectionKey, boolean> = {
+      lot: true,
+      tp: true,
+      oneToOne: true,
+      symbols: true,
+      excluded: true,
+    }
+    try {
+      const stored = localStorage.getItem('settingsOpenSections')
+      return stored ? { ...defaults, ...JSON.parse(stored) } : defaults
+    } catch {
+      return defaults
+    }
+  })
+  const toggleSection = (key: SectionKey) =>
+    setOpenSections(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      localStorage.setItem('settingsOpenSections', JSON.stringify(next))
+      return next
+    })
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(false)
@@ -1231,10 +1293,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       </div>
 
       {/* LOT SIZING */}
-      <div className="panel pad">
-        <div className="panel-head">
-          <h3>Lot sizing</h3>
-        </div>
+      <CollapsibleSection
+        head={<h3>Lot sizing</h3>}
+        open={openSections.lot}
+        onToggle={() => toggleSection('lot')}
+      >
         <div style={{ display: 'flex', gap: 28, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="field">
             <label>Default mode</label>
@@ -1379,15 +1442,20 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addLotException}>
           + Add exception
         </button>
-      </div>
+      </CollapsibleSection>
 
       {/* TAKE PROFIT & TRAILING */}
       {tpRows.length > 0 && (
-        <div className="panel pad">
-          <div className="panel-head">
-            <h3>Take-profit &amp; trailing</h3>
-            <span className="sub">per asset class · per signal type</span>
-          </div>
+        <CollapsibleSection
+          head={
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <h3>Take-profit &amp; trailing</h3>
+              <span className="sub">per asset class · per signal type</span>
+            </div>
+          }
+          open={openSections.tp}
+          onToggle={() => toggleSection('tp')}
+        >
           <div style={{ marginBottom: 16 }}>
             <Seg
               accent
@@ -1920,15 +1988,22 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               </table>
             </>
           )}
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* 1-1 FIXED TP */}
-      <div className="panel pad">
-        <div className="panel-head">
-          <h3>1-1 fixed TP</h3>
-          <span className="sub">1-1 trades always close at this $ amount · trailing disabled</span>
-        </div>
+      <CollapsibleSection
+        head={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <h3>1-1 fixed TP</h3>
+            <span className="sub">
+              1-1 trades always close at this $ amount · trailing disabled
+            </span>
+          </div>
+        }
+        open={openSections.oneToOne}
+        onToggle={() => toggleSection('oneToOne')}
+      >
         <div
           style={{
             display: 'flex',
@@ -1991,11 +2066,11 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
         <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addOneToOneRow}>
           + Add asset override
         </button>
-      </div>
+      </CollapsibleSection>
 
       {/* SYMBOL MAPPING */}
-      <div className="panel pad">
-        <div className="panel-head">
+      <CollapsibleSection
+        head={
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <h3>Symbol mapping</h3>
             <span className="sub">DB instrument → your broker's MT5 symbol</span>
@@ -2003,7 +2078,10 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
               Offset feed for indices, oil &amp; crypto · direct feed for forex, metals &amp; stocks
             </span>
           </div>
-        </div>
+        }
+        open={openSections.symbols}
+        onToggle={() => toggleSection('symbols')}
+      >
         <table className="tbl" style={{ maxWidth: 680 }}>
           <thead>
             <tr>
@@ -2162,7 +2240,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             + Add suffix
           </button>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* NOT FOUND SYMBOLS */}
       <div className="panel pad">
@@ -2185,12 +2263,16 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
       </div>
 
       {/* EXCLUDED TRADES */}
-      <div className="panel pad">
-        <div className="panel-head">
-          <h3>Excluded trades</h3>
-          <span className="sub">skip signals before they are ever placed</span>
-        </div>
-
+      <CollapsibleSection
+        head={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <h3>Excluded trades</h3>
+            <span className="sub">skip signals before they are ever placed</span>
+          </div>
+        }
+        open={openSections.excluded}
+        onToggle={() => toggleSection('excluded')}
+      >
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>By symbol</h3>
           <span className="sub">Use DB instrument (e.g. "SPX500USD" not "US500")</span>
@@ -2295,7 +2377,7 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
             </label>
           ))}
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* SAVE */}
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>

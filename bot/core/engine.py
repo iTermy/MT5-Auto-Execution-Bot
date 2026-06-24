@@ -94,6 +94,9 @@ class Engine:
         self._update_in_progress: bool = False
         self._update_progress: int = 0
         self._update_error: str | None = None
+        # Last Supabase pool-creation failure, surfaced as the Database status. None
+        # once the pool is open or before a connection attempt (idle).
+        self._supabase_error: str | None = None
         # (pending, open, trailing, mt5_connected) from the last status build; lets the
         # sync update-progress callback rebuild status without re-querying SQLite.
         self._last_counts: tuple[int, int, int, bool] = (0, 0, 0, False)
@@ -170,8 +173,11 @@ class Engine:
 
             try:
                 await self._supabase.create_pool()
-            except Exception:
+                self._supabase_error = None
+            except Exception as e:
                 logger.critical("Supabase connection failed", exc_info=True)
+                self._supabase_error = str(e) or "connection failed"
+                await self._broadcast_status()
                 return
 
             await self._reconciler.reconcile(self._mt5, self._sqlite)
@@ -663,6 +669,7 @@ class Engine:
             "mt5_connected": mt5_connected,
             "mt5_error": None if mt5_connected else self._mt5_conn.last_error,
             "supabase_connected": self._supabase._pool is not None,
+            "supabase_error": self._supabase_error,
             "pending_count": pending_count,
             "open_count": open_count,
             "trailing_count": trailing_count,

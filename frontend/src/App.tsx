@@ -110,7 +110,12 @@ export default function App() {
             )}
             {page === 'history' && <HistoryPage />}
             {page === 'settings' && (
-              <SettingsPage config={config} status={status} onConfigSaved={setConfig} />
+              <SettingsPage
+                config={config}
+                status={status}
+                connected={connected}
+                onConfigSaved={setConfig}
+              />
             )}
           </div>
           <LogDrawer open={logOpen} onToggle={() => setLogOpen(!logOpen)} logs={logs} />

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { fmtBalance, money } from '../utils/money'
+import { deriveConnStatuses, CONN_CLASS } from '../utils/connStatus'
 import type { DashboardData, StatusData } from '../types'
 
 interface Props {
@@ -24,9 +25,7 @@ export function TopBar({
 }: Props) {
   const acct = dashboard?.account
   const totalProfit = dashboard?.summary?.total_profit ?? 0
-  const mt5Ok = status?.mt5_connected ?? false
-  const supaOk = status?.supabase_connected ?? false
-  const licenseOk = status?.license_valid ?? false
+  const conns = deriveConnStatuses(status, connected)
 
   const [stopMenuOpen, setStopMenuOpen] = useState(false)
   const stopMenuRef = useRef<HTMLDivElement | null>(null)
@@ -115,16 +114,13 @@ export function TopBar({
       </div>
       <div className="tb-right">
         <div className="conns">
-          <div className={`conn ${mt5Ok ? 'live' : 'off'}`}>
+          <div className={`conn ${CONN_CLASS[conns.mt5.state]}`} title={conns.mt5.detail}>
             <span className="d" /> MT5
           </div>
-          <div className={`conn ${supaOk ? 'live' : 'off'}`}>
+          <div className={`conn ${CONN_CLASS[conns.database.state]}`} title={conns.database.detail}>
             <span className="d" /> Database
           </div>
-          <div
-            className={`conn ${licenseOk && connected ? 'live' : 'off'}`}
-            title={!licenseOk ? status?.license_message || undefined : undefined}
-          >
+          <div className={`conn ${CONN_CLASS[conns.license.state]}`} title={conns.license.detail}>
             <span className="d" /> License
           </div>
         </div>

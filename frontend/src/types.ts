@@ -7,6 +7,7 @@ export interface StatusData {
   mt5_connected: boolean
   mt5_error?: string | null
   supabase_connected: boolean
+  supabase_error?: string | null
   pending_count: number
   open_count: number
   trailing_count: number

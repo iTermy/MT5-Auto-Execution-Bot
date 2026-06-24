@@ -428,9 +428,17 @@ button {
 .conn.live .d {
   animation: ping 2.4s infinite;
 }
-.conn.off .d {
+.conn.off .d,
+.conn.idle .d {
   background: var(--text-3);
   box-shadow: none;
+}
+.conn.err .d {
+  background: var(--neg);
+  box-shadow: none;
+}
+.conn.err {
+  color: var(--neg);
 }
 @keyframes ping {
   0% {

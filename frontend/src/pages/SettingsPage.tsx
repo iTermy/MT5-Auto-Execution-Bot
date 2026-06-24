@@ -14,6 +14,7 @@ import {
 } from '../api'
 import type {
   Config,
+  StatusData,
   TPConfig,
   AssetTPConfig,
   ScalpOverrideConfig,
@@ -22,6 +23,7 @@ import type {
   SymbolSuffixRule,
 } from '../types'
 import { detectAssetClass } from '../utils/assetClass'
+import { deriveConnStatuses, CONN_CLASS, type ConnState } from '../utils/connStatus'
 import { CHANNELS } from '../utils/channels'
 
 const ASSET_CLASSES = [
@@ -66,6 +68,10 @@ const LOCKED_OFFSET_INSTRUMENTS = new Set([
   'DE30EUR',
   'JP225',
 ])
+
+// Status word for a connection indicator: its own verb when live/error, "idle" otherwise.
+const connWord = (state: ConnState, live: string, error: string) =>
+  state === 'live' ? live : state === 'error' ? error : 'idle'
 
 // Trailing % is the inverse of partial_close_percent (storage unchanged).
 const partialToTrailing = (p: number) => Math.max(0, Math.min(100, 100 - p))
@@ -277,18 +283,12 @@ type SectionKey = 'lot' | 'tp' | 'oneToOne' | 'symbols' | 'excluded'
 
 interface Props {
   config: Config | null
-  status: {
-    trading_active?: boolean
-    mt5_connected?: boolean
-    mt5_error?: string | null
-    supabase_connected?: boolean
-    license_valid?: boolean
-    license_message?: string
-  } | null
+  status: StatusData | null
+  connected: boolean
   onConfigSaved: (config: Config) => void
 }
 
-export function SettingsPage({ config, status, onConfigSaved }: Props) {
+export function SettingsPage({ config, status, connected, onConfigSaved }: Props) {
   const [lotMode, setLotMode] = useState('risk_percent')
   const [riskPct, setRiskPct] = useState('1.0')
   const [fixedLotDefault, setFixedLotDefault] = useState('0.01')
@@ -1067,28 +1067,41 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
 
   const isActive = status?.trading_active ?? false
   const mt5Ok = status?.mt5_connected ?? false
-  const mt5Error = status?.mt5_error ?? null
-  const supaOk = status?.supabase_connected ?? false
-  const licenseOk = status?.license_valid ?? false
+  const conns = deriveConnStatuses(status, connected)
 
   // Once a Save & validate is pending, watch the status feed for the engine's
-  // verdict. The engine flips license_valid asynchronously after its next
-  // sync cycle; reflect that back to the user instead of leaving the toast
-  // stuck on "waiting" or silently disappearing.
+  // verdict on both the MT5 terminal and the license. The engine reconnects MT5
+  // and re-validates asynchronously after its next sync cycle; surface whichever
+  // is failing instead of leaving the toast stuck on "waiting".
   useEffect(() => {
     if (!validateMsg || validateMsg.kind !== 'info') return
-    if (licenseOk) {
-      setValidateMsg({ kind: 'success', text: 'License valid — engine starting.' })
+    // MT5 first — the license can't validate without the terminal (it needs the account).
+    if (conns.mt5.state === 'error') {
+      setValidateMsg({ kind: 'error', text: `MT5 terminal not connected: ${conns.mt5.detail}` })
+      return
+    }
+    if (conns.mt5.state === 'live' && conns.license.state === 'live') {
+      setValidateMsg({ kind: 'success', text: 'MT5 connected and license valid — engine running.' })
+      return
+    }
+    // A confirmed license rejection (wrong key/account/expired) — report right away.
+    if (conns.license.state === 'error') {
+      setValidateMsg({
+        kind: 'error',
+        text: status?.license_message || 'License rejected — check the key and MT5 account.',
+      })
       return
     }
     const t = setTimeout(() => {
       setValidateMsg({
         kind: 'error',
-        text: status?.license_message || 'License not validated. Check the key and try again.',
+        text:
+          status?.license_message ||
+          'Could not validate. Check the license key and MT5 terminal path, then retry.',
       })
     }, 30000)
     return () => clearTimeout(t)
-  }, [licenseOk, validateMsg, status?.license_message])
+  }, [conns.mt5.state, conns.mt5.detail, conns.license.state, validateMsg, status?.license_message])
 
   useEffect(() => {
     if (!validateMsg || validateMsg.kind === 'info') return
@@ -1116,22 +1129,33 @@ export function SettingsPage({ config, status, onConfigSaved }: Props) {
           <h3>Engine &amp; connection</h3>
         </div>
         <div style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className={`conn ${mt5Ok ? 'live' : 'off'}`} title={mt5Error ?? ''}>
-            <span className="d" /> MT5 {mt5Ok ? 'connected' : 'disconnected'}
-            {!mt5Ok && mt5Error && (
+          <div className={`conn ${CONN_CLASS[conns.mt5.state]}`} title={conns.mt5.detail ?? ''}>
+            <span className="d" /> MT5 {connWord(conns.mt5.state, 'connected', 'error')}
+            {conns.mt5.state === 'error' && conns.mt5.detail && (
               <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>
-                · {mt5Error}
+                · {conns.mt5.detail}
               </span>
             )}
           </div>
-          <div className={`conn ${supaOk ? 'live' : 'off'}`}>
-            <span className="d" /> Database {supaOk ? 'connected' : 'disconnected'}
-          </div>
-          <div className={`conn ${licenseOk ? 'live' : 'off'}`}>
-            <span className="d" /> License {licenseOk ? 'valid' : 'invalid'}
-            {!licenseOk && status?.license_message && (
+          <div
+            className={`conn ${CONN_CLASS[conns.database.state]}`}
+            title={conns.database.detail ?? ''}
+          >
+            <span className="d" /> Database {connWord(conns.database.state, 'connected', 'error')}
+            {conns.database.state === 'error' && conns.database.detail && (
               <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>
-                · {status.license_message}
+                · {conns.database.detail}
+              </span>
+            )}
+          </div>
+          <div
+            className={`conn ${CONN_CLASS[conns.license.state]}`}
+            title={conns.license.detail ?? ''}
+          >
+            <span className="d" /> License {connWord(conns.license.state, 'valid', 'invalid')}
+            {conns.license.state === 'error' && conns.license.detail && (
+              <span className="faint" style={{ marginLeft: 6, fontSize: 11 }}>
+                · {conns.license.detail}
               </span>
             )}
           </div>

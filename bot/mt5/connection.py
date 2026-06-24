@@ -46,5 +46,11 @@ class MT5Connection:
             return False
         if mt5.terminal_info() is not None:
             return True
-        logger.warning("MT5 connection lost, reconnecting")
-        return self.initialize()
+        logger.warning(
+            "MT5 connection lost — terminal closed, crashed, or unreachable; reconnecting"
+        )
+        self._initialized = False
+        if self.initialize():
+            logger.info("MT5 reconnected")
+            return True
+        return False

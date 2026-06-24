@@ -206,7 +206,13 @@ class Engine:
                 tasks.append(api_task)
             self._tasks = tasks
 
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # return_exceptions keeps one task's crash from masking the others, but it
+            # also swallows the exception — surface it so a loop that dies (not just a
+            # shutdown CancelledError) is visible in the log instead of going silent.
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for task, result in zip(tasks, results, strict=True):
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                    logger.critical("Task %s exited unexpectedly", task.get_name(), exc_info=result)
         finally:
             self._running = False
             try:

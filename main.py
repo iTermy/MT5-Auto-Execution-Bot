@@ -2,6 +2,7 @@ import asyncio
 import atexit
 import ctypes
 import logging
+import platform
 import shutil
 import sys
 import tempfile
@@ -15,6 +16,7 @@ import pystray
 from PIL import Image
 
 from bot.api.app import create_app
+from bot.config.constants import BOT_VERSION
 from bot.config.settings import (
     load_config,
     load_dsn,
@@ -86,7 +88,12 @@ def _wait_for_api(timeout: float = 30.0) -> bool:
 
 
 def _run_engine(engine: Engine) -> None:
-    asyncio.run(engine.run_forever())
+    try:
+        asyncio.run(engine.run_forever())
+    except Exception:
+        # The tray (main thread) stays alive, so without this the engine would die
+        # silently and the bot would just look idle. Make the crash diagnosable.
+        logger.critical("Engine thread crashed", exc_info=True)
 
 
 def _ensure_config_exists() -> None:
@@ -103,6 +110,13 @@ def _ensure_config_exists() -> None:
 
 def main() -> None:
     setup_logging()
+    logger.info(
+        "MT5Bot %s starting | Python %s | %s | cwd=%s",
+        BOT_VERSION,
+        platform.python_version(),
+        platform.platform(),
+        Path.cwd(),
+    )
 
     if _acquire_single_instance_lock() is None:
         ctypes.windll.user32.MessageBoxW(

@@ -44,7 +44,8 @@ class MT5Connection:
     def ensure_connected(self) -> bool:
         if not self._initialized:
             return False
-        if mt5.terminal_info() is not None:
+        info = mt5.terminal_info()
+        if info is not None and info.connected:
             return True
         logger.warning(
             "MT5 connection lost — terminal closed, crashed, or unreachable; reconnecting"

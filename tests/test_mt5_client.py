@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 import MetaTrader5 as mt5
@@ -15,7 +16,10 @@ _IOC = 2
 
 def _client_with_filling(mode: int) -> MT5Client:
     client = MT5Client(MagicMock())
-    client._symbol_info_cache["X"] = make_symbol_info(name="X", filling_mode=mode)
+    client._symbol_info_cache["X"] = (
+        time.monotonic(),
+        make_symbol_info(name="X", filling_mode=mode),
+    )
     return client
 
 

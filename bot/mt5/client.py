@@ -31,6 +31,12 @@ _TRANSIENT_RETCODES = frozenset(
 _BULK_CACHE_TTL = 0.5  # seconds — collapses duplicate calls within a single cycle
 _TICK_FAIL_COOLDOWN = 60.0  # seconds — silence repeat errors for a missing symbol
 _SYMBOLS_CACHE_TTL = 300.0  # seconds — broker symbol list is near-static
+# trade_tick_value is live for cross pairs (EURGBP, EURCAD, …): it's the quote/profit
+# currency tick value converted to the account currency at the current rate, so it
+# drifts as that rate moves. Risk sizing depends entirely on it, so the cache must
+# expire — a permanent cache freezes a stale (or bad first-read) conversion rate and
+# mis-sizes lots. Static fields (digits, volumes, contract size) tolerate the refetch.
+_SYMBOL_INFO_TTL = 30.0  # seconds
 
 # symbol_info.filling_mode bitmask values (the MetaTrader5 package exposes the
 # ORDER_FILLING_* enum but not these SYMBOL_FILLING_* bits).
@@ -41,7 +47,7 @@ _SYMBOL_FILLING_IOC = 2
 class MT5Client:
     def __init__(self, connection: MT5Connection) -> None:
         self._conn = connection
-        self._symbol_info_cache: dict[str, SymbolInfo] = {}
+        self._symbol_info_cache: dict[str, tuple[float, SymbolInfo]] = {}
         self._positions_cache: tuple[float, list[PositionInfo]] | None = None
         self._orders_cache: tuple[float, list[OrderInfo]] | None = None
         self._account_cache: tuple[float, AccountInfo | None] | None = None
@@ -169,13 +175,14 @@ class MT5Client:
         return result
 
     def symbol_info(self, symbol: str) -> SymbolInfo | None:
+        now = time.monotonic()
         cached = self._symbol_info_cache.get(symbol)
-        if cached is not None:
-            return cached
+        if cached is not None and (now - cached[0]) < _SYMBOL_INFO_TTL:
+            return cached[1]
         raw = mt5.symbol_info(symbol)
         if raw is None:
             logger.error("symbol_info(%s) failed: %s", symbol, mt5.last_error())
-            return None
+            return cached[1] if cached is not None else None
         info = SymbolInfo(
             name=raw.name,
             digits=raw.digits,
@@ -188,7 +195,7 @@ class MT5Client:
             trade_contract_size=raw.trade_contract_size,
             filling_mode=raw.filling_mode,
         )
-        self._symbol_info_cache[symbol] = info
+        self._symbol_info_cache[symbol] = (now, info)
         return info
 
     def symbol_info_tick(self, symbol: str) -> TickInfo | None:

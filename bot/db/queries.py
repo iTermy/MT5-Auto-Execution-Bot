@@ -184,6 +184,18 @@ GET_FILLED_LIMIT_IDS = """
 SELECT DISTINCT limit_id FROM order_mappings WHERE status IN ('filled', 'closed')
 """
 
+# (signal_id, db price_level) pairs we have already filled or closed. The limit_id
+# guard above misses an edit that regenerated the limit_id (the TM rebuilds limit
+# rows with fresh IDENTITY ids on every message edit), so the same price level can
+# reappear under a new limit_id and get re-entered. This pairs the durable fill with
+# its price so a re-issued level is never placed a second time. feed_price_at_placement
+# holds the DB price_level captured at placement (NULL only for legacy/test rows).
+GET_FILLED_SIGNAL_PRICES = """
+SELECT DISTINCT signal_id, feed_price_at_placement
+FROM order_mappings
+WHERE status IN ('filled', 'closed') AND feed_price_at_placement IS NOT NULL
+"""
+
 # Signals where at least one limit has ever filled (currently open or already closed).
 # Used by the offset-drift gate to avoid cancelling pending siblings of a signal
 # whose other limits already hit.

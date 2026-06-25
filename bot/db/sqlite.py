@@ -12,6 +12,7 @@ from bot.db.queries import (
     GET_FILLED_LIMIT_IDS,
     GET_FILLED_POSITIONS,
     GET_FILLED_SIGNAL_IDS,
+    GET_FILLED_SIGNAL_PRICES,
     GET_ORDER_BY_TICKET,
     GET_ORDER_HISTORY,
     GET_PENDING_BY_SIGNAL,
@@ -314,6 +315,16 @@ class SQLiteDB:
         async with self._db.execute(GET_FILLED_LIMIT_IDS) as cursor:
             rows = await cursor.fetchall()
         return {row["limit_id"] for row in rows}
+
+    async def get_filled_signal_prices(self) -> dict[int, list[float]]:
+        """signal_id -> list of DB price levels we have already filled/closed. Lets the
+        placement guard reject a re-issued level whose limit_id changed on a TM edit."""
+        async with self._db.execute(GET_FILLED_SIGNAL_PRICES) as cursor:
+            rows = await cursor.fetchall()
+        out: dict[int, list[float]] = {}
+        for row in rows:
+            out.setdefault(row["signal_id"], []).append(row["feed_price_at_placement"])
+        return out
 
     async def get_signals_with_fills(self) -> set[int]:
         async with self._db.execute(GET_SIGNALS_WITH_FILLS) as cursor:

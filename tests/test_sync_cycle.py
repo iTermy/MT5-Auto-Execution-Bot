@@ -130,6 +130,39 @@ async def test_filled_then_closed_limit_not_replaced(sqlite_db, mock_mt5, sample
     assert 1 in cycle._logged_already_filled
 
 
+async def test_edited_limit_same_price_new_id_not_replaced(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # A TM message edit rebuilds the signal's limit rows with fresh IDENTITY ids. A level
+    # we already filled+closed (limit_id=1, price 1.09100) reappears under a new limit_id=2
+    # at the same price. The limit_id guard misses it, but the (signal_id, price) guard must
+    # still block re-entry.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=9201,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        feed_price=1.09100,
+    )
+    await sqlite_db.mark_filled(9201, "2026-01-01T00:01:00+00:00")
+    await sqlite_db.mark_closed(9201, 12.50)
+
+    # New limit_id, same signal + same price_level (1.09100 per _make_supabase_row).
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=2)])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert 2 in cycle._logged_already_filled
+
+
 async def test_cancelled_limit_still_replaceable(sqlite_db, mock_mt5, sample_config) -> None:
     # A never-filled limit that was cancelled (e.g. spread hour / offset drift) must
     # still re-place — the guard only blocks limits that actually filled.

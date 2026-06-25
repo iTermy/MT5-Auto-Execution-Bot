@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -345,6 +346,37 @@ class SyncCycle:
                             lid,
                             row["signal_id"],
                             row["instrument"],
+                        )
+
+                # Same guard, by (signal_id, price_level): a TM message edit rebuilds the
+                # signal's limit rows with fresh IDENTITY ids, so a level we already filled
+                # reappears under a new limit_id and slips past the limit_id check above.
+                # Never re-enter a (signal_id, price) we've already filled/closed.
+                filled_prices = await sqlite.get_filled_signal_prices()
+                if filled_prices:
+                    refilled = {
+                        lid
+                        for lid in new_limit_ids
+                        if any(
+                            math.isclose(
+                                float(supabase_by_limit[lid]["price_level"]), p, rel_tol=1e-9
+                            )
+                            for p in filled_prices.get(supabase_by_limit[lid]["signal_id"], ())
+                        )
+                    }
+                    new_limit_ids -= refilled
+                    for lid in refilled:
+                        if lid in self._logged_already_filled:
+                            continue
+                        self._logged_already_filled.add(lid)
+                        row = supabase_by_limit[lid]
+                        logger.warning(
+                            "Skipping re-placement of limit_id=%d signal_id=%d (%s) — a limit at "
+                            "price %.5f already filled on our end (TM regenerated limit_id on edit)",
+                            lid,
+                            row["signal_id"],
+                            row["instrument"],
+                            float(row["price_level"]),
                         )
 
                 # Drop blocked symbols (spread hour / weekend / news mode) from the
@@ -1302,7 +1334,9 @@ class SyncCycle:
                 )
             else:
                 retcode = res.retcode if res else "None"
-                logger.error("Profit-weekend exit close failed ticket=%d retcode=%s", ticket, retcode)
+                logger.error(
+                    "Profit-weekend exit close failed ticket=%d retcode=%s", ticket, retcode
+                )
                 new_count = self._profit_weekend_fail_count.get(ticket, 0) + 1
                 self._profit_weekend_fail_count[ticket] = new_count
                 if new_count == _FORCE_EXIT_MAX_ATTEMPTS:

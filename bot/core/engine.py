@@ -94,6 +94,9 @@ class Engine:
         self._update_in_progress: bool = False
         self._update_progress: int = 0
         self._update_error: str | None = None
+        # Set once a terminal shutdown begins, surfaced via the status broadcast so the
+        # UI can show a closing screen before the process exits and the SSE drops.
+        self._shutting_down: bool = False
         # Last Supabase pool-creation failure, surfaced as the Database status. None
         # once the pool is open or before a connection attempt (idle).
         self._supabase_error: str | None = None
@@ -114,9 +117,24 @@ class Engine:
 
     def shutdown(self) -> None:
         """Signal the engine to stop all tasks and exit. Safe to call from any thread."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
         self._trading_active = False
         if self._loop is not None and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._cancel_tasks)
+            self._loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._do_shutdown()))
+        elif self._shutdown_callback is not None:
+            self._shutdown_callback()
+
+    async def _do_shutdown(self) -> None:
+        """Emit a final 'shutting down' status so the UI can show a closing screen, give
+        the SSE a moment to flush it to the browser, then cancel tasks and exit."""
+        try:
+            self.status_queue.put_nowait(self._status_snapshot())
+        except asyncio.QueueFull:
+            pass
+        await asyncio.sleep(0.4)
+        self._cancel_tasks()
         if self._shutdown_callback is not None:
             self._shutdown_callback()
 
@@ -675,6 +693,7 @@ class Engine:
             "trailing_count": trailing_count,
             "bot_version": BOT_VERSION,
             "shutdown_reason": self.shutdown_reason,
+            "shutting_down": self._shutting_down,
             "update_available": info.available if info else False,
             "update_version": info.version if info else None,
             "update_notes": info.notes if info else "",

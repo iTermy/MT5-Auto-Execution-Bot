@@ -6,6 +6,7 @@ import { useHistory } from './hooks/useHistory'
 import { NavSidebar } from './components/NavSidebar'
 import { TopBar } from './components/TopBar'
 import { UpdateModal } from './components/UpdateModal'
+import { ShutdownOverlay } from './components/ShutdownOverlay'
 import { LogDrawer } from './components/LogDrawer'
 import { DashboardPage } from './pages/DashboardPage'
 import { HistoryPage } from './pages/HistoryPage'
@@ -17,6 +18,7 @@ export default function App() {
   const [logOpen, setLogOpen] = useState(false)
   const [config, setConfig] = useState<Config | null>(null)
   const [updateModalOpen, setUpdateModalOpen] = useState(false)
+  const [shuttingDown, setShuttingDown] = useState(false)
   const { logs, status, connected } = useSSE()
   const dashboard = useDashboard()
   const history = useHistory(5000)
@@ -39,6 +41,7 @@ export default function App() {
   }
 
   async function handleShutdown() {
+    setShuttingDown(true)
     try {
       await shutdownEngine()
     } catch {
@@ -54,8 +57,14 @@ export default function App() {
     }
   }
 
+  const updateInProgress = status?.update_in_progress ?? false
   // Keep the modal up while an install is mid-flight even if the user didn't open it.
-  const showUpdateModal = updateModalOpen || (status?.update_in_progress ?? false)
+  const showUpdateModal = updateModalOpen || updateInProgress
+  // A terminal shutdown (UI button or system-tray Exit) — but not an update restart,
+  // which the update modal already narrates.
+  const showShutdown = (shuttingDown || (status?.shutting_down ?? false)) && !updateInProgress
+
+  if (showShutdown) return <ShutdownOverlay connected={connected} />
 
   return (
     <div className="app">

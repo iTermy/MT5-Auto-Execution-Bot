@@ -13,6 +13,7 @@ export interface StatusData {
   trailing_count: number
   bot_version?: string
   shutdown_reason?: string | null
+  shutting_down?: boolean
   update_available?: boolean
   update_version?: string | null
   update_notes?: string

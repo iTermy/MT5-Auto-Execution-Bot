@@ -220,6 +220,24 @@ class SyncCycle:
                 )
                 hit_limit_ids = set()
 
+            # Still-pending limits on a 'profit'-marked signal we still hold a filled
+            # position for. The TM marking 'profit' drops the signal out of the active
+            # set, but we keep its remaining entries live until our own TP engine closes
+            # the trade — once we're flat the signal leaves filled_sids and the limits
+            # fall back to normal stale-cancellation.
+            filled_sids = {r["signal_id"] for r in sqlite_active if r["status"] == "filled"}
+            try:
+                profit_limit_signal = await supabase.fetch_profit_limit_ids()
+            except Exception:
+                logger.error(
+                    "Profit-limit fetch failed — stale-pending will not spare profit limits",
+                    exc_info=True,
+                )
+                profit_limit_signal = {}
+            profit_held_limit_ids = {
+                lid for lid, sid in profit_limit_signal.items() if sid in filled_sids
+            }
+
             # Per-symbol spread-hour / news-mode gate. Crypto and 24h stocks are exempt
             # (24/7 markets). Stocks use an earlier cutoff because they close at 16:00 EST
             # — the cancel must land before then or MT5 rejects it once the session is
@@ -287,9 +305,16 @@ class SyncCycle:
                 # marked 'hit' on a still-live signal is spared: hold the order so a
                 # sub-pip price mismatch still fills. Genuine cancels/closes drop the
                 # signal out of hit_limit_ids, so those orders are still cancelled.
+                # Pending limits on a 'profit'-marked signal we still hold a position
+                # for are likewise spared, so the remaining entries keep filling until
+                # our own TP engine closes the trade (profit_held_limit_ids).
                 for row in sqlite_pending:
                     lid = row["limit_id"]
-                    if lid in supabase_limit_ids or lid in hit_limit_ids:
+                    if (
+                        lid in supabase_limit_ids
+                        or lid in hit_limit_ids
+                        or lid in profit_held_limit_ids
+                    ):
                         continue
                     ok = await self._canceller.cancel_order(
                         row["mt5_ticket"], mt5_client, sqlite, spread=False

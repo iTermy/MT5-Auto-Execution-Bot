@@ -9,6 +9,7 @@ from bot.db.queries import (
     FETCH_HIT_LIMIT_IDS,
     FETCH_LIVE_PRICES,
     FETCH_NEWS_MODE,
+    FETCH_PROFIT_LIMIT_IDS,
     FETCH_SIGNAL_STATUS,
     FETCH_SIGNAL_STATUSES,
     UPSERT_USER_SNAPSHOT,
@@ -78,6 +79,11 @@ class SupabaseDB:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(FETCH_HIT_LIMIT_IDS)
         return {row["limit_id"] for row in rows}
+
+    async def fetch_profit_limit_ids(self) -> dict[int, int]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(FETCH_PROFIT_LIMIT_IDS)
+        return {row["limit_id"]: row["signal_id"] for row in rows}
 
     async def fetch_live_prices(self, symbols: list[str]) -> dict[str, asyncpg.Record]:
         async with self._pool.acquire() as conn:

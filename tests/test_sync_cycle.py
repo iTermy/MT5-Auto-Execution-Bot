@@ -28,10 +28,17 @@ def _make_supabase_row(
     }
 
 
-def _mock_supabase(signals=None, live_prices=None, news_mode=None, hit_limit_ids=None):
+def _mock_supabase(
+    signals=None,
+    live_prices=None,
+    news_mode=None,
+    hit_limit_ids=None,
+    profit_limit_ids=None,
+):
     sb = AsyncMock()
     sb.fetch_active_signals.return_value = signals or []
     sb.fetch_hit_limit_ids.return_value = set(hit_limit_ids or [])
+    sb.fetch_profit_limit_ids.return_value = dict(profit_limit_ids or {})
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
     sb.fetch_news_mode.return_value = news_mode
@@ -431,6 +438,75 @@ async def test_stale_pending_cancelled_when_signal_gone(sqlite_db, mock_mt5, sam
     )
     mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=3001)
     supabase = _mock_supabase(signals=[], hit_limit_ids=set())
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(3001)
+    rows = await sqlite_db.get_pending_orders()
+    assert len(rows) == 0
+
+
+async def test_stale_pending_kept_when_signal_profit_marked_and_position_held(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # The TM marked the signal 'profit', so its still-pending limit drops out of
+    # the active Supabase query. We still hold a filled position for the signal,
+    # so the remaining pending limit is held until our own TP engine closes out.
+    await sqlite_db.insert_order(
+        limit_id=10,
+        signal_id=1,
+        mt5_ticket=3001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+    )
+    # A second limit on the same signal that already filled (open position).
+    await sqlite_db.insert_order(
+        limit_id=11,
+        signal_id=1,
+        mt5_ticket=3002,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_filled(3002, "2026-01-01T00:01:00+00:00")
+
+    supabase = _mock_supabase(signals=[], profit_limit_ids={10: 1})
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    rows = await sqlite_db.get_pending_orders()
+    assert len(rows) == 1
+
+
+async def test_stale_pending_cancelled_when_profit_signal_has_no_position(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Signal is 'profit'-marked but we hold no filled position for it — our own TP
+    # engine is not running on it, so the leftover pending limit is stale-cancelled.
+    await sqlite_db.insert_order(
+        limit_id=10,
+        signal_id=1,
+        mt5_ticket=3001,
+        order_type="buy_limit",
+        lot_size=0.01,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4000.0,
+        signal_type="standard",
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=3001)
+    supabase = _mock_supabase(signals=[], profit_limit_ids={10: 1})
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()

@@ -256,13 +256,16 @@ def _build_nearby_signals(
             }
         )
 
-    result.sort(key=lambda x: x["distance_magnitude"])
+    # Sort by the proximity bar fill (closeness relative to each instrument's own
+    # threshold), so the fullest bars — the signals nearest to triggering — come first.
+    # distance_magnitude breaks ties between equal (rounded) fills.
+    result.sort(key=lambda x: (-x["proximity_pct"], x["distance_magnitude"]))
     return result
 
 
 def _distance_magnitude(distance: float, asset_class: AssetClass) -> float:
-    """The displayed proximity number (pips for forex, dollars otherwise), so the
-    Closest Signals list sorts pips and dollars on one scale instead of by raw price."""
+    """The displayed proximity number (pips for forex, dollars otherwise). Used for the
+    distance label and as a tie-break when two signals share the same bar fill."""
     abs_d = abs(distance)
     if asset_class == AssetClass.FOREX:
         return abs_d * 10000

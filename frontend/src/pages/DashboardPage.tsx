@@ -73,8 +73,8 @@ export function DashboardPage({ dashboard, history, config, onNavigate }: Props)
 
   const pos = useSort(posRows, 'pnl')
 
-  // Closest Signals: every active Supabase signal (placed or watching), sorted
-  // by absolute distance from the current price.
+  // Closest Signals: every active Supabase signal (placed or watching), sorted by
+  // proximity bar fill — closeness relative to each instrument's own threshold.
   const signalGroups = useMemo(() => {
     return nearbySignals.map(s => ({
       signal_id: s.signal_id,

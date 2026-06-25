@@ -32,16 +32,17 @@ WHERE s.status IN ('active', 'hit')
   AND l.status = 'hit'
 """
 
-# Still-pending limits on a signal the TM marked 'profit'. The signal has left
-# the active/hit set so these limits would otherwise be stale-cancelled, but we
-# keep them live (gated on us still holding a filled position for the signal) so
-# the remaining entries can still fill until our own TP engine closes the trade.
+# Every limit of a signal the TM marked 'profit'. Marking 'profit' is a final
+# status on the TM side, which flips the signal's still-pending limits to
+# 'cancelled' (not 'pending'), so we can't filter on the limit status here. We
+# map each limit to its signal and let the caller spare the ones we still hold
+# as local pending orders while a filled position remains — keeping the
+# remaining entries live until our own TP engine closes the trade.
 FETCH_PROFIT_LIMIT_IDS = """
 SELECT l.id AS limit_id, l.signal_id
 FROM signals s
 JOIN limits l ON l.signal_id = s.id
 WHERE s.status = 'profit'
-  AND l.status = 'pending'
 """
 
 FETCH_LIVE_PRICES = """

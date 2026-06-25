@@ -79,7 +79,7 @@ export function HistoryPage() {
   const [data, setData] = useState<HistoryData | null>(null)
   const [instrumentFilter, setInstrumentFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('closed')
   const [sortBy, setSortBy] = useState<SortKey>('newest')
 
   useEffect(() => {
@@ -301,6 +301,7 @@ export function HistoryPage() {
           <table className="tbl">
             <thead>
               <tr>
+                <th className="num">ID</th>
                 <th>Closed</th>
                 <th>Symbol</th>
                 <th>Side</th>
@@ -314,6 +315,7 @@ export function HistoryPage() {
             <tbody>
               {filteredGroups.map(g => (
                 <tr key={g.signalId}>
+                  <td className="num mono dim">{g.signalId}</td>
                   <td className="t-sub mono">{formatTime(g.closedAt)}</td>
                   <td>
                     <span className="sym">{g.symbol || '—'}</span>

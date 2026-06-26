@@ -203,7 +203,13 @@ async def approximate_lot_sizes(request: Request) -> dict:
         "balance": acct["balance"],
         "currency": acct.get("currency"),
         "exceptions": [
-            {"symbol": r.symbol, "signal_type": r.signal_type, "mode": r.mode, "value": r.value}
+            {
+                "symbol": r.symbol,
+                "channel": "",
+                "signal_type": r.signal_type,
+                "mode": r.mode,
+                "value": r.value,
+            }
             for r in recs
         ],
     }

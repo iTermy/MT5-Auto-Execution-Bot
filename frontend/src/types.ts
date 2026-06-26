@@ -30,6 +30,7 @@ export interface LogEntry {
 
 export interface LotExceptionConfig {
   symbol: string
+  channel?: string
   signal_type: string
   mode: 'risk_percent' | 'fixed'
   value: number

@@ -59,7 +59,8 @@ class SymbolSuffixRule(BaseModel):
 
 
 class LotExceptionConfig(BaseModel):
-    symbol: str
+    symbol: str = ""  # "" or "all" applies to every symbol
+    channel: str = ""  # "" or "all" applies to every channel (stores channel_id)
     signal_type: str = "all"  # "all" applies to every signal type
     mode: str  # "risk_percent" | "fixed"
     value: float  # percent for risk_percent, lots for fixed

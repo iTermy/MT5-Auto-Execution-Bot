@@ -206,6 +206,75 @@ def test_exception_signal_type_only_does_not_apply_to_others(mock_mt5) -> None:
     assert lot == pytest.approx(0.05, abs=1e-6)
 
 
+def test_channel_only_beats_symbol_and_type(mock_mt5) -> None:
+    # Legends (channel) -> 0.3 beats XAUUSD swing (symbol+type) -> 0.5 for a
+    # Legends gold-swing trade, per the channel > symbol > type weighting.
+    cfg = _cfg_with_exceptions(
+        LotExceptionConfig(channel="legends", mode="fixed", value=0.3),
+        LotExceptionConfig(symbol="EURUSD", signal_type="swing", mode="fixed", value=0.5),
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(
+        stop_loss=1.09000,
+        limit_prices=[1.09100],
+        mt5_symbol="EURUSD",
+        signal_type="swing",
+        channel_id="legends",
+    )
+
+    assert lot == pytest.approx(0.3, abs=1e-6)
+
+
+def test_channel_symbol_type_beats_channel_only(mock_mt5) -> None:
+    cfg = _cfg_with_exceptions(
+        LotExceptionConfig(channel="legends", mode="fixed", value=0.3),
+        LotExceptionConfig(
+            channel="legends", symbol="EURUSD", signal_type="swing", mode="fixed", value=0.5
+        ),
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(
+        stop_loss=1.09000,
+        limit_prices=[1.09100],
+        mt5_symbol="EURUSD",
+        signal_type="swing",
+        channel_id="legends",
+    )
+
+    assert lot == pytest.approx(0.5, abs=1e-6)
+
+
+def test_blank_symbol_is_wildcard(mock_mt5) -> None:
+    cfg = _cfg_with_exceptions(LotExceptionConfig(symbol="", mode="fixed", value=0.4))
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD")
+
+    assert lot == pytest.approx(0.4, abs=1e-6)
+
+
+def test_channel_rule_ignored_when_trade_has_no_channel(mock_mt5) -> None:
+    cfg = _cfg_with_exceptions(LotExceptionConfig(channel="legends", mode="fixed", value=0.3))
+    cfg = cfg.model_copy(
+        update={
+            "lot_sizing": cfg.lot_sizing.model_copy(update={"mode": "fixed", "fixed_lot": 0.05})
+        }
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(
+        stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD", channel_id=None
+    )
+
+    assert lot == pytest.approx(0.05, abs=1e-6)
+
+
 def test_legacy_dict_exceptions_coerced(mock_mt5) -> None:
     from bot.config.settings import LotSizingConfig
 

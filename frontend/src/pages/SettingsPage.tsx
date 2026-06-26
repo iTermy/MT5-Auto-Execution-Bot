@@ -105,6 +105,7 @@ interface SymbolRow {
 
 interface LotExceptionRow {
   symbol: string
+  channel: string
   signalType: string
   mode: 'risk_percent' | 'fixed'
   value: string
@@ -392,6 +393,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       for (const ex of cfg.lot_sizing.exceptions) {
         exceptions.push({
           symbol: ex.symbol,
+          channel: ex.channel ?? '',
           signalType: ex.signal_type || 'all',
           mode: ex.mode,
           value: String(ex.value),
@@ -404,6 +406,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
         if (sym === 'default' || seen.has(sym)) continue
         exceptions.push({
           symbol: sym,
+          channel: '',
           signalType: 'all',
           mode: 'risk_percent',
           value: String(value),
@@ -414,7 +417,13 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
     if (fl && typeof fl === 'object') {
       for (const [sym, value] of Object.entries(fl as Record<string, number>)) {
         if (sym === 'default' || seen.has(sym)) continue
-        exceptions.push({ symbol: sym, signalType: 'all', mode: 'fixed', value: String(value) })
+        exceptions.push({
+          symbol: sym,
+          channel: '',
+          signalType: 'all',
+          mode: 'fixed',
+          value: String(value),
+        })
         seen.add(sym)
       }
     }
@@ -663,7 +672,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
 
   function updateLotException(
     i: number,
-    field: 'symbol' | 'signalType' | 'mode' | 'value',
+    field: 'symbol' | 'channel' | 'signalType' | 'mode' | 'value',
     value: string
   ) {
     setLotExceptions(prev =>
@@ -679,7 +688,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   function addLotException() {
     setLotExceptions(prev => [
       ...prev,
-      { symbol: '', signalType: 'all', mode: 'risk_percent', value: '1.0' },
+      { symbol: '', channel: '', signalType: 'all', mode: 'risk_percent', value: '1.0' },
     ])
     touch()
   }
@@ -691,9 +700,10 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
 
   function buildLotExceptions(): LotExceptionConfig[] {
     return lotExceptions
-      .filter(r => r.symbol.trim())
+      .filter(r => r.value.trim() !== '')
       .map(r => ({
         symbol: r.symbol.trim(),
+        channel: r.channel,
         signal_type: r.signalType,
         mode: r.mode,
         value: parseFloat(r.value) || 0,
@@ -715,11 +725,22 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
         const next = [...prev]
         for (const ex of data.exceptions) {
           const value = String(ex.value)
+          const channel = ex.channel ?? ''
           const i = next.findIndex(
-            r => r.symbol.trim() === ex.symbol && r.signalType === ex.signal_type
+            r =>
+              r.symbol.trim() === ex.symbol &&
+              r.channel === channel &&
+              r.signalType === ex.signal_type
           )
           if (i >= 0) next[i] = { ...next[i], mode: 'fixed', value }
-          else next.push({ symbol: ex.symbol, signalType: ex.signal_type, mode: 'fixed', value })
+          else
+            next.push({
+              symbol: ex.symbol,
+              channel,
+              signalType: ex.signal_type,
+              mode: 'fixed',
+              value,
+            })
         }
         return next
       })
@@ -1474,12 +1495,15 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
 
         <div className="panel-head" style={{ marginBottom: 6 }}>
           <h3 style={{ fontSize: 14 }}>Exceptions</h3>
-          <span className="sub">override mode and value for specific MT5 symbols</span>
+          <span className="sub">
+            most specific match wins — channel beats symbol beats signal type
+          </span>
         </div>
         {lotExceptions.length > 0 && (
-          <table className="tbl" style={{ maxWidth: 720 }}>
+          <table className="tbl" style={{ maxWidth: 860 }}>
             <thead>
               <tr>
+                <th>Channel</th>
                 <th>Symbol</th>
                 <th>Signal type</th>
                 <th>Mode</th>
@@ -1491,12 +1515,27 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
               {lotExceptions.map((r, i) => (
                 <tr key={i}>
                   <td>
+                    <select
+                      className="inp"
+                      value={r.channel}
+                      onChange={e => updateLotException(i, 'channel', e.target.value)}
+                      style={{ width: 140 }}
+                    >
+                      <option value="">All channels</option>
+                      {CHANNELS.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
                     <input
                       className="inp mono"
                       list="broker-symbols"
                       value={r.symbol}
                       onChange={e => updateLotException(i, 'symbol', e.target.value)}
-                      placeholder="BTCUSD, XAUUSD, …"
+                      placeholder="All symbols"
                       style={{ width: 160 }}
                     />
                   </td>

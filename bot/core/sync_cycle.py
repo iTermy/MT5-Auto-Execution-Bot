@@ -649,6 +649,7 @@ class SyncCycle:
                             all_prices,
                             mt5_sym,
                             row0["signal_type"] or "standard",
+                            channel_id=row0["channel_id"],
                         )
 
                     # --- Placement phase: approved signals only ---

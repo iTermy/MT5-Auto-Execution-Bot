@@ -52,18 +52,29 @@ class LotCalculator:
             return rp.get(mt5_symbol) or rp.get("default") or 1.0
         return float(rp)
 
-    def _resolve_exception(self, mt5_symbol: str, signal_type: str) -> LotExceptionConfig | None:
-        # A signal-type-specific exception beats an "all" one for the same symbol.
-        exact: LotExceptionConfig | None = None
-        fallback: LotExceptionConfig | None = None
+    def _resolve_exception(
+        self, mt5_symbol: str, signal_type: str, channel_id: int | None
+    ) -> LotExceptionConfig | None:
+        # Most-specific match wins, weighting channel > symbol > signal_type. A rule
+        # is a candidate only if every dimension it specifies matches the trade; ties
+        # (true duplicates) resolve to the last-defined entry.
+        chan = None if channel_id is None else str(channel_id)
+        best: LotExceptionConfig | None = None
+        best_score = -1
         for ex in self._config.lot_sizing.exceptions:
-            if ex.symbol != mt5_symbol:
+            sym_w = not ex.symbol or ex.symbol.lower() == "all"
+            chan_w = not ex.channel or ex.channel.lower() == "all"
+            type_w = ex.signal_type == "all"
+            if not sym_w and ex.symbol != mt5_symbol:
                 continue
-            if ex.signal_type == signal_type:
-                exact = ex
-            elif ex.signal_type == "all":
-                fallback = ex
-        return exact or fallback
+            if not chan_w and ex.channel != chan:
+                continue
+            if not type_w and ex.signal_type != signal_type:
+                continue
+            score = (0 if chan_w else 4) + (0 if sym_w else 2) + (0 if type_w else 1)
+            if score >= best_score:
+                best, best_score = ex, score
+        return best
 
     def calculate(
         self,
@@ -71,14 +82,15 @@ class LotCalculator:
         limit_prices: list[float],
         mt5_symbol: str,
         signal_type: str = "all",
+        channel_id: int | None = None,
     ) -> float:
         info = self._client.symbol_info(mt5_symbol)
         if info is None:
             logger.error("symbol_info unavailable for %s, using fixed_lot fallback", mt5_symbol)
             return self._get_fixed_lot(mt5_symbol)
 
-        # Per-symbol exception takes precedence over the global mode.
-        exception = self._resolve_exception(mt5_symbol, signal_type)
+        # A matching exception takes precedence over the global mode.
+        exception = self._resolve_exception(mt5_symbol, signal_type, channel_id)
         if exception is not None:
             if exception.mode == "fixed":
                 return _clamp(exception.value, info)

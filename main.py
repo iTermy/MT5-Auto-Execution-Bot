@@ -71,9 +71,11 @@ def _acquire_single_instance_lock() -> int | None:
     return fd
 
 
+_BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+
+
 def _make_tray_icon() -> Image.Image:
-    img = Image.new("RGBA", (64, 64), (18, 28, 50, 255))
-    return img
+    return Image.open(_BUNDLE_DIR / "assets" / "logo.png")
 
 
 def _wait_for_api(timeout: float = 30.0) -> bool:

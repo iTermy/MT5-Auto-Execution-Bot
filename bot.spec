@@ -7,6 +7,7 @@ a = Analysis(
     datas=[
         ('frontend/dist', 'frontend/dist'),
         ('config.example.json', '.'),
+        ('assets/logo.png', 'assets'),
     ],
     hiddenimports=[
         'asyncpg',
@@ -52,4 +53,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/logo.ico',
 )

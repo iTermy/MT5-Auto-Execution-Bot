@@ -19,12 +19,7 @@ export function NavSidebar({ page, onNavigate, logOpen, onToggleLog }: Props) {
   return (
     <aside className="rail">
       <div className="brand">
-        <Icon
-          name="spark"
-          size={22}
-          strokeWidth={0}
-          style={{ fill: '#1a1410', stroke: '#1a1410', strokeWidth: 0.5 }}
-        />
+        <img className="brand-logo" src="/logo.png" alt="Trade Master" />
       </div>
       {item('dashboard', 'dashboard')}
       {item('history', 'history')}

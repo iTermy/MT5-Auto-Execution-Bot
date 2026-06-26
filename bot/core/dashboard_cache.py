@@ -69,6 +69,7 @@ class DashboardCache:
         pending_limit_ids: set[int] | None = None,
         config: Settings | None = None,
         broker_symbols: frozenset[str] | None = None,
+        signal_actions: dict[int, str] | None = None,
     ) -> None:
         now_iso = datetime.now(UTC).isoformat()
 
@@ -166,6 +167,7 @@ class DashboardCache:
             tick_cache,
             config,
             mt5_client,
+            signal_actions or {},
         )
 
         total_profit = sum(p["profit"] for p in positions)
@@ -193,6 +195,7 @@ def _build_nearby_signals(
     tick_cache: dict,
     config: Settings | None,
     mt5_client,
+    signal_actions: dict[int, str],
 ) -> list[dict]:
     if not supabase_rows or config is None:
         return []
@@ -253,6 +256,7 @@ def _build_nearby_signals(
                 "distance": round(distance, 5),
                 "distance_magnitude": distance_magnitude,
                 "placed": placed,
+                "action": signal_actions.get(sig_id),
             }
         )
 

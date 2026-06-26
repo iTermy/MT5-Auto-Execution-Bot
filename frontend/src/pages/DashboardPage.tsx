@@ -1,7 +1,10 @@
 import { useState, useMemo } from 'react'
 import { Icon } from '../components/Icon'
 import { Seg } from '../components/Seg'
+import { SignalMenu } from '../components/SignalMenu'
 import { ProxMeter } from '../components/ProxMeter'
+import { setSignalAction } from '../api'
+import type { SignalAction } from '../types'
 import { EquityCurve } from '../charts/EquityCurve'
 import { Donut } from '../charts/Donut'
 import { Bars } from '../charts/Bars'
@@ -88,10 +91,19 @@ export function DashboardPage({ dashboard, history, config, status, onNavigate }
       channelName: getChannelName(s.channel_id),
       signalType: formatSignalType(s.signal_type),
       placed: s.placed,
+      action: s.action,
     }))
   }, [nearbySignals])
 
   const visibleGroups = showAll ? signalGroups : signalGroups.slice(0, 3)
+
+  async function handleSignalAction(signalId: number, action: SignalAction) {
+    try {
+      await setSignalAction(signalId, action)
+    } catch {
+      /* dashboard poll will re-sync the badge */
+    }
+  }
 
   // Recent Trades: backend already returns one row per signal_id
   const recentTradeGroups = useMemo(() => {
@@ -296,11 +308,31 @@ export function DashboardPage({ dashboard, history, config, status, onNavigate }
                   <span className="sym">{g.sym}</span>
                   <span className={'tag ' + g.side}>{g.side}</span>
                   <span
-                    className={'tag ' + (g.placed ? 'long' : 'ghost')}
+                    className={
+                      'tag ' +
+                      (g.action === 'skip'
+                        ? 'skipped'
+                        : g.action === 'manual'
+                          ? 'manual'
+                          : g.placed
+                            ? 'long'
+                            : 'ghost')
+                    }
                     style={{ marginLeft: 'auto' }}
                   >
-                    {g.placed ? 'placed' : 'watching'}
+                    {g.action === 'skip'
+                      ? 'skipped'
+                      : g.action === 'manual'
+                        ? 'manual'
+                        : g.placed
+                          ? 'placed'
+                          : 'watching'}
                   </span>
+                  <SignalMenu
+                    action={g.action}
+                    placed={g.placed}
+                    onAction={a => handleSignalAction(g.signal_id, a)}
+                  />
                 </div>
                 <ProxMeter pct={g.pct} label={g.dist} />
                 <div className="fill-kv">

@@ -560,6 +560,7 @@ class Engine:
             positions = self._mt5.positions_get()
             orders = self._mt5.orders_get()
             active = await self._sqlite.get_all_active()
+            signal_actions = await self._sqlite.get_signal_actions()
             # symbols_get() is cached in the client; refresh the API-facing copy cheaply.
             catalogue = self._mt5.symbols_get()
             self.broker_symbols = sorted(catalogue)
@@ -586,6 +587,7 @@ class Engine:
                 pending_limit_ids=self._sync_cycle.last_sqlite_pending_limit_ids,
                 config=self._config,
                 broker_symbols=catalogue,
+                signal_actions=signal_actions,
             )
         except Exception:
             logger.error("Dashboard cache update failed", exc_info=True)

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 from bot.core.sync_cycle import SyncCycle
 from tests.conftest import (
     make_account_info,
+    make_order_info,
     make_order_result,
     make_position,
     make_symbol_info,
@@ -1033,7 +1034,7 @@ async def test_sl_strip_removes_sl_in_window(sqlite_db, mock_mt5, sample_config)
 
     cycle = SyncCycle()
     await cycle._manage_spread_hour_sls(
-        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config, set()
     )
 
     mock_mt5.modify_position_sl.assert_called_once_with(3001, "EURUSD", 0.0)
@@ -1048,7 +1049,7 @@ async def test_sl_strip_exempts_crypto(sqlite_db, mock_mt5, sample_config) -> No
 
     cycle = SyncCycle()
     await cycle._manage_spread_hour_sls(
-        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config, set()
     )
 
     mock_mt5.modify_position_sl.assert_not_called()
@@ -1065,7 +1066,7 @@ async def test_sl_strip_idempotent_when_already_stripped(
 
     cycle = SyncCycle()
     await cycle._manage_spread_hour_sls(
-        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(True), sample_config, set()
     )
 
     mock_mt5.modify_position_sl.assert_not_called()
@@ -1081,7 +1082,7 @@ async def test_sl_restore_resets_sl_after_window(sqlite_db, mock_mt5, sample_con
 
     cycle = SyncCycle()
     await cycle._manage_spread_hour_sls(
-        sqlite_db, mock_mt5, [pos], _strip_scheduler(False), sample_config
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(False), sample_config, set()
     )
 
     mock_mt5.modify_position_sl.assert_called_once_with(3003, "EURUSD", 1.08500)
@@ -1101,10 +1102,105 @@ async def test_sl_restore_closes_when_price_past_stop(sqlite_db, mock_mt5, sampl
 
     cycle = SyncCycle()
     await cycle._manage_spread_hour_sls(
-        sqlite_db, mock_mt5, [pos], _strip_scheduler(False), sample_config
+        sqlite_db, mock_mt5, [pos], _strip_scheduler(False), sample_config, set()
     )
 
     mock_mt5.close_position.assert_called_once()
     mock_mt5.modify_position_sl.assert_not_called()
     row = await sqlite_db.get_order_by_ticket(3004)
     assert row["status"] == "closed"
+
+
+# ---------------------------------------------------------------------------
+# Per-signal user overrides: skip (pull + never place) and manual (orphan)
+# ---------------------------------------------------------------------------
+
+
+async def test_skip_cancels_pending_and_closes_fills(sqlite_db, mock_mt5, sample_config) -> None:
+    # Skipped signal with one pending order and one filled position: pull both.
+    await sqlite_db.insert_order(
+        limit_id=5001,
+        signal_id=1,
+        mt5_ticket=5001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
+    await _insert_filled(sqlite_db, mt5_ticket=5002, signal_id=1, symbol="EURUSD")
+    await sqlite_db.set_signal_action(1, "skip")
+
+    mock_mt5.orders_get.return_value = [make_order_info(ticket=5001)]
+    mock_mt5.positions_get.return_value = [make_position(ticket=5002, symbol="EURUSD")]
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=5001)
+    mock_mt5.close_position.return_value = make_order_result(ticket=5002)
+
+    supabase = _mock_supabase(signals=[])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.cancel_pending_order.assert_called_once_with(5001)
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "skip"
+    assert await sqlite_db.get_pending_orders() == []
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_skip_blocks_new_placement(sqlite_db, mock_mt5, sample_config) -> None:
+    # A live signal the user skipped must never place, even with a fresh limit.
+    await sqlite_db.set_signal_action(1, "skip")
+
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1, signal_id=1)])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert await sqlite_db.get_pending_orders() == []
+
+
+async def test_manual_orphans_pending_and_skips_management(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Manually-handled signal: pending stays put, fills are not force-exited even
+    # under news that would otherwise close the position.
+    await sqlite_db.insert_order(
+        limit_id=6001,
+        signal_id=1,
+        mt5_ticket=6001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
+    await _insert_filled(sqlite_db, mt5_ticket=6002, signal_id=1, symbol="EURUSD")
+    await sqlite_db.set_signal_action(1, "manual")
+
+    mock_mt5.orders_get.return_value = [make_order_info(ticket=6001)]
+    mock_mt5.positions_get.return_value = [make_position(ticket=6002, symbol="EURUSD")]
+
+    supabase = _mock_supabase(signals=[], news_mode="USD")
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.cancel_pending_order.assert_not_called()
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_pending_orders()} == {6001}
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {6002}
+
+
+async def test_clear_signal_action_resumes_management(sqlite_db) -> None:
+    await sqlite_db.set_signal_action(1, "manual")
+    assert await sqlite_db.get_signal_actions() == {1: "manual"}
+    await sqlite_db.clear_signal_action(1)
+    assert await sqlite_db.get_signal_actions() == {}

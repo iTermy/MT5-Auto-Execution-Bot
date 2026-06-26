@@ -1,11 +1,14 @@
 import logging
+from datetime import UTC, datetime
 
 import aiosqlite
 
 from bot.db.queries import (
     CREATE_ORDER_MAPPINGS,
+    CREATE_SIGNAL_ACTIONS,
     CREATE_SIGNAL_FINALIZED,
     DELETE_CLAIMED_ORDER,
+    DELETE_SIGNAL_ACTION,
     GET_ALL_ACTIVE,
     GET_CLAIMED_BY_SIGNAL_LIMIT,
     GET_CLAIMED_ORDERS,
@@ -18,6 +21,7 @@ from bot.db.queries import (
     GET_PENDING_BY_SIGNAL,
     GET_PENDING_ORDERS,
     GET_SETTLED_UNFINALIZED_SIGNALS,
+    GET_SIGNAL_ACTIONS,
     GET_SIGNAL_FINAL_AGGREGATE,
     GET_SIGNALS_WITH_FILLS,
     GET_TRAILING_POSITIONS,
@@ -29,6 +33,7 @@ from bot.db.queries import (
     MARK_FILLED,
     MARK_SIGNAL_FINALIZED,
     PROMOTE_CLAIMED_TO_PENDING,
+    SET_SIGNAL_ACTION,
     SET_SL_STRIPPED,
     SET_TRAILING,
     SIGNAL_SUMMARY,
@@ -67,6 +72,7 @@ class SQLiteDB:
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute(CREATE_ORDER_MAPPINGS)
         await self._db.execute(CREATE_SIGNAL_FINALIZED)
+        await self._db.execute(CREATE_SIGNAL_ACTIONS)
         await self._db.commit()
         # Migrations for existing databases
         for col in (
@@ -233,6 +239,23 @@ class SQLiteDB:
         cursor = await self._db.execute(MARK_SIGNAL_FINALIZED, (signal_id, finalized_at))
         await self._db.commit()
         return cursor.rowcount > 0
+
+    async def set_signal_action(self, signal_id: int, action: str) -> None:
+        """Record a user override ('skip' or 'manual') for a signal. Reversible —
+        clear_signal_action hands the signal back to normal bot management."""
+        await self._db.execute(
+            SET_SIGNAL_ACTION, (signal_id, action, datetime.now(UTC).isoformat())
+        )
+        await self._db.commit()
+
+    async def clear_signal_action(self, signal_id: int) -> None:
+        await self._db.execute(DELETE_SIGNAL_ACTION, (signal_id,))
+        await self._db.commit()
+
+    async def get_signal_actions(self) -> dict[int, str]:
+        async with self._db.execute(GET_SIGNAL_ACTIONS) as cursor:
+            rows = await cursor.fetchall()
+        return {row["signal_id"]: row["action"] for row in rows}
 
     async def update_ticket(self, old_ticket: int, new_ticket: int) -> bool:
         """Update the ticket on a filled row. Returns True if a row was actually updated."""

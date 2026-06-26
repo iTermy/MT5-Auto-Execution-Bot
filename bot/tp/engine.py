@@ -60,6 +60,10 @@ class TPEngine:
         mt5_pos_map = {p.ticket: p for p in mt5_client.positions_get()}
         sqlite_rows = await sqlite.get_filled_positions()
 
+        # Skipped/manual signals are off-limits to the TP engine — skip and manual
+        # both mean "stop managing this signal", so never trail or close their positions.
+        unmanaged_sids = set(await sqlite.get_signal_actions())
+
         # Sample MFE/MAE for every open position regardless of crypto_only — keeps
         # excursion history complete through spread hours.
         excursions = await self._sample_excursions(sqlite_rows, mt5_pos_map, mt5_client, sqlite)
@@ -67,6 +71,8 @@ class TPEngine:
         by_signal: dict[int, list] = defaultdict(list)
         for row in sqlite_rows:
             if row["mt5_ticket"] not in mt5_pos_map:
+                continue
+            if row["signal_id"] in unmanaged_sids:
                 continue
             # SL stripped for spread-hour protection — leave it untouched (the sync
             # cycle owns stripping/restoring). Trailing would otherwise re-arm an SL.

@@ -188,6 +188,14 @@ class SyncCycle:
     ) -> SyncResult:
         result = SyncResult()
 
+        # User per-signal overrides. 'skip' signals are pulled (pending cancelled,
+        # fills closed) and never placed; 'manual' signals are orphaned — the bot
+        # stops placing, cancelling, and managing them. Both gate every loop below.
+        actions = await sqlite.get_signal_actions()
+        skipped_sids = {sid for sid, a in actions.items() if a == "skip"}
+        manual_sids = {sid for sid, a in actions.items() if a == "manual"}
+        unmanaged_sids = skipped_sids | manual_sids
+
         try:
             supabase_rows = await supabase.fetch_active_signals()
         except Exception:
@@ -201,7 +209,14 @@ class SyncCycle:
             supabase_rows = self._apply_exclusions(supabase_rows, config)
 
             sqlite_active = await sqlite.get_all_active()
-            sqlite_pending = [r for r in sqlite_active if r["status"] == "pending"]
+            # Skipped/manual signals are dropped from the working pending set so no
+            # gate, stale-cancel, SL-change, or drift loop touches them. Skipped
+            # pending is cancelled by _apply_skips; manual pending is left orphaned.
+            sqlite_pending = [
+                r
+                for r in sqlite_active
+                if r["status"] == "pending" and r["signal_id"] not in unmanaged_sids
+            ]
 
             supabase_by_limit = {r["limit_id"]: r for r in supabase_rows}
             supabase_limit_ids = set(supabase_by_limit)
@@ -350,6 +365,14 @@ class SyncCycle:
                         result.errors += not ok
 
                 new_limit_ids = supabase_limit_ids - sqlite_limit_ids
+
+                # User-skipped and manually-handled signals never place — drop their
+                # limits before any placement work.
+                new_limit_ids = {
+                    lid
+                    for lid in new_limit_ids
+                    if supabase_by_limit[lid]["signal_id"] not in unmanaged_sids
+                }
 
                 # Never re-place a limit that has already filled on our end. A limit can
                 # fill on our broker while the TM still shows it pending (sub-pip mismatch,
@@ -812,12 +835,18 @@ class SyncCycle:
                 f"{closed_pnl:.2f}" if closed_pnl is not None else "?",
             )
 
+        # Skip: pull every order/position on a user-skipped signal (cancel pending,
+        # close fills). Runs even on a Supabase outage — it's driven by local state.
+        await self._apply_skips(skipped_sids, sqlite, mt5_client, mt5_positions, mt5_orders, result)
+
         # M2: mark positions closed if they disappeared from MT5 externally
         await self._check_external_closes(sqlite, mt5_client, mt5_positions)
 
         # Strip/restore SLs around spread hour. Runs unconditionally (even on a
         # Supabase outage) so a stripped position always gets its SL back.
-        await self._manage_spread_hour_sls(sqlite, mt5_client, mt5_positions, scheduler, config)
+        await self._manage_spread_hour_sls(
+            sqlite, mt5_client, mt5_positions, scheduler, config, unmanaged_sids
+        )
 
         if supabase_rows is not None:
             # Build signal-level lookup from supabase rows for SL sync and forced exit
@@ -828,14 +857,22 @@ class SyncCycle:
                     supabase_by_signal[sid] = row
 
             await self._sync_filled_sls(
-                sqlite, mt5_client, mt5_positions, supabase_by_signal, config, live_prices
+                sqlite,
+                mt5_client,
+                mt5_positions,
+                supabase_by_signal,
+                config,
+                live_prices,
+                unmanaged_sids,
             )
             await self._check_forced_exits(
-                supabase, sqlite, mt5_client, mt5_positions, scheduler, config
+                supabase, sqlite, mt5_client, mt5_positions, scheduler, config, unmanaged_sids
             )
-            await self._check_news_exits(news_symbols, sqlite, mt5_client, mt5_positions, config)
+            await self._check_news_exits(
+                news_symbols, sqlite, mt5_client, mt5_positions, config, unmanaged_sids
+            )
             await self._check_profit_weekend_exits(
-                supabase, sqlite, mt5_client, mt5_positions, scheduler, config
+                supabase, sqlite, mt5_client, mt5_positions, scheduler, config, unmanaged_sids
             )
 
             # Snapshot for the dashboard's "Closest Signals" view. Re-query pending
@@ -855,6 +892,7 @@ class SyncCycle:
         supabase_by_signal: dict[int, dict],
         config: Settings,
         live_prices: dict,
+        unmanaged_sids: set[int],
     ) -> None:
         filled = await sqlite.get_filled_positions()
         if not filled:
@@ -863,6 +901,8 @@ class SyncCycle:
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
 
         for row in filled:
+            if row["signal_id"] in unmanaged_sids:
+                continue
             if row["is_trailing"]:
                 continue
             # SL deliberately removed for spread-hour protection — don't re-apply it
@@ -968,6 +1008,7 @@ class SyncCycle:
         mt5_positions: list,
         scheduler: MarketScheduler,
         config: Settings,
+        unmanaged_sids: set[int],
     ) -> None:
         """Strip the stop-loss from every hit position ~5 min before spread hour so a
         spread-driven spike can't stop it out, then restore it once the window ends.
@@ -983,6 +1024,8 @@ class SyncCycle:
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
 
         for row in filled:
+            if row["signal_id"] in unmanaged_sids:
+                continue
             ticket = row["mt5_ticket"]
             pos = pos_by_ticket.get(ticket)
             if pos is None:
@@ -1094,8 +1137,9 @@ class SyncCycle:
         mt5_positions: list,
         scheduler: MarketScheduler,
         config: Settings,
+        unmanaged_sids: set[int],
     ) -> None:
-        filled_sids = await sqlite.get_filled_signal_ids()
+        filled_sids = await sqlite.get_filled_signal_ids() - unmanaged_sids
         if not filled_sids:
             self._last_signal_status.clear()
             return
@@ -1233,6 +1277,7 @@ class SyncCycle:
         mt5_client: MT5Client,
         mt5_positions: list,
         config: Settings,
+        unmanaged_sids: set[int],
     ) -> None:
         """Force-close filled positions whose instrument is under active news. Mirrors
         the manual-cancel / breakeven force-exit: stop trailing, close, mark closed.
@@ -1247,6 +1292,8 @@ class SyncCycle:
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
 
         for row in filled:
+            if row["signal_id"] in unmanaged_sids:
+                continue
             ticket = row["mt5_ticket"]
             pos = pos_by_ticket.get(ticket)
             if pos is None:
@@ -1302,6 +1349,7 @@ class SyncCycle:
         mt5_positions: list,
         scheduler: MarketScheduler,
         config: Settings,
+        unmanaged_sids: set[int],
     ) -> None:
         """Flatten profit-marked signals before the forex weekend. A 'profit' status keeps
         positions open for the TP engine during the week (see _check_forced_exits), but we
@@ -1321,6 +1369,8 @@ class SyncCycle:
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
 
         for row in await sqlite.get_filled_positions():
+            if row["signal_id"] in unmanaged_sids:
+                continue
             ticket = row["mt5_ticket"]
             pos = pos_by_ticket.get(ticket)
             if pos is None:
@@ -1373,6 +1423,62 @@ class SyncCycle:
                         row["signal_id"],
                         new_count,
                     )
+
+    async def _apply_skips(
+        self,
+        skipped_sids: set[int],
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        mt5_positions: list,
+        mt5_orders: list,
+        result: SyncResult,
+    ) -> None:
+        """Pull every order/position on a user-skipped signal: cancel its pending
+        orders and market-close its open positions. Idempotent — a cancelled/closed
+        row drops out of the queries below, so re-running has no further effect. A
+        failed close (e.g. market shut) leaves the position 'filled' and retries
+        next cycle."""
+        if not skipped_sids:
+            return
+
+        order_tickets = {o.ticket for o in mt5_orders}
+        for row in await sqlite.get_pending_orders():
+            if row["signal_id"] not in skipped_sids:
+                continue
+            if row["mt5_ticket"] not in order_tickets:
+                continue
+            ok = await self._canceller.cancel_order(
+                row["mt5_ticket"], mt5_client, sqlite, spread=False
+            )
+            result.cancelled += ok
+            result.errors += not ok
+
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+        for row in await sqlite.get_filled_positions():
+            if row["signal_id"] not in skipped_sids:
+                continue
+            ticket = row["mt5_ticket"]
+            pos = pos_by_ticket.get(ticket)
+            if pos is None:
+                continue
+            await sqlite.set_trailing(ticket, 0)
+            res = mt5_client.close_position(
+                ticket=pos.ticket,
+                symbol=pos.symbol,
+                volume=pos.volume,
+                position_type=pos.type,
+                comment="skip",
+            )
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                if realized_pnl is None:
+                    realized_pnl = pos.profit
+                await sqlite.mark_closed(ticket, realized_pnl)
+                logger.info("Skip: closed ticket=%d signal=%d", ticket, row["signal_id"])
+            else:
+                retcode = res.retcode if res else "None"
+                logger.error("Skip close failed ticket=%d retcode=%s", ticket, retcode)
+                result.errors += 1
 
     async def _check_external_closes(
         self, sqlite: SQLiteDB, mt5_client: MT5Client, mt5_positions: list

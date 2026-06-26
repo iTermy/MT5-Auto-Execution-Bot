@@ -1,4 +1,11 @@
-import type { Config, DashboardData, HistoryData, LotExceptionConfig, StatusData } from './types'
+import type {
+  Config,
+  DashboardData,
+  HistoryData,
+  LotExceptionConfig,
+  SignalAction,
+  StatusData,
+} from './types'
 
 export interface ApproximateLots {
   balance: number
@@ -87,6 +94,15 @@ export async function fetchApproximateLots(): Promise<ApproximateLots> {
     throw new Error(detail)
   }
   return r.json()
+}
+
+export async function setSignalAction(signalId: number, action: SignalAction): Promise<void> {
+  const r = await fetch('/api/signals/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signal_id: signalId, action }),
+  })
+  if (!r.ok) throw new Error(`POST /api/signals/action ${r.status}`)
 }
 
 export async function fetchHistory(fromDate?: string, toDate?: string): Promise<HistoryData> {

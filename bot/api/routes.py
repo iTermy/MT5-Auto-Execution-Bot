@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 if sys.platform == "win32":
@@ -112,6 +113,26 @@ async def get_dashboard(request: Request) -> dict:
         "summary": data.summary,
         "updated_at": data.updated_at,
     }
+
+
+class SignalActionBody(BaseModel):
+    signal_id: int
+    action: str  # 'skip' | 'manual' | 'none' (clear)
+
+
+@router.post("/api/signals/action")
+async def set_signal_action(request: Request, body: SignalActionBody) -> dict:
+    """Persist a per-signal user override. 'skip' pulls and never places the signal;
+    'manual' orphans it (bot stops managing); 'none' clears the override. The pull /
+    re-place takes effect on the next sync cycle — MT5 is never touched here."""
+    if body.action not in ("skip", "manual", "none"):
+        raise HTTPException(400, "action must be 'skip', 'manual', or 'none'")
+    sqlite = request.app.state.engine._sqlite
+    if body.action == "none":
+        await sqlite.clear_signal_action(body.signal_id)
+    else:
+        await sqlite.set_signal_action(body.signal_id, body.action)
+    return {"ok": True}
 
 
 @router.get("/api/history")

@@ -224,6 +224,31 @@ CREATE TABLE IF NOT EXISTS signal_finalized (
 )
 """
 
+# SQLite — per-signal user override. 'skip' = never place; cancel/close everything.
+# 'manual' = orphan the placed limits; the bot stops touching the signal entirely.
+# Reversible: deleting the row hands the signal back to normal bot management.
+CREATE_SIGNAL_ACTIONS = """
+CREATE TABLE IF NOT EXISTS signal_actions (
+    signal_id  BIGINT PRIMARY KEY,
+    action     TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
+SET_SIGNAL_ACTION = """
+INSERT INTO signal_actions (signal_id, action, created_at)
+VALUES (?, ?, ?)
+ON CONFLICT(signal_id) DO UPDATE SET action = excluded.action, created_at = excluded.created_at
+"""
+
+DELETE_SIGNAL_ACTION = """
+DELETE FROM signal_actions WHERE signal_id = ?
+"""
+
+GET_SIGNAL_ACTIONS = """
+SELECT signal_id, action FROM signal_actions
+"""
+
 MARK_SIGNAL_FINALIZED = """
 INSERT OR IGNORE INTO signal_finalized (signal_id, finalized_at) VALUES (?, ?)
 """

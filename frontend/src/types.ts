@@ -197,7 +197,10 @@ export interface NearbySignalData {
   distance_display: string
   proximity_pct: number
   placed: boolean
+  action: 'skip' | 'manual' | null
 }
+
+export type SignalAction = 'skip' | 'manual' | 'none'
 
 export interface DashboardData {
   account: AccountData | null

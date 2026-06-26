@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 import aiosqlite
 
 from bot.db.queries import (
+    CLEAR_HISTORY,
+    CLEAR_SIGNAL_FINALIZED,
     CREATE_ORDER_MAPPINGS,
     CREATE_SIGNAL_ACTIONS,
     CREATE_SIGNAL_FINALIZED,
@@ -357,6 +359,14 @@ class SQLiteDB:
     async def get_order_history(self, from_date: str, to_date: str) -> list[aiosqlite.Row]:
         async with self._db.execute(GET_ORDER_HISTORY, (from_date, to_date)) as cursor:
             return await cursor.fetchall()
+
+    async def clear_history(self) -> int:
+        """Reset the account to 'new': delete every closed/cancelled trade row and the
+        finalize guard. Open and pending orders are kept. Returns the rows deleted."""
+        cursor = await self._db.execute(CLEAR_HISTORY)
+        await self._db.execute(CLEAR_SIGNAL_FINALIZED)
+        await self._db.commit()
+        return cursor.rowcount
 
     async def update_db_stop_loss(
         self, mt5_ticket: int, new_db_sl: float, new_mt5_sl: float

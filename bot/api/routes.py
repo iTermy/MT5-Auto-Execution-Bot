@@ -212,6 +212,15 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
     }
 
 
+@router.post("/api/history/clear")
+async def clear_history(request: Request) -> dict:
+    """Reset the account to new — wipe all closed/cancelled trade history so every
+    history- and dashboard-stat goes to zero. Live positions and pending orders are
+    untouched (only terminal rows are removed)."""
+    deleted = await request.app.state.engine._sqlite.clear_history()
+    return {"ok": True, "deleted": deleted}
+
+
 @router.get("/api/mt5/terminals")
 async def list_mt5_terminals() -> dict:
     paths = await asyncio.to_thread(_collect_mt5_terminals)

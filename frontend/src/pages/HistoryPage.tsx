@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { fetchHistory } from '../api'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { fetchHistory, clearHistory } from '../api'
 import { Seg } from '../components/Seg'
 import { money } from '../utils/money'
 import { computeDetailedStats, formatHoldTime } from '../utils/stats'
@@ -81,14 +81,33 @@ export function HistoryPage() {
   const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('closed')
   const [sortBy, setSortBy] = useState<SortKey>('newest')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearing, setClearing] = useState(false)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const from = `${fromDate}T00:00:00`
     const to = `${toDate}T23:59:59`
     fetchHistory(from, to)
       .then(setData)
       .catch(() => {})
   }, [fromDate, toDate])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function handleClear() {
+    setClearing(true)
+    try {
+      await clearHistory()
+      setConfirmClear(false)
+      load()
+    } catch {
+      /* keep the dialog open so the user can retry */
+    } finally {
+      setClearing(false)
+    }
+  }
 
   const trades: TradeData[] = data?.trades ?? []
 
@@ -210,7 +229,41 @@ export function HistoryPage() {
             </select>
           </div>
         </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn sm danger-solid" onClick={() => setConfirmClear(true)}>
+            Clear history
+          </button>
+        </div>
       </div>
+
+      {confirmClear && (
+        <div className="modal-overlay" onClick={() => !clearing && setConfirmClear(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Clear history?</div>
+            <p className="modal-notes">
+              This resets all statistics and the visuals on the dashboard — equity curve, win/loss,
+              P&amp;L and every trade record are wiped, and the account is treated as new (starting
+              balance becomes the current balance, P&amp;L back to 0).
+            </p>
+            <div className="modal-warn">
+              Your current open positions and pending orders are not touched — only past trade
+              history is cleared. This can’t be undone.
+            </div>
+            <div className="modal-actions">
+              <button
+                className="btn ghost"
+                onClick={() => setConfirmClear(false)}
+                disabled={clearing}
+              >
+                Cancel
+              </button>
+              <button className="btn danger-solid" onClick={handleClear} disabled={clearing}>
+                {clearing ? 'Clearing…' : 'Clear history'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* STATISTICS — trade-level, unaffected by filters */}
       {trades.length > 0 && (

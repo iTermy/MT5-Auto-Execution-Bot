@@ -303,6 +303,17 @@ UPDATE_LAST_OFFSET_CHECK = """
 UPDATE order_mappings SET last_offset_check = ? WHERE mt5_ticket = ?
 """
 
+# Reset the account to "new": drop every terminal trade row (closed / cancelled)
+# so all history-derived stats and dashboard visuals go to zero. Open and pending
+# orders ('pending', 'filled', 'claimed') are intentionally kept untouched.
+CLEAR_HISTORY = """
+DELETE FROM order_mappings WHERE status IN ('closed', 'cancelled', 'spread_cancelled')
+"""
+
+CLEAR_SIGNAL_FINALIZED = """
+DELETE FROM signal_finalized
+"""
+
 GET_ORDER_HISTORY = """
 SELECT
     signal_id,

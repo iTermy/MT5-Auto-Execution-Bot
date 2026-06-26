@@ -121,3 +121,8 @@ export async function fetchHistory(fromDate?: string, toDate?: string): Promise<
   if (!r.ok) throw new Error(`GET /api/history ${r.status}`)
   return r.json()
 }
+
+export async function clearHistory(): Promise<void> {
+  const r = await fetch('/api/history/clear', { method: 'POST' })
+  if (!r.ok) throw new Error(`POST /api/history/clear ${r.status}`)
+}

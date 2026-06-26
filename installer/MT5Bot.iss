@@ -36,10 +36,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 ; Downloaded to {tmp} by the [Code] section below; `external` means it is taken at
 ; install time from that path rather than compiled into the installer.
 Source: "{tmp}\MT5Bot.exe"; DestDir: "{app}"; Flags: external ignoreversion
+; Compiled into the installer so the shortcuts show the logo immediately, even before
+; the downloaded exe carries its own embedded icon.
+Source: "..\assets\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\MT5Bot"; Filename: "{app}\MT5Bot.exe"
-Name: "{autodesktop}\MT5Bot"; Filename: "{app}\MT5Bot.exe"; Tasks: desktopicon
+Name: "{autoprograms}\MT5Bot"; Filename: "{app}\MT5Bot.exe"; IconFilename: "{app}\logo.ico"
+Name: "{autodesktop}\MT5Bot"; Filename: "{app}\MT5Bot.exe"; Tasks: desktopicon; IconFilename: "{app}\logo.ico"
 
 [Run]
 Filename: "{app}\MT5Bot.exe"; Description: "Launch MT5Bot"; Flags: nowait postinstall skipifsilent

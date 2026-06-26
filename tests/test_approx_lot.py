@@ -26,25 +26,25 @@ def _gold_info(**overrides):
 
 
 def test_gold_sized_to_target_risk() -> None:
-    # balance=10000 → 5% = 500 risk. Gold median cumulative SL = 25 price units.
-    # lot = 500 / (100 * 25) = 0.2 → exactly 5% per a median signal.
+    # balance=10000 → 3% = 300 risk. Gold median cumulative SL = 25 price units.
+    # lot = 300 / (100 * 25) = 0.12 → exactly 3% per a median signal.
     cfg = make_settings()
     recs = compute_recommendations(cfg, 10000.0, {"XAUUSD": _gold_info()}, max_lot=5.0)
 
     gold = next(r for r in recs if r.symbol == "XAUUSD")
     assert gold.mode == "fixed"
     assert gold.signal_type == "all"
-    assert gold.value == pytest.approx(0.2, abs=1e-9)
+    assert gold.value == pytest.approx(0.12, abs=1e-9)
 
 
 def test_forex_uses_pip_value_and_pip_median() -> None:
     # EURUSD default: pip_val=10. Forex median = 90.2 pips.
-    # lot = 500 / (10 * 90.2) = 0.554 → floored to step 0.01 → 0.55.
+    # lot = 300 / (10 * 90.2) = 0.3326 → floored to step 0.01 → 0.33.
     cfg = make_settings()
     recs = compute_recommendations(cfg, 10000.0, {"EURUSD": make_symbol_info()}, max_lot=5.0)
 
     eur = next(r for r in recs if r.symbol == "EURUSD")
-    assert eur.value == pytest.approx(0.55, abs=1e-9)
+    assert eur.value == pytest.approx(0.33, abs=1e-9)
 
 
 def test_symbols_without_specs_are_skipped() -> None:
@@ -65,7 +65,7 @@ def test_max_lot_caps_the_value() -> None:
 
 
 def test_tiny_target_clamps_up_to_volume_min() -> None:
-    # balance=100 → 5% = 5. lot = 5 / (100*25) = 0.002 → floors below step, clamps to min.
+    # balance=100 → 3% = 3. lot = 3 / (100*25) = 0.0012 → floors below step, clamps to min.
     cfg = make_settings()
     recs = compute_recommendations(cfg, 100.0, {"XAUUSD": _gold_info()}, max_lot=5.0)
 

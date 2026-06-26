@@ -8,7 +8,7 @@ from bot.trading.symbol_mapper import map_symbol
 # Target average risk per signal as a percent of account balance. The approximation
 # sizes each instrument so a median-shaped signal risks roughly this much; signals
 # with more limits or wider stops risk more, fewer/tighter risk less.
-_TARGET_RISK_PCT = 5.0
+_TARGET_RISK_PCT = 3.0
 
 # Median cumulative stop-loss distance per instrument, in the instrument's own price
 # units (sum of |limit - SL| across a signal's limits). From signal-history analysis.
@@ -74,7 +74,7 @@ def compute_recommendations(
     specs: dict[str, SymbolInfo],
     max_lot: float,
 ) -> list[LotRecommendation]:
-    """Fixed-lot-per-limit values that put a median-shaped signal at ~5% account risk.
+    """Fixed-lot-per-limit values that put a median-shaped signal at ~3% account risk.
     `specs` maps broker symbol -> SymbolInfo; symbols the broker doesn't carry are
     skipped. Lots are floored to the broker volume step and capped at max_lot."""
     risk_money = balance * _TARGET_RISK_PCT / 100

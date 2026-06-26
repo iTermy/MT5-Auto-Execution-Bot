@@ -116,6 +116,7 @@ class ProximityConfig(BaseModel):
     forex_jpy_pips: float = 15.0
     metals: float = 25.0
     crypto: float = 1000.0
+    oil: float = 1.0
     stocks: float = 5.0
     indices: dict[str, float] = {
         "SPX": 40.0,
@@ -124,8 +125,10 @@ class ProximityConfig(BaseModel):
         "USTEC": 100.0,
         "DAX": 100.0,
         "DE30": 100.0,
+        "DE40": 100.0,
         "US30": 100.0,
         "US2000": 20.0,
+        "UK100": 50.0,
         "JP225": 200.0,
     }
     stock_overrides: dict[str, float] = {}

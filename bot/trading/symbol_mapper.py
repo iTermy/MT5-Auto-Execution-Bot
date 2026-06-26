@@ -134,7 +134,10 @@ def proximity_threshold(
     if asset_class == AssetClass.CRYPTO:
         return prox.crypto
 
-    return None  # OIL and any other unhandled classes
+    if asset_class == AssetClass.OIL:
+        return prox.oil
+
+    return None  # any other unhandled classes
 
 
 def offset_drift_threshold(asset_class: AssetClass, drift: OffsetDriftConfig, db_sym: str) -> float:

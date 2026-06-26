@@ -1158,13 +1158,18 @@ class SyncCycle:
 
             previous = self._last_signal_status.get(signal_id)
 
-            if current == "profit" and previous != "profit":
+            # A manual 'profit' (TM reply / slash command, closed_reason "manual") closes
+            # our positions like breakeven; an auto-TP 'profit' (closed_reason "automatic")
+            # leaves them open for our own TP engine to manage.
+            manual_profit = current == "profit" and closed_reason == "manual"
+
+            if current == "profit" and not manual_profit and previous != "profit":
                 logger.info(
-                    "Signal %d profit-marked by TM — keeping positions; TP engine continues",
+                    "Signal %d auto-TP-marked by TM — keeping positions; TP engine continues",
                     signal_id,
                 )
 
-            if current not in _FORCE_EXIT_STATUSES:
+            if current not in _FORCE_EXIT_STATUSES and not manual_profit:
                 self._last_signal_status[signal_id] = current
                 self._last_force_exit_status.pop(signal_id, None)
                 continue
@@ -1179,7 +1184,7 @@ class SyncCycle:
             # next day) and positions should stay open. Crypto stays tradable through the
             # weekend, but a 'cancelled' TM status is the only directive we have for it,
             # so crypto positions always close on cancellation regardless of day/time.
-            # 'breakeven' status closes unconditionally (unchanged behavior).
+            # 'breakeven' and manual 'profit' statuses close unconditionally.
             gate_reason = current
             if current == "cancelled":
                 is_weekend = scheduler.is_weekend_window()

@@ -863,6 +863,54 @@ async def test_profit_marked_crypto_kept_open_in_weekend_window(
 
 
 # ---------------------------------------------------------------------------
+# Manual profit force-exit: a TM-marked manual 'profit' closes immediately
+# (like breakeven), while an auto-TP 'profit' stays open for our TP engine.
+# ---------------------------------------------------------------------------
+
+
+async def test_manual_profit_position_closed_on_weekday(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=9301, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9301, symbol="USDCAD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9301)
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {
+        1: {"status": "profit", "closed_reason": "manual"}
+    }
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_profit"
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_auto_tp_profit_position_kept_open_on_weekday(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=9401, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9401, symbol="USDCAD")]
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {
+        1: {"status": "profit", "closed_reason": "automatic"}
+    }
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9401}
+
+
+# ---------------------------------------------------------------------------
 # Offset drift interval throttle: skip re-evaluation within 30 min window
 # ---------------------------------------------------------------------------
 

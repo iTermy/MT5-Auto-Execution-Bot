@@ -20,6 +20,10 @@ export interface StatusData {
   update_in_progress?: boolean
   update_progress?: number
   update_error?: string | null
+  spread_hour_active?: boolean
+  market_closed?: boolean
+  algo_trading_disabled?: boolean
+  symbol_count?: number
 }
 
 export interface LogEntry {

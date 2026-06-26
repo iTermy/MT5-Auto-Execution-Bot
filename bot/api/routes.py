@@ -40,6 +40,10 @@ _STATUS_DEFAULTS: dict = {
     "update_in_progress": False,
     "update_progress": 0,
     "update_error": None,
+    "spread_hour_active": False,
+    "market_closed": False,
+    "algo_trading_disabled": False,
+    "symbol_count": 0,
 }
 
 

@@ -114,6 +114,7 @@ export default function App() {
                 dashboard={dashboard}
                 history={history}
                 config={config}
+                status={status}
                 onNavigate={setPage}
               />
             )}

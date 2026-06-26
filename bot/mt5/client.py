@@ -58,6 +58,12 @@ class MT5Client:
     def ensure_connected(self) -> bool:
         return self._conn.ensure_connected()
 
+    def trade_allowed(self) -> bool:
+        """Whether algo/auto-trading is enabled in the terminal (the top-right
+        toggle). False here is what surfaces as retcode 10027 on order_send."""
+        info = mt5.terminal_info()
+        return bool(info.trade_allowed) if info is not None else False
+
     def order_send(self, request: OrderRequest) -> OrderResult | None:
         req = {
             "action": request.action,

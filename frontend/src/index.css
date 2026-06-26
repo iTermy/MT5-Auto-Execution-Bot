@@ -352,6 +352,38 @@ button {
   color: var(--text);
 }
 
+/* ── Stackable warning banners ── */
+.warn-banner {
+  align-items: flex-start;
+}
+.warn-banner.danger {
+  border-color: var(--neg);
+  background: var(--neg-tint);
+}
+.warn-banner.danger > svg {
+  color: var(--neg);
+}
+.banner-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin: -2px -4px 0 4px;
+  background: none;
+  border: none;
+  border-radius: var(--r-xs);
+  color: var(--text-3);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.banner-close:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
 /* ── Top bar ── */
 .topbar {
   display: flex;

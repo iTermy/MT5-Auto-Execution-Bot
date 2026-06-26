@@ -12,16 +12,18 @@ import type { Period } from '../utils/stats'
 import { getChannelName } from '../utils/channels'
 import { directionFromOrderType } from '../utils/orderType'
 import { formatSignalType } from '../utils/signalType'
-import type { Config, DashboardData, HistoryData, Page, TradeData } from '../types'
+import { WarningBanners } from '../components/WarningBanners'
+import type { Config, DashboardData, HistoryData, Page, StatusData, TradeData } from '../types'
 
 interface Props {
   dashboard: DashboardData | null
   history: HistoryData | null
   config: Config | null
+  status: StatusData | null
   onNavigate: (page: Page) => void
 }
 
-export function DashboardPage({ dashboard, history, config, onNavigate }: Props) {
+export function DashboardPage({ dashboard, history, config, status, onNavigate }: Props) {
   const licenseMissing = config !== null && !config.license_key
   const [pnlP, setPnlP] = useState<Period>('all')
   const [wlP, setWlP] = useState<Period>('all')
@@ -130,6 +132,7 @@ export function DashboardPage({ dashboard, history, config, onNavigate }: Props)
           </button>
         </div>
       )}
+      <WarningBanners status={status} config={config} />
       {/* HERO */}
       <div className="row">
         <div className="panel pad" style={{ flex: 2.1, minWidth: 0 }}>

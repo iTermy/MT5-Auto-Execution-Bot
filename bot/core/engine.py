@@ -103,6 +103,7 @@ class Engine:
         # (pending, open, trailing, mt5_connected) from the last status build; lets the
         # sync update-progress callback rebuild status without re-querying SQLite.
         self._last_counts: tuple[int, int, int, bool] = (0, 0, 0, False)
+        self._last_trade_allowed = True
 
     def start(self) -> None:
         self._trading_active = True
@@ -670,6 +671,7 @@ class Engine:
         trailing_count = sum(1 for r in active if r["status"] == "filled" and r["is_trailing"])
         mt5_connected = self._mt5.ensure_connected()
         self._last_counts = (pending_count, open_count, trailing_count, mt5_connected)
+        self._last_trade_allowed = self._mt5.trade_allowed() if mt5_connected else True
         try:
             self.status_queue.put_nowait(self._status_snapshot())
         except asyncio.QueueFull:
@@ -702,4 +704,8 @@ class Engine:
             "update_in_progress": self._update_in_progress,
             "update_progress": self._update_progress,
             "update_error": self._update_error,
+            "spread_hour_active": self._scheduler.is_spread_hour(),
+            "market_closed": self._scheduler.is_weekend_window(),
+            "algo_trading_disabled": mt5_connected and not self._last_trade_allowed,
+            "symbol_count": len(self.broker_symbols),
         }

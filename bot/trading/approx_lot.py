@@ -116,9 +116,12 @@ def compute_recommendations(
             out.append(LotRecommendation(mt5_sym, "all", "fixed", lot))
 
     if mode == "total_lot":
-        # Per-limit lots are step-multiples, so scaling by an integer stays on-step.
+        # Per-limit lots are step-multiples, so scaling by an integer stays on-step;
+        # round to shed binary float artifacts (0.3 * 3 -> 0.8999999999999999).
         return [
-            LotRecommendation(r.symbol, r.signal_type, "total_lot", r.value * _AVG_LIMITS)
+            LotRecommendation(
+                r.symbol, r.signal_type, "total_lot", round(r.value * _AVG_LIMITS, 8)
+            )
             for r in out
         ]
 

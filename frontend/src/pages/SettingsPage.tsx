@@ -107,7 +107,7 @@ interface LotExceptionRow {
   symbol: string
   channel: string
   signalType: string
-  mode: 'risk_percent' | 'fixed'
+  mode: 'risk_percent' | 'fixed' | 'total_lot'
   value: string
 }
 
@@ -293,6 +293,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const [lotMode, setLotMode] = useState('risk_percent')
   const [riskPct, setRiskPct] = useState('1.0')
   const [fixedLotDefault, setFixedLotDefault] = useState('0.01')
+  const [totalLotDefault, setTotalLotDefault] = useState('0.1')
   const [maxLot, setMaxLot] = useState('5.0')
   const [lotExceptions, setLotExceptions] = useState<LotExceptionRow[]>([])
   const [approxLoading, setApproxLoading] = useState(false)
@@ -383,6 +384,14 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       setFixedLotDefault(String(fl))
     } else if (fl && typeof fl === 'object') {
       setFixedLotDefault(String((fl as Record<string, number>).default ?? 0.01))
+    }
+
+    // Global Total lot default — accept flat number, or "default" key of a dict.
+    const tl = cfg.lot_sizing.total_lot
+    if (typeof tl === 'number') {
+      setTotalLotDefault(String(tl))
+    } else if (tl && typeof tl === 'object') {
+      setTotalLotDefault(String((tl as Record<string, number>).default ?? 0.1))
     }
 
     // Load exceptions. Prefer the new `exceptions` field; if absent, migrate
@@ -678,7 +687,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
     setLotExceptions(prev =>
       prev.map((r, j) => {
         if (j !== i) return r
-        if (field === 'mode') return { ...r, mode: value as 'risk_percent' | 'fixed' }
+        if (field === 'mode') return { ...r, mode: value as 'risk_percent' | 'fixed' | 'total_lot' }
         return { ...r, [field]: value }
       })
     )
@@ -710,13 +719,15 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       }))
   }
 
-  // Fetch per-instrument fixed lots sized for ~5% average risk and upsert them into
-  // the exceptions table (by symbol + signal type), leaving unrelated rows untouched.
+  // Fetch per-instrument lots sized for ~5% average risk and upsert them into the
+  // exceptions table (by symbol + signal type), leaving unrelated rows untouched. Uses
+  // the active global mode so total-lot mode gets total-per-signal lots, not per-limit.
   async function handleCalculateApproxLots() {
+    const mode = lotMode === 'total_lot' ? 'total_lot' : 'fixed'
     setApproxLoading(true)
     setApproxMsg(null)
     try {
-      const data = await fetchApproximateLots()
+      const data = await fetchApproximateLots(mode)
       if (data.exceptions.length === 0) {
         setApproxMsg({ kind: 'error', text: 'No supported instruments found on this broker.' })
         return
@@ -732,13 +743,13 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
               r.channel === channel &&
               r.signalType === ex.signal_type
           )
-          if (i >= 0) next[i] = { ...next[i], mode: 'fixed', value }
+          if (i >= 0) next[i] = { ...next[i], mode: ex.mode, value }
           else
             next.push({
               symbol: ex.symbol,
               channel,
               signalType: ex.signal_type,
-              mode: 'fixed',
+              mode: ex.mode,
               value,
             })
         }
@@ -746,9 +757,10 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       })
       touch()
       const bal = data.balance.toLocaleString(undefined, { maximumFractionDigits: 0 })
+      const label = mode === 'total_lot' ? 'total lots' : 'fixed lots'
       setApproxMsg({
         kind: 'success',
-        text: `Set ${data.exceptions.length} fixed lots for ~5% avg risk on ${data.currency ?? ''} ${bal} balance. Review and save.`,
+        text: `Set ${data.exceptions.length} ${label} for ~5% avg risk on ${data.currency ?? ''} ${bal} balance. Review and save.`,
       })
     } catch (e) {
       setApproxMsg({ kind: 'error', text: e instanceof Error ? e.message : 'Calculation failed' })
@@ -958,6 +970,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
           mode: lotMode,
           risk_percent: parseFloat(riskPct) || 1.0,
           fixed_lot: parseFloat(fixedLotDefault) || 0.01,
+          total_lot: parseFloat(totalLotDefault) || 0.1,
           max_lot_per_order: parseFloat(maxLot) || 5.0,
           exceptions: buildLotExceptions(),
         },
@@ -1411,6 +1424,20 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
                     </>
                   ),
                 },
+                {
+                  value: 'total_lot',
+                  label: (
+                    <>
+                      Total lot
+                      <span
+                        style={{ color: 'var(--warn)', marginLeft: 4 }}
+                        title="Experimental: The value selected gets distributed among limits. Example: Value = 1, # of Limits = 2, Each limit = 0.5. More limits = lower risk."
+                      >
+                        ★
+                      </span>
+                    </>
+                  ),
+                },
               ]}
               onChange={v => {
                 setLotMode(v)
@@ -1418,7 +1445,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
               }}
             />
           </div>
-          {lotMode === 'risk_percent' ? (
+          {lotMode === 'risk_percent' && (
             <div className="field">
               <label>Risk per signal (%)</label>
               <input
@@ -1431,7 +1458,8 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
                 style={{ width: 100 }}
               />
             </div>
-          ) : (
+          )}
+          {lotMode === 'fixed' && (
             <div className="field">
               <label>Fixed lot</label>
               <input
@@ -1439,6 +1467,20 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
                 value={fixedLotDefault}
                 onChange={e => {
                   setFixedLotDefault(e.target.value)
+                  touch()
+                }}
+                style={{ width: 100 }}
+              />
+            </div>
+          )}
+          {lotMode === 'total_lot' && (
+            <div className="field">
+              <label>Total lot</label>
+              <input
+                className="inp num mono"
+                value={totalLotDefault}
+                onChange={e => {
+                  setTotalLotDefault(e.target.value)
                   touch()
                 }}
                 style={{ width: 100 }}
@@ -1457,7 +1499,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
               style={{ width: 100 }}
             />
           </div>
-          {lotMode === 'fixed' && (
+          {(lotMode === 'fixed' || lotMode === 'total_lot') && (
             <div
               className="field"
               style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}
@@ -1470,7 +1512,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
                 disabled={approxLoading || !mt5Ok}
                 title={
                   mt5Ok
-                    ? 'Suggest fixed lots per instrument that put a typical signal near 5% account risk, and add them as exceptions below'
+                    ? `Suggest ${lotMode === 'total_lot' ? 'total' : 'fixed'} lots per instrument that put a typical signal near 5% account risk, and add them as exceptions below`
                     : 'Connect MT5 first — sizing needs your account balance'
                 }
               >
@@ -1479,7 +1521,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
             </div>
           )}
         </div>
-        {lotMode === 'fixed' && approxMsg && (
+        {(lotMode === 'fixed' || lotMode === 'total_lot') && approxMsg && (
           <div
             style={{
               marginTop: 10,
@@ -1559,6 +1601,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
                       options={[
                         { value: 'risk_percent', label: 'Risk %' },
                         { value: 'fixed', label: 'Fixed' },
+                        { value: 'total_lot', label: 'Total' },
                       ]}
                       onChange={v => updateLotException(i, 'mode', v)}
                     />

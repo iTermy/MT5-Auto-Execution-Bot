@@ -46,6 +46,12 @@ class LotCalculator:
             return fl.get(mt5_symbol) or fl.get("default") or 0.01
         return float(fl)
 
+    def _get_total_lot(self, mt5_symbol: str) -> float:
+        tl = self._config.lot_sizing.total_lot
+        if isinstance(tl, dict):
+            return tl.get(mt5_symbol) or tl.get("default") or 0.1
+        return float(tl)
+
     def _get_risk_percent(self, mt5_symbol: str) -> float:
         rp = self._config.lot_sizing.risk_percent
         if isinstance(rp, dict):
@@ -94,10 +100,15 @@ class LotCalculator:
         if exception is not None:
             if exception.mode == "fixed":
                 return _clamp(exception.value, info)
+            if exception.mode == "total_lot":
+                return _clamp(exception.value / len(limit_prices), info)
             return self._calc_risk_lot(exception.value, info, stop_loss, limit_prices, mt5_symbol)
 
-        if self._config.lot_sizing.mode != "risk_percent":
+        mode = self._config.lot_sizing.mode
+        if mode == "fixed":
             return _clamp(self._get_fixed_lot(mt5_symbol), info)
+        if mode == "total_lot":
+            return _clamp(self._get_total_lot(mt5_symbol) / len(limit_prices), info)
 
         return self._calc_risk_lot(
             self._get_risk_percent(mt5_symbol), info, stop_loss, limit_prices, mt5_symbol

@@ -8,7 +8,12 @@ from bot.trading.symbol_mapper import map_symbol
 # Target average risk per signal as a percent of account balance. The approximation
 # sizes each instrument so a median-shaped signal risks roughly this much; signals
 # with more limits or wider stops risk more, fewer/tighter risk less.
-_TARGET_RISK_PCT = 3.0
+_TARGET_RISK_PCT = 5.0
+
+# Median number of limits per signal, from signal-history analysis. Only used for the
+# "total_lot" mode: its recommended total is the per-limit fixed lot scaled up by this,
+# since the bot splits a total lot evenly across a signal's limits at placement time.
+_AVG_LIMITS = 3
 
 # Median cumulative stop-loss distance per instrument, in the instrument's own price
 # units (sum of |limit - SL| across a signal's limits). From signal-history analysis.
@@ -73,10 +78,15 @@ def compute_recommendations(
     balance: float,
     specs: dict[str, SymbolInfo],
     max_lot: float,
+    mode: str = "fixed",
 ) -> list[LotRecommendation]:
-    """Fixed-lot-per-limit values that put a median-shaped signal at ~3% account risk.
-    `specs` maps broker symbol -> SymbolInfo; symbols the broker doesn't carry are
-    skipped. Lots are floored to the broker volume step and capped at max_lot."""
+    """Lot values that put a median-shaped signal at ~5% account risk, one per supported
+    broker symbol. `specs` maps broker symbol -> SymbolInfo; symbols the broker doesn't
+    carry are skipped. Lots are floored to the broker volume step and capped at max_lot.
+
+    `mode="fixed"` returns the per-limit lot directly. `mode="total_lot"` returns the
+    total lot (per-limit scaled by `_AVG_LIMITS`), so the same median signal lands at the
+    same risk once the bot splits that total across its limits."""
     risk_money = balance * _TARGET_RISK_PCT / 100
     out: list[LotRecommendation] = []
 
@@ -104,5 +114,12 @@ def compute_recommendations(
         lot = _clamp(min(risk_money / (pip_val * _FOREX_MEDIAN_PIPS), max_lot), info)
         if lot > 0:
             out.append(LotRecommendation(mt5_sym, "all", "fixed", lot))
+
+    if mode == "total_lot":
+        # Per-limit lots are step-multiples, so scaling by an integer stays on-step.
+        return [
+            LotRecommendation(r.symbol, r.signal_type, "total_lot", r.value * _AVG_LIMITS)
+            for r in out
+        ]
 
     return out

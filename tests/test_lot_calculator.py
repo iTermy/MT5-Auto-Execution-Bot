@@ -87,6 +87,53 @@ def test_fixed_lot_clamped_to_volume_step(mock_mt5) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Total lot mode — the value is split evenly across a signal's limits
+# ---------------------------------------------------------------------------
+
+
+def test_total_lot_split_across_limits(mock_mt5) -> None:
+    # total_lot=0.09, 3 limits → each limit gets 0.03
+    cfg = make_settings(
+        lot_sizing=make_settings().lot_sizing.model_copy(
+            update={"mode": "total_lot", "total_lot": 0.09}
+        )
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(
+        stop_loss=1.09000, limit_prices=[1.09100, 1.09200, 1.09300], mt5_symbol="EURUSD"
+    )
+
+    assert lot == pytest.approx(0.03, abs=1e-6)
+
+
+def test_total_lot_single_limit_is_whole_value(mock_mt5) -> None:
+    cfg = make_settings(
+        lot_sizing=make_settings().lot_sizing.model_copy(
+            update={"mode": "total_lot", "total_lot": 0.1}
+        )
+    )
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="EURUSD")
+
+    assert lot == pytest.approx(0.1, abs=1e-6)
+
+
+def test_total_lot_exception_split_across_limits(mock_mt5) -> None:
+    # A "total_lot" exception distributes its value the same way the global mode does.
+    cfg = _cfg_with_exceptions(LotExceptionConfig(symbol="EURUSD", mode="total_lot", value=0.1))
+    mock_mt5.symbol_info.return_value = _make_eurusd_info()
+
+    calc = LotCalculator(mock_mt5, cfg)
+    lot = calc.calculate(stop_loss=1.09000, limit_prices=[1.09100, 1.09200], mt5_symbol="EURUSD")
+
+    assert lot == pytest.approx(0.05, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
 # Volume step flooring (not rounding)
 # ---------------------------------------------------------------------------
 

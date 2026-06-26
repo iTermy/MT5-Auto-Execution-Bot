@@ -62,8 +62,8 @@ class LotExceptionConfig(BaseModel):
     symbol: str = ""  # "" or "all" applies to every symbol
     channel: str = ""  # "" or "all" applies to every channel (stores channel_id)
     signal_type: str = "all"  # "all" applies to every signal type
-    mode: str  # "risk_percent" | "fixed"
-    value: float  # percent for risk_percent, lots for fixed
+    mode: str  # "risk_percent" | "fixed" | "total_lot"
+    value: float  # percent for risk_percent, lots for fixed/total_lot
 
 
 class ExcludedTradeConfig(BaseModel):
@@ -75,6 +75,9 @@ class LotSizingConfig(BaseModel):
     mode: str = "risk_percent"
     risk_percent: float | dict[str, float] = 1.0
     fixed_lot: float | dict[str, float] = 0.01
+    # Total lots for a signal, split evenly across its limits (more limits = less per
+    # limit = lower risk). Same per-instrument dict form as fixed_lot.
+    total_lot: float | dict[str, float] = 0.1
     max_lot_per_order: float = 5.0
     exceptions: list[LotExceptionConfig] = []
 

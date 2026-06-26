@@ -36,7 +36,7 @@ export interface LotExceptionConfig {
   symbol: string
   channel?: string
   signal_type: string
-  mode: 'risk_percent' | 'fixed'
+  mode: 'risk_percent' | 'fixed' | 'total_lot'
   value: number
 }
 
@@ -49,6 +49,7 @@ export interface LotSizingConfig {
   mode: string
   risk_percent: number | Record<string, number>
   fixed_lot: number | Record<string, number>
+  total_lot: number | Record<string, number>
   max_lot_per_order: number
   exceptions?: LotExceptionConfig[]
 }

@@ -211,9 +211,10 @@ async def list_mt5_symbols(request: Request) -> dict:
 
 
 @router.get("/api/lot-sizing/approximate")
-async def approximate_lot_sizes(request: Request) -> dict:
-    """Fixed-lot-per-limit suggestions that put a median signal near 5% account risk,
-    one per supported broker symbol. Computed from cached specs + balance — no MT5 call."""
+async def approximate_lot_sizes(request: Request, mode: str = "fixed") -> dict:
+    """Lot suggestions that put a median signal near 5% account risk, one per supported
+    broker symbol. `mode` is "fixed" (per-limit lots) or "total_lot" (total-per-signal
+    lots). Computed from cached specs + balance — no MT5 call."""
     engine = request.app.state.engine
     acct = engine.dashboard_cache.data.account
     if not acct or not acct.get("balance"):
@@ -223,6 +224,7 @@ async def approximate_lot_sizes(request: Request) -> dict:
         float(acct["balance"]),
         engine.lot_specs,
         engine._config.lot_sizing.max_lot_per_order,
+        mode,
     )
     return {
         "balance": acct["balance"],

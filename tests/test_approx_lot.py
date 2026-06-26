@@ -26,25 +26,37 @@ def _gold_info(**overrides):
 
 
 def test_gold_sized_to_target_risk() -> None:
-    # balance=10000 → 3% = 300 risk. Gold median cumulative SL = 25 price units.
-    # lot = 300 / (100 * 25) = 0.12 → exactly 3% per a median signal.
+    # balance=10000 → 5% = 500 risk. Gold median cumulative SL = 25 price units.
+    # lot = 500 / (100 * 25) = 0.20 → exactly 5% per a median signal.
     cfg = make_settings()
     recs = compute_recommendations(cfg, 10000.0, {"XAUUSD": _gold_info()}, max_lot=5.0)
 
     gold = next(r for r in recs if r.symbol == "XAUUSD")
     assert gold.mode == "fixed"
     assert gold.signal_type == "all"
-    assert gold.value == pytest.approx(0.12, abs=1e-9)
+    assert gold.value == pytest.approx(0.20, abs=1e-9)
+
+
+def test_total_lot_scales_fixed_by_avg_limits() -> None:
+    # total_lot recommendation = per-limit fixed lot * _AVG_LIMITS (3). Gold fixed=0.20.
+    cfg = make_settings()
+    recs = compute_recommendations(
+        cfg, 10000.0, {"XAUUSD": _gold_info()}, max_lot=5.0, mode="total_lot"
+    )
+
+    gold = next(r for r in recs if r.symbol == "XAUUSD")
+    assert gold.mode == "total_lot"
+    assert gold.value == pytest.approx(0.60, abs=1e-9)
 
 
 def test_forex_uses_pip_value_and_pip_median() -> None:
     # EURUSD default: pip_val=10. Forex median = 90.2 pips.
-    # lot = 300 / (10 * 90.2) = 0.3326 → floored to step 0.01 → 0.33.
+    # lot = 500 / (10 * 90.2) = 0.5543 → floored to step 0.01 → 0.55.
     cfg = make_settings()
     recs = compute_recommendations(cfg, 10000.0, {"EURUSD": make_symbol_info()}, max_lot=5.0)
 
     eur = next(r for r in recs if r.symbol == "EURUSD")
-    assert eur.value == pytest.approx(0.33, abs=1e-9)
+    assert eur.value == pytest.approx(0.55, abs=1e-9)
 
 
 def test_symbols_without_specs_are_skipped() -> None:
@@ -65,7 +77,7 @@ def test_max_lot_caps_the_value() -> None:
 
 
 def test_tiny_target_clamps_up_to_volume_min() -> None:
-    # balance=100 → 3% = 3. lot = 3 / (100*25) = 0.0012 → floors below step, clamps to min.
+    # balance=100 → 5% = 5. lot = 5 / (100*25) = 0.002 → floors below step, clamps to min.
     cfg = make_settings()
     recs = compute_recommendations(cfg, 100.0, {"XAUUSD": _gold_info()}, max_lot=5.0)
 

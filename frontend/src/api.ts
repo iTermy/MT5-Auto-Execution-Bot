@@ -81,8 +81,10 @@ export async function fetchNotFoundSymbols(): Promise<string[]> {
   return data.symbols
 }
 
-export async function fetchApproximateLots(): Promise<ApproximateLots> {
-  const r = await fetch('/api/lot-sizing/approximate')
+export async function fetchApproximateLots(
+  mode: 'fixed' | 'total_lot' = 'fixed'
+): Promise<ApproximateLots> {
+  const r = await fetch(`/api/lot-sizing/approximate?mode=${mode}`)
   if (!r.ok) {
     let detail = `GET /api/lot-sizing/approximate ${r.status}`
     try {

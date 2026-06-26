@@ -51,8 +51,8 @@ FROM live_prices
 WHERE symbol = ANY($1)
 """
 
-FETCH_NEWS_MODE = """
-SELECT news_mode FROM bot_mode_status WHERE id = 1
+FETCH_MODE_GATES = """
+SELECT news_mode, vol_guard FROM bot_mode_status WHERE id = 1
 """
 
 FETCH_FEED_HEALTH = """

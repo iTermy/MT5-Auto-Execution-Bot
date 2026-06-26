@@ -8,7 +8,7 @@ from bot.db.queries import (
     FETCH_FEED_HEALTH,
     FETCH_HIT_LIMIT_IDS,
     FETCH_LIVE_PRICES,
-    FETCH_NEWS_MODE,
+    FETCH_MODE_GATES,
     FETCH_PROFIT_LIMIT_IDS,
     FETCH_SIGNAL_STATUS,
     FETCH_SIGNAL_STATUSES,
@@ -102,9 +102,14 @@ class SupabaseDB:
             for row in rows
         }
 
-    async def fetch_news_mode(self) -> str | None:
+    async def fetch_mode_gates(self) -> tuple[str | None, str | None]:
+        """Return (news_mode, vol_guard) from the single bot_mode_status row. Both are
+        comma-separated token lists (or 'ALL'), NULL when the respective mode is off."""
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(FETCH_NEWS_MODE)
+            row = await conn.fetchrow(FETCH_MODE_GATES)
+        if row is None:
+            return None, None
+        return row["news_mode"], row["vol_guard"]
 
     async def fetch_feed_health(self) -> dict[str, str]:
         """Return {feed_name: status} from the feed_health table."""

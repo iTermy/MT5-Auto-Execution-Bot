@@ -132,6 +132,7 @@ export interface Config {
   config_migrations?: string[]
   disclaimer_accepted?: boolean
   disable_auto_tp?: boolean
+  volatility_guard?: boolean
   spread_hour: SpreadHourConfig
   tp_config: TPConfig
 }

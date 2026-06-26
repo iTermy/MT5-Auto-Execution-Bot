@@ -33,6 +33,7 @@ def _mock_supabase(
     signals=None,
     live_prices=None,
     news_mode=None,
+    vol_guard=None,
     hit_limit_ids=None,
     profit_limit_ids=None,
 ):
@@ -42,7 +43,7 @@ def _mock_supabase(
     sb.fetch_profit_limit_ids.return_value = dict(profit_limit_ids or {})
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
-    sb.fetch_news_mode.return_value = news_mode
+    sb.fetch_mode_gates.return_value = (news_mode, vol_guard)
     sb.fetch_feed_health.return_value = {}
     return sb
 
@@ -798,6 +799,44 @@ async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_co
 
 
 # ---------------------------------------------------------------------------
+# Volatility guard: vol_guard tokens gate trades exactly like news, but only
+# when the user has enabled the feature (config.volatility_guard).
+# ---------------------------------------------------------------------------
+
+
+async def test_vol_guard_gates_like_news_when_enabled(sqlite_db, mock_mt5, sample_config) -> None:
+    sample_config.volatility_guard = True
+    await _insert_filled(sqlite_db, mt5_ticket=8301, signal_id=1, symbol="EURUSD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=8301, symbol="EURUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8301)
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="USD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_vol_guard_ignored_when_disabled(sqlite_db, mock_mt5, sample_config) -> None:
+    # Default off: the vol_guard column is read but never acted on.
+    assert sample_config.volatility_guard is False
+    await _insert_filled(sqlite_db, mt5_ticket=8401, signal_id=1, symbol="EURUSD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=8401, symbol="EURUSD")]
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8401}
+
+
+# ---------------------------------------------------------------------------
 # Profit-weekend force-exit: flatten profit-marked signals before the weekend
 # ---------------------------------------------------------------------------
 
@@ -868,9 +907,7 @@ async def test_profit_marked_crypto_kept_open_in_weekend_window(
 # ---------------------------------------------------------------------------
 
 
-async def test_manual_profit_position_closed_on_weekday(
-    sqlite_db, mock_mt5, sample_config
-) -> None:
+async def test_manual_profit_position_closed_on_weekday(sqlite_db, mock_mt5, sample_config) -> None:
     await _insert_filled(sqlite_db, mt5_ticket=9301, signal_id=1, symbol="USDCAD")
     mock_mt5.positions_get.return_value = [make_position(ticket=9301, symbol="USDCAD")]
     mock_mt5.close_position.return_value = make_order_result(ticket=9301)

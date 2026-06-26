@@ -241,6 +241,10 @@ class Settings(BaseModel):
     # bot still places, cancels, and updates limits, and cancels a signal's remaining
     # pending limits once its filled positions are all closed.
     disable_auto_tp: bool = False
+    # When true the bot also reads bot_mode_status.vol_guard (the TM volatility guard,
+    # same token format as news_mode) and gates on it exactly like news mode — cancelling
+    # matching pending orders and force-closing matching filled positions. Off by default.
+    volatility_guard: bool = False
     tp_config: TPConfig
 
     @model_validator(mode="before")

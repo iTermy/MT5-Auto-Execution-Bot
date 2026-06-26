@@ -216,6 +216,9 @@ Cancelled orders marked `spread_cancelled` in SQLite. Re-placed automatically wh
 
 While a symbol is under news the bot (a) cancels its pending orders (same path as the spread gate) and (b) force-closes any filled positions on that symbol (`SyncCycle._check_news_exits`), mirroring the manual-cancel / breakeven force-exit.
 
+## Volatility Guard (opt-in)
+`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated currency codes / named assets, or `ALL`, NULL when calm). It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in a single `bot_mode_status` row fetch (`SupabaseDB.fetch_mode_gates`) and unions its tokens into the same gate set, so volatility tokens cancel pending orders and force-close filled positions through the exact same path, parsing, and crypto/24h exemptions as news. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
+
 ## Polling Strategy
 | State | MT5 calls/min | Supabase queries/min |
 |-------|--------------|---------------------|

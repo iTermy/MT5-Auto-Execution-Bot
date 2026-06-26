@@ -260,13 +260,19 @@ class SyncCycle:
             now = datetime.now(UTC)
 
             # news_mode is per-symbol: a comma-separated list of currency/asset tokens
-            # (or 'ALL'), NULL when there's no news. Fetched regardless of
-            # placement_active so news force-exits still fire while placement is paused.
+            # (or 'ALL'), NULL when there's no news. The volatility guard (vol_guard)
+            # shares the same token format and gating semantics — when the user enables
+            # it, its tokens are folded into the same set so they cancel/close trades
+            # identically. Fetched regardless of placement_active so force-exits still
+            # fire while placement is paused.
             news_symbols: frozenset[str] = frozenset()
             try:
-                news_symbols = parse_news_symbols(await supabase.fetch_news_mode())
+                news_mode_raw, vol_guard_raw = await supabase.fetch_mode_gates()
+                news_symbols = parse_news_symbols(news_mode_raw)
+                if config.volatility_guard:
+                    news_symbols |= parse_news_symbols(vol_guard_raw)
             except Exception:
-                logger.error("Failed to fetch news_mode", exc_info=True)
+                logger.error("Failed to fetch bot mode gates", exc_info=True)
 
             def _instr_of(row) -> str:
                 lid = row["limit_id"]

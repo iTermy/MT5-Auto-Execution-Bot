@@ -395,10 +395,11 @@ class Engine:
         while True:
             try:
                 config = self._config
-                if not self._scheduler.is_spread_hour():
-                    await self._tp.run_cycle(self._mt5, self._sqlite, config)
-                else:
-                    await self._tp.run_cycle(self._mt5, self._sqlite, config, crypto_only=True)
+                if not config.disable_auto_tp:
+                    if not self._scheduler.is_spread_hour():
+                        await self._tp.run_cycle(self._mt5, self._sqlite, config)
+                    else:
+                        await self._tp.run_cycle(self._mt5, self._sqlite, config, crypto_only=True)
                 if self._tp_finalizer is not None:
                     await self._tp_finalizer.sweep(self._mt5, self._sqlite, config)
             except Exception:

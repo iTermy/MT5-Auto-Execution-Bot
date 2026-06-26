@@ -842,6 +842,11 @@ class SyncCycle:
         # M2: mark positions closed if they disappeared from MT5 externally
         await self._check_external_closes(sqlite, mt5_client, mt5_positions)
 
+        # Disable-auto-TP: the user owns every exit, so once a signal's filled
+        # positions are all closed, clear its remaining pending limits.
+        if config.disable_auto_tp:
+            await self._cancel_pending_after_close(sqlite, mt5_client, unmanaged_sids, result)
+
         # Strip/restore SLs around spread hour. Runs unconditionally (even on a
         # Supabase outage) so a stripped position always gets its SL back.
         await self._manage_spread_hour_sls(
@@ -1484,6 +1489,39 @@ class SyncCycle:
                 retcode = res.retcode if res else "None"
                 logger.error("Skip close failed ticket=%d retcode=%s", ticket, retcode)
                 result.errors += 1
+
+    async def _cancel_pending_after_close(
+        self,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        unmanaged_sids: set[int],
+        result: SyncResult,
+    ) -> None:
+        """When auto-TP is disabled the bot doesn't manage exits, so a signal whose
+        filled positions are all closed (user-TP'd or stopped out) should have its
+        remaining pending limits cancelled — otherwise it keeps entering after the
+        user has closed the trade. Only signals that have actually filled are touched;
+        an untouched signal with no fills still places its limits normally."""
+        pending = await sqlite.get_pending_orders()
+        if not pending:
+            return
+        open_sids = {row["signal_id"] for row in await sqlite.get_filled_positions()}
+        filled_ever = await sqlite.get_signals_with_fills()
+        for row in pending:
+            sid = row["signal_id"]
+            if sid in unmanaged_sids or sid in open_sids or sid not in filled_ever:
+                continue
+            ok = await self._canceller.cancel_order(
+                row["mt5_ticket"], mt5_client, sqlite, spread=False
+            )
+            result.cancelled += ok
+            result.errors += not ok
+            if ok:
+                logger.info(
+                    "Disable-auto-TP: cancelled orphaned limit ticket=%d signal=%d after close",
+                    row["mt5_ticket"],
+                    sid,
+                )
 
     async def _check_external_closes(
         self, sqlite: SQLiteDB, mt5_client: MT5Client, mt5_positions: list

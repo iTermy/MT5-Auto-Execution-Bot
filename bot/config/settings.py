@@ -237,6 +237,10 @@ class Settings(BaseModel):
     # absent in existing installs' config.json) means the disclaimer still shows, so
     # existing users see it once and acceptance is backfilled by /api/disclaimer/accept.
     disclaimer_accepted: bool = False
+    # When true the TP engine never trails or closes — the user owns every exit. The
+    # bot still places, cancels, and updates limits, and cancels a signal's remaining
+    # pending limits once its filled positions are all closed.
+    disable_auto_tp: bool = False
     tp_config: TPConfig
 
     @model_validator(mode="before")

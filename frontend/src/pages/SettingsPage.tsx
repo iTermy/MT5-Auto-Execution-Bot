@@ -280,7 +280,7 @@ function CollapsibleSection({
   )
 }
 
-type SectionKey = 'lot' | 'tp' | 'oneToOne' | 'symbols' | 'excluded'
+type SectionKey = 'lot' | 'tp' | 'oneToOne' | 'symbols' | 'excluded' | 'misc'
 
 interface Props {
   config: Config | null
@@ -324,6 +324,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const [excludedTrades, setExcludedTrades] = useState<ExcludedTradeRow[]>([])
   const [disabledSignalTypes, setDisabledSignalTypes] = useState<string[]>([])
   const [disabledChannels, setDisabledChannels] = useState<string[]>([])
+  const [disableAutoTp, setDisableAutoTp] = useState(false)
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(() => {
     const defaults: Record<SectionKey, boolean> = {
       lot: true,
@@ -331,6 +332,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       oneToOne: true,
       symbols: true,
       excluded: true,
+      misc: true,
     }
     try {
       const stored = localStorage.getItem('settingsOpenSections')
@@ -554,6 +556,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
     setExcludedTrades(trades)
     setDisabledSignalTypes(cfg.disabled_signal_types ?? [])
     setDisabledChannels(cfg.disabled_channels ?? [])
+    setDisableAutoTp(cfg.disable_auto_tp ?? false)
   }, [])
 
   useEffect(() => {
@@ -983,6 +986,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
         excluded_symbols: [], // migrated into excluded_trades
         disabled_signal_types: disabledSignalTypes,
         disabled_channels: disabledChannels,
+        disable_auto_tp: disableAutoTp,
       }
       await updateConfig(updated)
       onConfigSaved(updated)
@@ -2567,6 +2571,33 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
             </label>
           ))}
         </div>
+      </CollapsibleSection>
+
+      {/* MISC */}
+      <CollapsibleSection
+        head={<h3>Misc</h3>}
+        open={openSections.misc}
+        onToggle={() => toggleSection('misc')}
+      >
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={disableAutoTp}
+            onChange={() => {
+              setDisableAutoTp(v => !v)
+              touch()
+            }}
+            style={{ accentColor: 'var(--accent)', width: 16, height: 16, marginTop: 2 }}
+          />
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>Disable auto-TP</span>
+            <span className="faint" style={{ fontSize: 12.5, maxWidth: 560 }}>
+              The bot still places, updates, and cancels limits, but never trails or takes profit —
+              you manage every exit. Once you fully close a signal, its remaining pending limits are
+              cancelled automatically.
+            </span>
+          </span>
+        </label>
       </CollapsibleSection>
 
       {/* SAVE */}

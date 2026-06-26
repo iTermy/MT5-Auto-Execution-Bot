@@ -174,6 +174,8 @@ class Engine:
             # user enters their credentials and prevents signal data from being
             # fetched without an active license.
             await self._wait_for_license_config()
+            if self._shutting_down:
+                return
 
             if not await self._wait_for_mt5_init():
                 return
@@ -280,7 +282,7 @@ class Engine:
         Settings without restarting the bot. Returns True once initialized,
         False if the engine is shut down before MT5 comes up."""
         logged_failure = False
-        while self._running:
+        while self._running and not self._shutting_down:
             self._mt5_conn.set_terminal_path(self._config.mt5_terminal_path)
             if self._mt5_conn.initialize():
                 return True
@@ -306,7 +308,7 @@ class Engine:
         if self._config.license_key:
             return
         logger.info("Waiting for license key in config.json — engine paused")
-        while not self._config.license_key:
+        while not self._config.license_key and not self._shutting_down:
             await self._broadcast_status()
             await asyncio.sleep(2.0)
             new_config = load_config()

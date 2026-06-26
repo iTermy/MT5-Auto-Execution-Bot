@@ -230,6 +230,10 @@ class Settings(BaseModel):
     proximity: ProximityConfig = ProximityConfig()
     # One-time config migrations already applied to this install (see migrate_config).
     config_migrations: list[str] = []
+    # Set true once the user accepts the in-app risk disclaimer. Default false (and
+    # absent in existing installs' config.json) means the disclaimer still shows, so
+    # existing users see it once and acceptance is backfilled by /api/disclaimer/accept.
+    disclaimer_accepted: bool = False
     tp_config: TPConfig
 
     @model_validator(mode="before")

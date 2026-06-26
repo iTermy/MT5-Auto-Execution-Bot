@@ -68,6 +68,20 @@ async def update_config(config: Settings) -> dict:
     return {"ok": True}
 
 
+@router.post("/api/disclaimer/accept")
+async def accept_disclaimer() -> dict:
+    """Persist the user's one-time risk-disclaimer acceptance. Targeted raw-JSON write
+    so the rest of config.json is untouched (and the key is backfilled for existing
+    installs that predate the field)."""
+    try:
+        data = json.loads(_CONFIG_PATH.read_text())
+    except FileNotFoundError:
+        raise HTTPException(404, "config.json not found") from None
+    data["disclaimer_accepted"] = True
+    _CONFIG_PATH.write_text(json.dumps(data, indent=2))
+    return {"ok": True}
+
+
 @router.post("/api/engine/start")
 async def engine_start(request: Request) -> dict:
     request.app.state.engine.start()

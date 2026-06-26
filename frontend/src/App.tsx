@@ -1,11 +1,19 @@
 import { useState, useEffect } from 'react'
-import { fetchConfig, startEngine, stopEngine, shutdownEngine, installUpdate } from './api'
+import {
+  fetchConfig,
+  startEngine,
+  stopEngine,
+  shutdownEngine,
+  installUpdate,
+  acceptDisclaimer,
+} from './api'
 import { useSSE } from './hooks/useSSE'
 import { useDashboard } from './hooks/useDashboard'
 import { useHistory } from './hooks/useHistory'
 import { NavSidebar } from './components/NavSidebar'
 import { TopBar } from './components/TopBar'
 import { UpdateModal } from './components/UpdateModal'
+import { DisclaimerModal } from './components/DisclaimerModal'
 import { ShutdownOverlay } from './components/ShutdownOverlay'
 import { LogDrawer } from './components/LogDrawer'
 import { DashboardPage } from './pages/DashboardPage'
@@ -49,6 +57,16 @@ export default function App() {
     }
   }
 
+  async function handleAcceptDisclaimer() {
+    try {
+      await acceptDisclaimer()
+    } catch {
+      /* keep the modal up so acceptance is retried on the next click */
+      return
+    }
+    setConfig(c => (c ? { ...c, disclaimer_accepted: true } : c))
+  }
+
   async function handleConfirmUpdate() {
     try {
       await installUpdate()
@@ -68,6 +86,9 @@ export default function App() {
 
   return (
     <div className="app">
+      {config && !config.disclaimer_accepted && (
+        <DisclaimerModal onAccept={handleAcceptDisclaimer} />
+      )}
       <TopBar
         dashboard={dashboard}
         status={status}

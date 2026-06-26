@@ -671,6 +671,25 @@ button {
   gap: 10px;
   margin-top: 20px;
 }
+.disclaimer-modal {
+  width: 480px;
+}
+.disclaimer-body {
+  max-height: 52vh;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.disclaimer-body p {
+  margin: 0 0 12px;
+}
+.disclaimer-body p:last-child {
+  margin-bottom: 0;
+}
+.disclaimer-body strong {
+  color: var(--text);
+}
 .modal-progress {
   height: 8px;
   border-radius: 999px;

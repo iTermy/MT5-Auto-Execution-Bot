@@ -130,6 +130,7 @@ export interface Config {
   offset_instruments: string[]
   feed_max_staleness_seconds: number
   config_migrations?: string[]
+  disclaimer_accepted?: boolean
   spread_hour: SpreadHourConfig
   tp_config: TPConfig
 }

@@ -707,7 +707,11 @@ class Engine:
             "update_in_progress": self._update_in_progress,
             "update_progress": self._update_progress,
             "update_error": self._update_error,
-            "spread_hour_active": self._scheduler.is_spread_hour(),
+            # Gate out the weekend so the banner reflects only the genuine daily
+            # spread-hour window — is_spread_hour() stays true all weekend (the
+            # trading gates rely on that), which the "Market closed" banner covers.
+            "spread_hour_active": self._scheduler.is_spread_hour()
+            and not self._scheduler.is_weekend_window(),
             "market_closed": self._scheduler.is_weekend_window(),
             "algo_trading_disabled": mt5_connected and not self._last_trade_allowed,
             "symbol_count": len(self.broker_symbols),

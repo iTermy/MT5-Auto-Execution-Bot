@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+from bot.config.settings import ExcludedChannelAssetConfig
 from bot.core.sync_cycle import SyncCycle
 from tests.conftest import (
     make_account_info,
@@ -1335,3 +1336,69 @@ async def test_clear_signal_action_resumes_management(sqlite_db) -> None:
     assert await sqlite_db.get_signal_actions() == {1: "manual"}
     await sqlite_db.clear_signal_action(1)
     assert await sqlite_db.get_signal_actions() == {}
+
+
+# ---------------------------------------------------------------------------
+# Channel + asset-class exclusions: drop signals before placement
+# ---------------------------------------------------------------------------
+
+
+async def test_excluded_channel_asset_blocks_placement(sqlite_db, mock_mt5, sample_config) -> None:
+    # Exclude forex signals from channel 123 → a EURUSD limit on that channel never places.
+    sample_config.excluded_channel_assets = [
+        ExcludedChannelAssetConfig(channel="123", asset_class="forex")
+    ]
+    mock_mt5.account_info.return_value = make_account_info()
+    row = _make_supabase_row(limit_id=1, instrument="EURUSD")
+    row["channel_id"] = 123
+    row["price_level"] = 1.09950
+    supabase = _mock_supabase(signals=[row])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert 1 in cycle._logged_excluded
+
+
+async def test_excluded_channel_asset_ignores_other_asset(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # The same channel rule targets indices; a forex EURUSD limit is unaffected and places.
+    sample_config.excluded_channel_assets = [
+        ExcludedChannelAssetConfig(channel="123", asset_class="indices")
+    ]
+    mock_mt5.account_info.return_value = make_account_info()
+    mock_mt5.order_send.return_value = make_order_result(ticket=2002)
+    mock_mt5.order_get_by_ticket.return_value = None
+    row = _make_supabase_row(limit_id=1, instrument="EURUSD")
+    row["channel_id"] = 123
+    row["price_level"] = 1.09950
+    supabase = _mock_supabase(signals=[row])
+    supabase.fetch_signal_status.return_value = "active"
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 1
+    mock_mt5.order_send.assert_called_once()
+
+
+async def test_excluded_asset_wildcard_channel(sqlite_db, mock_mt5, sample_config) -> None:
+    # Channel left as "all": every forex signal is excluded regardless of channel.
+    sample_config.excluded_channel_assets = [ExcludedChannelAssetConfig(asset_class="forex")]
+    mock_mt5.account_info.return_value = make_account_info()
+    row = _make_supabase_row(limit_id=1, instrument="EURUSD")
+    row["channel_id"] = 999
+    row["price_level"] = 1.09950
+    supabase = _mock_supabase(signals=[row])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()

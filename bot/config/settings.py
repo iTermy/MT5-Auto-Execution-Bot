@@ -71,6 +71,11 @@ class ExcludedTradeConfig(BaseModel):
     signal_type: str = "all"  # "all" excludes every signal type for this symbol
 
 
+class ExcludedChannelAssetConfig(BaseModel):
+    channel: str = ""  # "" or "all" = every channel (stores channel_id)
+    asset_class: str = ""  # "" or "all" = every asset class
+
+
 class LotSizingConfig(BaseModel):
     mode: str = "risk_percent"
     risk_percent: float | dict[str, float] = 1.0
@@ -216,6 +221,9 @@ class Settings(BaseModel):
     excluded_symbols: list[str] = []
     # Per-(symbol, signal_type) exclusions. signal_type "all" drops every type.
     excluded_trades: list[ExcludedTradeConfig] = []
+    # Per-(channel, asset_class) exclusions. A blank/"all" dimension is a wildcard;
+    # a signal is dropped if any rule matches both its channel and its asset class.
+    excluded_channel_assets: list[ExcludedChannelAssetConfig] = []
     # Signal types and channel ids that are skipped wholesale (empty = none skipped).
     disabled_signal_types: list[str] = []
     disabled_channels: list[str] = []

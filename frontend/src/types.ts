@@ -45,6 +45,11 @@ export interface ExcludedTradeConfig {
   signal_type: string
 }
 
+export interface ExcludedChannelAssetConfig {
+  channel: string
+  asset_class: string
+}
+
 export interface LotSizingConfig {
   mode: string
   risk_percent: number | Record<string, number>
@@ -125,6 +130,7 @@ export interface Config {
   stock_no_suffix: string[]
   excluded_symbols: string[]
   excluded_trades: ExcludedTradeConfig[]
+  excluded_channel_assets: ExcludedChannelAssetConfig[]
   disabled_signal_types: string[]
   disabled_channels: string[]
   offset_instruments: string[]

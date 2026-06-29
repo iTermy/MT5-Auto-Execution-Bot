@@ -161,6 +161,17 @@ class SyncCycle:
                     if rule.symbol.upper() == sym and rule.signal_type in ("all", stype):
                         reason = f"excluded trade {rule.symbol}/{rule.signal_type}"
                         break
+                if reason is None and config.excluded_channel_assets:
+                    asset = detect_asset_class(sym).value
+                    for rule in config.excluded_channel_assets:
+                        chan_ok = rule.channel in ("", "all") or chan == rule.channel
+                        asset_ok = rule.asset_class in ("", "all") or rule.asset_class == asset
+                        if chan_ok and asset_ok:
+                            reason = (
+                                f"excluded channel/asset {rule.channel or 'all'}/"
+                                f"{rule.asset_class or 'all'}"
+                            )
+                            break
 
             if reason is None:
                 filtered.append(r)

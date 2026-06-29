@@ -20,6 +20,7 @@ import type {
   ScalpOverrideConfig,
   LotExceptionConfig,
   ExcludedTradeConfig,
+  ExcludedChannelAssetConfig,
   SymbolSuffixRule,
 } from '../types'
 import { detectAssetClass } from '../utils/assetClass'
@@ -36,6 +37,17 @@ const ASSET_CLASSES = [
   'oil',
 ] as const
 type AssetKey = (typeof ASSET_CLASSES)[number]
+
+// Display labels for the asset-class dropdowns.
+const ASSET_CLASS_LABELS: Record<AssetKey, string> = {
+  forex: 'Forex',
+  forex_jpy: 'Forex (JPY)',
+  metals: 'Metals',
+  indices: 'Indices',
+  stocks: 'Stocks',
+  crypto: 'Crypto',
+  oil: 'Oil',
+}
 
 type OverrideType = 'scalp' | 'toll' | 'swing' | 'pa'
 const OVERRIDE_TYPES: OverrideType[] = ['scalp', 'toll', 'swing', 'pa']
@@ -119,6 +131,11 @@ interface SuffixRuleRow {
 interface ExcludedTradeRow {
   symbol: string
   signalType: string
+}
+
+interface ExcludedChannelAssetRow {
+  channel: string
+  assetClass: string
 }
 
 interface InstrumentOverrideRow {
@@ -322,6 +339,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const [stockSuffix, setStockSuffix] = useState('-24')
   const [suffixRules, setSuffixRules] = useState<SuffixRuleRow[]>([])
   const [excludedTrades, setExcludedTrades] = useState<ExcludedTradeRow[]>([])
+  const [excludedChannelAssets, setExcludedChannelAssets] = useState<ExcludedChannelAssetRow[]>([])
   const [disabledSignalTypes, setDisabledSignalTypes] = useState<string[]>([])
   const [disabledChannels, setDisabledChannels] = useState<string[]>([])
   const [disableAutoTp, setDisableAutoTp] = useState(false)
@@ -555,6 +573,12 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       }
     }
     setExcludedTrades(trades)
+    setExcludedChannelAssets(
+      (cfg.excluded_channel_assets ?? []).map(r => ({
+        channel: r.channel || '',
+        assetClass: r.asset_class || '',
+      }))
+    )
     setDisabledSignalTypes(cfg.disabled_signal_types ?? [])
     setDisabledChannels(cfg.disabled_channels ?? [])
     setDisableAutoTp(cfg.disable_auto_tp ?? false)
@@ -795,6 +819,28 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       .map(r => ({ symbol: r.symbol.trim(), signal_type: r.signalType }))
   }
 
+  function updateExcludedChannelAsset(i: number, field: 'channel' | 'assetClass', value: string) {
+    setExcludedChannelAssets(prev => prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)))
+    touch()
+  }
+
+  function addExcludedChannelAsset() {
+    setExcludedChannelAssets(prev => [...prev, { channel: '', assetClass: '' }])
+    touch()
+  }
+
+  function removeExcludedChannelAsset(i: number) {
+    setExcludedChannelAssets(prev => prev.filter((_, j) => j !== i))
+    touch()
+  }
+
+  // Drop rows with no constraint (both wildcards) — they'd exclude every trade.
+  function buildExcludedChannelAssets(): ExcludedChannelAssetConfig[] {
+    return excludedChannelAssets
+      .filter(r => r.channel || r.assetClass)
+      .map(r => ({ channel: r.channel, asset_class: r.assetClass }))
+  }
+
   // Checkboxes store the *disabled* set (default empty = all enabled), so a toggle
   // adds/removes the item from that list.
   function toggleDisabled(list: string[], setList: (v: string[]) => void, key: string) {
@@ -985,6 +1031,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
         stock_suffix: stockSuffix,
         symbol_suffixes: buildSuffixRules(),
         excluded_trades: buildExcludedTrades(),
+        excluded_channel_assets: buildExcludedChannelAssets(),
         excluded_symbols: [], // migrated into excluded_trades
         disabled_signal_types: disabledSignalTypes,
         disabled_channels: disabledChannels,
@@ -2520,6 +2567,75 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
           </table>
         )}
         <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addExcludedTrade}>
+          + Add exclusion
+        </button>
+
+        <div style={{ height: 1, background: 'var(--hairline)', margin: '20px 0' }} />
+
+        <div className="panel-head" style={{ marginBottom: 6 }}>
+          <h3 style={{ fontSize: 14 }}>By channel &amp; asset</h3>
+          <span className="sub">
+            drop a channel's signals for a given asset class (e.g. indices from one channel) — leave
+            a column on "All" to wildcard it
+          </span>
+        </div>
+        {excludedChannelAssets.length > 0 && (
+          <table className="tbl" style={{ maxWidth: 520 }}>
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Asset class</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {excludedChannelAssets.map((r, i) => (
+                <tr key={i}>
+                  <td>
+                    <select
+                      className="inp"
+                      value={r.channel}
+                      onChange={e => updateExcludedChannelAsset(i, 'channel', e.target.value)}
+                      style={{ width: 180 }}
+                    >
+                      <option value="">All channels</option>
+                      {CHANNELS.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      className="inp"
+                      value={r.assetClass}
+                      onChange={e => updateExcludedChannelAsset(i, 'assetClass', e.target.value)}
+                      style={{ width: 150 }}
+                    >
+                      <option value="">All assets</option>
+                      {ASSET_CLASSES.map(a => (
+                        <option key={a} value={a}>
+                          {ASSET_CLASS_LABELS[a]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ width: 40 }}>
+                    <button className="btn sm ghost" onClick={() => removeExcludedChannelAsset(i)}>
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <button
+          className="btn sm ghost"
+          style={{ marginTop: 10 }}
+          onClick={addExcludedChannelAsset}
+        >
           + Add exclusion
         </button>
 

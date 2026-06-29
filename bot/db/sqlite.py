@@ -6,9 +6,11 @@ import aiosqlite
 from bot.db.queries import (
     CLEAR_HISTORY,
     CLEAR_SIGNAL_FINALIZED,
+    CLEAR_SIGNAL_TP_FIRED,
     CREATE_ORDER_MAPPINGS,
     CREATE_SIGNAL_ACTIONS,
     CREATE_SIGNAL_FINALIZED,
+    CREATE_SIGNAL_TP_FIRED,
     DELETE_CLAIMED_ORDER,
     DELETE_SIGNAL_ACTION,
     GET_ALL_ACTIVE,
@@ -26,6 +28,7 @@ from bot.db.queries import (
     GET_SIGNAL_ACTIONS,
     GET_SIGNAL_FINAL_AGGREGATE,
     GET_SIGNALS_WITH_FILLS,
+    GET_TP_FIRED_SIGNALS,
     GET_TRAILING_POSITIONS,
     GET_USER_STATS,
     INSERT_CLAIMED_ORDER,
@@ -34,6 +37,7 @@ from bot.db.queries import (
     MARK_CLOSED,
     MARK_FILLED,
     MARK_SIGNAL_FINALIZED,
+    MARK_SIGNAL_TP_FIRED,
     PROMOTE_CLAIMED_TO_PENDING,
     SET_SIGNAL_ACTION,
     SET_SL_STRIPPED,
@@ -74,6 +78,7 @@ class SQLiteDB:
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute(CREATE_ORDER_MAPPINGS)
         await self._db.execute(CREATE_SIGNAL_FINALIZED)
+        await self._db.execute(CREATE_SIGNAL_TP_FIRED)
         await self._db.execute(CREATE_SIGNAL_ACTIONS)
         await self._db.commit()
         # Migrations for existing databases
@@ -242,6 +247,17 @@ class SQLiteDB:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def mark_signal_tp_fired(self, signal_id: int) -> None:
+        """Record that our own TP engine has fired on this signal. Idempotent — once set,
+        the placement loop never re-places any of the signal's limits."""
+        await self._db.execute(MARK_SIGNAL_TP_FIRED, (signal_id, datetime.now(UTC).isoformat()))
+        await self._db.commit()
+
+    async def get_tp_fired_signals(self) -> set[int]:
+        async with self._db.execute(GET_TP_FIRED_SIGNALS) as cursor:
+            rows = await cursor.fetchall()
+        return {row["signal_id"] for row in rows}
+
     async def set_signal_action(self, signal_id: int, action: str) -> None:
         """Record a user override ('skip' or 'manual') for a signal. Reversible —
         clear_signal_action hands the signal back to normal bot management."""
@@ -365,6 +381,7 @@ class SQLiteDB:
         finalize guard. Open and pending orders are kept. Returns the rows deleted."""
         cursor = await self._db.execute(CLEAR_HISTORY)
         await self._db.execute(CLEAR_SIGNAL_FINALIZED)
+        await self._db.execute(CLEAR_SIGNAL_TP_FIRED)
         await self._db.commit()
         return cursor.rowcount
 

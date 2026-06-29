@@ -258,3 +258,6 @@ async def test_run_cycle_records_trigger_outcome(sqlite_db, mock_mt5, sample_con
     rows = await sqlite_db.get_all_active()
     trailing_row = next(r for r in rows if r["mt5_ticket"] == 1001)
     assert trailing_row["mfe_price"] == pytest.approx(6.0)
+
+    # The signal is durably marked TP-fired so its siblings never re-place.
+    assert 7 in await sqlite_db.get_tp_fired_signals()

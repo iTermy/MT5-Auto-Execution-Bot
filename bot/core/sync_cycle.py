@@ -321,7 +321,29 @@ class SyncCycle:
                 except Exception:
                     logger.error("Live prices fetch failed", exc_info=True)
 
+            # Signals our own TP engine has already fired on. Once we TP a signal we
+            # tear down its remaining limits and must never re-enter them, even while
+            # Supabase still shows the signal active (the TM/DB can lag, or the user may
+            # run a tighter TP than the channel). Durable, so a restart can't re-place.
+            tp_fired_signals = await sqlite.get_tp_fired_signals()
+
             if placement_active:
+                # Safety net: cancel any still-pending order on a TP-fired signal. The TP
+                # engine cancels these the moment it fires; this re-cancels if that order
+                # send failed, so a TP'd signal can never leave a live entry behind.
+                if tp_fired_signals:
+                    for row in sqlite_pending:
+                        if row["signal_id"] not in tp_fired_signals:
+                            continue
+                        ok = await self._canceller.cancel_order(
+                            row["mt5_ticket"], mt5_client, sqlite, spread=False
+                        )
+                        result.cancelled += ok
+                        result.errors += not ok
+                    sqlite_pending = [
+                        r for r in sqlite_pending if r["signal_id"] not in tp_fired_signals
+                    ]
+
                 # Cancel stale pending (limit gone from Supabase). A limit the TM
                 # marked 'hit' on a still-live signal is spared: hold the order so a
                 # sub-pip price mismatch still fills. Genuine cancels/closes drop the
@@ -432,6 +454,28 @@ class SyncCycle:
                             row["instrument"],
                             float(row["price_level"]),
                         )
+
+                # Never re-place a limit on a signal our own TP engine has fired on.
+                # The local cancel + this guard together mean a TP'd signal's siblings
+                # stay down regardless of how long the TM/DB takes to mark it profit.
+                tp_blocked = {
+                    lid
+                    for lid in new_limit_ids
+                    if supabase_by_limit[lid]["signal_id"] in tp_fired_signals
+                }
+                new_limit_ids -= tp_blocked
+                for lid in tp_blocked:
+                    if lid in self._logged_already_filled:
+                        continue
+                    self._logged_already_filled.add(lid)
+                    row = supabase_by_limit[lid]
+                    logger.warning(
+                        "Skipping re-placement of limit_id=%d signal_id=%d (%s) — our TP "
+                        "engine already fired on this signal; not re-entering",
+                        lid,
+                        row["signal_id"],
+                        row["instrument"],
+                    )
 
                 # Drop blocked symbols (spread hour / weekend / news mode) from the
                 # pre-check phase — otherwise tick/proximity/live-price-staleness checks

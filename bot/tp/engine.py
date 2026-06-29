@@ -179,6 +179,7 @@ class TPEngine:
                 for err in result.errors:
                     logger.error("TPEngine execute signal=%d: %s", signal_id, err)
                 if result.closed_tickets or result.trailed_tickets:
+                    await sqlite.mark_signal_tp_fired(signal_id)
                     await self._cancel_pending_for_signal(signal_id, mt5_client, sqlite)
                 if self._outcomes_writer is not None and result.snapshot is not None:
                     await self._record_outcome(

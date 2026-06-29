@@ -204,6 +204,52 @@ async def test_cancelled_limit_still_replaceable(sqlite_db, mock_mt5, sample_con
     assert 1 not in cycle._logged_already_filled
 
 
+async def test_tp_fired_signal_limit_not_replaced(sqlite_db, mock_mt5, sample_config) -> None:
+    # Our TP engine fired on signal 1 (durably marked). A new limit on that signal still
+    # shows active in Supabase (TM/DB lag), but must NOT be re-placed.
+    await sqlite_db.mark_signal_tp_fired(1)
+
+    mock_mt5.account_info.return_value = make_account_info()
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=7, signal_id=1)])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert 7 in cycle._logged_already_filled
+
+
+async def test_tp_fired_signal_pending_sibling_cancelled(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # A still-pending sibling on a TP-fired signal (e.g. the TP engine's cancel failed)
+    # is cancelled by the sync cycle's safety net, even though Supabase lists it active.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=4001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_signal_tp_fired(1)
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=4001)
+
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1, signal_id=1)])
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(4001)
+    assert len(await sqlite_db.get_pending_orders()) == 0
+
+
 # ---------------------------------------------------------------------------
 # Spread hour: pending orders are cancelled, placement is skipped
 # ---------------------------------------------------------------------------

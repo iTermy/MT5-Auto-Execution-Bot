@@ -224,6 +224,29 @@ CREATE TABLE IF NOT EXISTS signal_finalized (
 )
 """
 
+# SQLite — guard table marking a signal our own TP engine has fired on. Once we TP a
+# signal locally we cancel its remaining limits and must never re-enter them, even while
+# the signal is still active in Supabase (the TM/DB may lag, or the user may run a tighter
+# TP than the channel). Durable so a restart can't re-place a TP'd signal's limits.
+CREATE_SIGNAL_TP_FIRED = """
+CREATE TABLE IF NOT EXISTS signal_tp_fired (
+    signal_id BIGINT PRIMARY KEY,
+    fired_at  TEXT NOT NULL
+)
+"""
+
+MARK_SIGNAL_TP_FIRED = """
+INSERT OR IGNORE INTO signal_tp_fired (signal_id, fired_at) VALUES (?, ?)
+"""
+
+GET_TP_FIRED_SIGNALS = """
+SELECT signal_id FROM signal_tp_fired
+"""
+
+CLEAR_SIGNAL_TP_FIRED = """
+DELETE FROM signal_tp_fired
+"""
+
 # SQLite — per-signal user override. 'skip' = never place; cancel/close everything.
 # 'manual' = orphan the placed limits; the bot stops touching the signal entirely.
 # Reversible: deleting the row hands the signal back to normal bot management.

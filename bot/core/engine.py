@@ -22,6 +22,7 @@ from bot.utils.time_utils import MarketScheduler
 _RETCODE_DONE = 10009  # mt5.TRADE_RETCODE_DONE
 _MARGIN_MODE_HEDGING = 2  # mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
 _USER_SNAPSHOT_INTERVAL = 300.0  # 5 min between user-table upserts
+_DISCONNECTED_RETRY_INTERVAL = 2.0  # short re-check while MT5 is disconnected
 _UPDATE_CHECK_INTERVAL = 3600.0  # 1h between release-manifest checks
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,16 @@ class Engine:
                         await self._license.validate(new_config.license_key, mt5_account)
                         self._last_license_valid = self._license.license_valid
 
+                # Skip the cycle while MT5 is disconnected — no point driving order
+                # placement/management against a dead IPC pipe or a terminal with no
+                # broker link. ensure_connected() re-inits a crashed terminal and rides
+                # out a transient broker-link drop (e.g. the account briefly logged in
+                # elsewhere) without re-initializing, then we resume on the next tick.
+                if not self._mt5.ensure_connected():
+                    await self._broadcast_status()
+                    await asyncio.sleep(_DISCONNECTED_RETRY_INTERVAL)
+                    continue
+
                 # Keep placing while the license is valid OR only transiently/
                 # not-yet-confirmed unhealthy (armed). A never-valid license (invalid
                 # from startup) is unarmed and never places; a confirmed rejection
@@ -395,6 +406,11 @@ class Engine:
         while True:
             try:
                 config = self._config
+                # The sync loop owns reconnection; here just skip while disconnected
+                # so the TP engine and finalizer don't run against a dead pipe.
+                if not self._mt5.ensure_connected():
+                    await asyncio.sleep(_DISCONNECTED_RETRY_INTERVAL)
+                    continue
                 if not config.disable_auto_tp:
                     if not self._scheduler.is_spread_hour():
                         await self._tp.run_cycle(self._mt5, self._sqlite, config)

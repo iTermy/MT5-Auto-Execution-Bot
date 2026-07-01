@@ -205,6 +205,39 @@ async def test_cancelled_limit_still_replaceable(sqlite_db, mock_mt5, sample_con
     assert 1 not in cycle._logged_already_filled
 
 
+async def test_replaced_limit_reuses_filled_sibling_lot(sqlite_db, mock_mt5, sample_config) -> None:
+    # A signal with a filled sibling re-places its remaining limit using the sibling's
+    # stored lot, not a fresh calc: the Supabase fetch drops hit limits (l.status='hit'),
+    # so recomputing would split the size across fewer survivors and oversize the order.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=9101,
+        order_type="buy_limit",
+        lot_size=0.33,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_filled(9101, "2026-01-01T00:01:00+00:00")
+
+    mock_mt5.account_info.return_value = make_account_info()
+    mock_mt5.positions_get.return_value = [make_position(ticket=9101, volume=0.33)]
+    mock_mt5.order_send.return_value = make_order_result(ticket=9102)
+    mock_mt5.order_get_by_ticket.return_value = None
+    row = _make_supabase_row(limit_id=2)  # new pending sibling of the same signal
+    row["price_level"] = 1.09950
+    supabase = _mock_supabase(signals=[row])
+    supabase.fetch_signal_status.return_value = "active"
+    scheduler = _mock_scheduler()
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.placed == 1
+    assert mock_mt5.order_send.call_args.args[0].volume == 0.33
+
+
 async def test_tp_fired_signal_limit_not_replaced(sqlite_db, mock_mt5, sample_config) -> None:
     # Our TP engine fired on signal 1 (durably marked). A new limit on that signal still
     # shows active in Supabase (TM/DB lag), but must NOT be re-placed.

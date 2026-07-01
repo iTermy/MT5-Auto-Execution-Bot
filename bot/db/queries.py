@@ -216,6 +216,19 @@ GET_SIGNALS_WITH_FILLS = """
 SELECT DISTINCT signal_id FROM order_mappings WHERE status IN ('filled', 'closed')
 """
 
+# Per-signal placement lot taken from a sibling that already filled/closed. When a
+# signal has fills and its remaining limits must be re-placed (e.g. a TM
+# cancel→reactivate), reuse this lot instead of recomputing: recomputation divides by
+# only the still-'pending' limit count, since hit siblings drop out of the Supabase
+# fetch (l.status='hit'), which inflates the size. All limits of a signal share one
+# lot, so any filled sibling is representative.
+GET_SIGNAL_FILLED_LOTS = """
+SELECT signal_id, MAX(lot_size) AS lot_size
+FROM order_mappings
+WHERE status IN ('filled', 'closed') AND lot_size IS NOT NULL
+GROUP BY signal_id
+"""
+
 # SQLite — guard table marking a signal's full-trade outcome as already recorded.
 CREATE_SIGNAL_FINALIZED = """
 CREATE TABLE IF NOT EXISTS signal_finalized (

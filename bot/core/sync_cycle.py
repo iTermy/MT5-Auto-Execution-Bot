@@ -721,9 +721,24 @@ class SyncCycle:
                                 )
                                 self._logged_proximity.add(sig_id)
 
-                    # Compute lot once per approved signal (not once per limit)
+                    # Compute lot once per approved signal (not once per limit). If the
+                    # signal already has filled siblings, reuse their placement lot rather
+                    # than recomputing: the Supabase fetch drops hit limits (l.status='hit'),
+                    # so recomputation would divide the size across only the still-pending
+                    # survivors and oversize the re-placed limits.
+                    filled_lots = await sqlite.get_signal_filled_lots()
                     signal_lots: dict[int, float] = {}
                     for sig_id in approved_signals:
+                        prior_lot = filled_lots.get(sig_id)
+                        if prior_lot is not None:
+                            signal_lots[sig_id] = prior_lot
+                            logger.info(
+                                "Signal %d: reusing filled-sibling lot=%.2f for %d re-placed limit(s)",
+                                sig_id,
+                                prior_lot,
+                                len(new_by_signal[sig_id]),
+                            )
+                            continue
                         lids = new_by_signal[sig_id]
                         row0 = supabase_by_limit[lids[0]]
                         all_prices = [float(r["price_level"]) for r in by_signal[sig_id]]

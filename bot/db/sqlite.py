@@ -26,6 +26,7 @@ from bot.db.queries import (
     GET_PENDING_ORDERS,
     GET_SETTLED_UNFINALIZED_SIGNALS,
     GET_SIGNAL_ACTIONS,
+    GET_SIGNAL_FILLED_LOTS,
     GET_SIGNAL_FINAL_AGGREGATE,
     GET_SIGNALS_WITH_FILLS,
     GET_TP_FIRED_SIGNALS,
@@ -371,6 +372,11 @@ class SQLiteDB:
         async with self._db.execute(GET_SIGNALS_WITH_FILLS) as cursor:
             rows = await cursor.fetchall()
         return {row["signal_id"] for row in rows}
+
+    async def get_signal_filled_lots(self) -> dict[int, float]:
+        async with self._db.execute(GET_SIGNAL_FILLED_LOTS) as cursor:
+            rows = await cursor.fetchall()
+        return {row["signal_id"]: row["lot_size"] for row in rows}
 
     async def get_order_history(self, from_date: str, to_date: str) -> list[aiosqlite.Row]:
         async with self._db.execute(GET_ORDER_HISTORY, (from_date, to_date)) as cursor:

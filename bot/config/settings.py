@@ -200,6 +200,14 @@ class TPConfig(BaseModel):
 class Settings(BaseModel):
     license_key: str = ""
     mt5_terminal_path: str = ""
+    # Which copy of the bot this is when running several side by side on one machine.
+    # Left at 1 (or absent) it behaves exactly like a lone install: single-instance
+    # lock "mt5bot.lock" and UI port 8501. Give a *separate* install folder — with its
+    # own config.json, orders.db, and mt5_terminal_path — instance_id 2, 3, ... to run
+    # concurrently: each instance N takes lock "mt5bot-N.lock" and port 8500+N. Two
+    # folders sharing an instance_id still exclude each other (same lock), so the
+    # double-open guard holds per instance.
+    instance_id: int = 1
     lot_sizing: LotSizingConfig = LotSizingConfig()
     polling: PollingConfig = PollingConfig()
     magic_number: int = 20250001
@@ -269,6 +277,13 @@ class Settings(BaseModel):
                 {"suffix": data["universal_suffix"], "asset_classes": sorted(_VALID_ASSET_CLASSES)}
             ]
         return data
+
+    @field_validator("instance_id")
+    @classmethod
+    def _positive_instance_id(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("instance_id must be >= 1")
+        return v
 
     @field_validator("symbol_suffixes")
     @classmethod

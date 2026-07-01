@@ -430,7 +430,7 @@ class Engine:
             cfg = uvicorn.Config(
                 self.app,
                 host="127.0.0.1",
-                port=8501,
+                port=8500 + self._config.instance_id,
                 log_level="error",
                 log_config=None,
                 loop="none",

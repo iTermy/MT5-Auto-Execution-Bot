@@ -38,19 +38,27 @@ from bot.utils.logging import setup_logging
 
 logger = logging.getLogger(__name__)
 
-_API_URL = "http://localhost:8501"
-_LOCK_PATH = Path(tempfile.gettempdir()) / "mt5bot.lock"
+
+def _api_url(instance_id: int) -> str:
+    return f"http://localhost:{8500 + instance_id}"
 
 
-def _acquire_single_instance_lock() -> int | None:
-    """Take an exclusive lock on a temp file to prevent a second MT5Bot.exe
-    from running concurrently. Returns the file descriptor on success or None
-    if another instance already holds the lock."""
+def _lock_path(instance_id: int) -> Path:
+    name = "mt5bot.lock" if instance_id == 1 else f"mt5bot-{instance_id}.lock"
+    return Path(tempfile.gettempdir()) / name
+
+
+def _acquire_single_instance_lock(lock_path: Path) -> int | None:
+    """Take an exclusive lock on a temp file to prevent a second MT5Bot.exe of the
+    same instance_id from running concurrently. Returns the file descriptor on
+    success or None if another instance already holds the lock. The lock name is
+    keyed by instance_id, so distinct instances coexist while duplicates of the
+    same instance still exclude each other."""
     import msvcrt
 
     fd = None
     try:
-        fd = _LOCK_PATH.open("w+")
+        fd = lock_path.open("w+")
         msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         if fd is not None:
@@ -78,11 +86,11 @@ def _make_tray_icon() -> Image.Image:
     return Image.open(_BUNDLE_DIR / "assets" / "logo.png")
 
 
-def _wait_for_api(timeout: float = 30.0) -> bool:
+def _wait_for_api(api_url: str, timeout: float = 30.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            urllib.request.urlopen(f"{_API_URL}/api/status", timeout=1)
+            urllib.request.urlopen(f"{api_url}/api/status", timeout=1)
             return True
         except Exception:
             time.sleep(0.25)
@@ -120,15 +128,6 @@ def main() -> None:
         Path.cwd(),
     )
 
-    if _acquire_single_instance_lock() is None:
-        ctypes.windll.user32.MessageBoxW(
-            0,
-            "MT5 Auto Execution Bot is already running. Check your system tray.",
-            "MT5Bot",
-            0x40,  # MB_ICONINFORMATION
-        )
-        sys.exit(0)
-
     _ensure_config_exists()
     migrate_config()
 
@@ -136,6 +135,17 @@ def main() -> None:
     if config is None:
         logger.critical("Failed to load config.json — copy config.example.json to config.json")
         sys.exit(1)
+
+    api_url = _api_url(config.instance_id)
+
+    if _acquire_single_instance_lock(_lock_path(config.instance_id)) is None:
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "MT5 Auto Execution Bot is already running. Check your system tray.",
+            "MT5Bot",
+            0x40,  # MB_ICONINFORMATION
+        )
+        sys.exit(0)
 
     dsn = load_dsn()
     license_url = load_license_url()
@@ -165,7 +175,7 @@ def main() -> None:
     engine.app = create_app(engine)
 
     def on_open(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
-        webbrowser.open(_API_URL)
+        webbrowser.open(api_url)
 
     def on_exit(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
         engine.shutdown()
@@ -189,10 +199,10 @@ def main() -> None:
     )
     engine_thread.start()
 
-    if _wait_for_api():
-        webbrowser.open(_API_URL)
+    if _wait_for_api(api_url):
+        webbrowser.open(api_url)
     else:
-        logger.warning("FastAPI did not become ready within 30s — open %s manually", _API_URL)
+        logger.warning("FastAPI did not become ready within 30s — open %s manually", api_url)
 
     tray.run()
 

@@ -3,9 +3,11 @@ import json
 from bot.config.settings import (
     _MIGRATION_OFFSET_BACKFILL,
     _MIGRATION_PROXIMITY_BUMP,
+    _MIGRATION_RISKY_GOLD_DISABLED,
     _MIGRATION_SPREAD_HOUR_LATE,
     _MIGRATION_SYMBOL_MAP_BACKFILL,
     _OFFSET_BACKFILL_SYMBOLS,
+    _RISKY_GOLD_CHANNEL_ID,
     migrate_config,
 )
 
@@ -203,6 +205,41 @@ def test_symbol_map_backfill_is_idempotent_and_respects_removal(tmp_path) -> Non
 
     migrate_config(cfg)
     assert "UK100USD" not in _read(cfg)["offset_instruments"]  # not re-added
+
+
+def test_risky_gold_channel_disabled_by_default(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"disabled_channels": ["1512881096650391582"]})
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert _RISKY_GOLD_CHANNEL_ID in data["disabled_channels"]
+    assert "1512881096650391582" in data["disabled_channels"]  # existing entries preserved
+    assert _MIGRATION_RISKY_GOLD_DISABLED in data["config_migrations"]
+
+
+def test_risky_gold_disable_seeds_list_when_key_absent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {})
+
+    migrate_config(cfg)
+
+    assert _read(cfg)["disabled_channels"] == [_RISKY_GOLD_CHANNEL_ID]
+
+
+def test_risky_gold_disable_is_idempotent_and_respects_reenable(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {})
+    migrate_config(cfg)
+
+    # User re-enables the channel after the one-time migration.
+    data = _read(cfg)
+    data["disabled_channels"].remove(_RISKY_GOLD_CHANNEL_ID)
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    assert _RISKY_GOLD_CHANNEL_ID not in _read(cfg)["disabled_channels"]  # not re-added
 
 
 def test_missing_file_is_noop(tmp_path) -> None:

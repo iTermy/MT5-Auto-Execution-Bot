@@ -14,6 +14,7 @@ const CHANNEL_NAMES: Record<string, string> = {
   '1512881213017296906': 'Gold Swings',
   '1512881345758757005': 'Gold PA',
   '1512882862494580797': 'Gold 1-1',
+  '1522144546299838524': 'Risky Gold',
   '1512882437267390586': 'OT Calls',
   '1512882024145354833': 'General Tolls',
 }

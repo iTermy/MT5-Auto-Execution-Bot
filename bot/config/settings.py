@@ -72,6 +72,12 @@ _MIGRATION_SPREAD_HOUR_LATE = "spread_hour_late_market_v1"
 # also added to offset_instruments (it postdates the earlier offset backfill).
 _MIGRATION_SYMBOL_MAP_BACKFILL = "symbol_map_backfill_v1"
 
+# Ship the "Risky Gold" channel disabled (unchecked) for existing installs: it appears
+# in the By-channel list after updating but its signals are skipped until the user opts
+# in. Applied once, so a user who later enables it keeps it enabled.
+_RISKY_GOLD_CHANNEL_ID = "1522144546299838524"
+_MIGRATION_RISKY_GOLD_DISABLED = "risky_gold_channel_disabled_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -384,6 +390,17 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
                 smap.setdefault(db_sym, mt5_sym)
             data["symbol_map"] = smap
         applied.append(_MIGRATION_SYMBOL_MAP_BACKFILL)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_RISKY_GOLD_DISABLED not in applied:
+        disabled = data.get("disabled_channels")
+        if not isinstance(disabled, list):
+            disabled = []
+        if _RISKY_GOLD_CHANNEL_ID not in disabled:
+            disabled.append(_RISKY_GOLD_CHANNEL_ID)
+        data["disabled_channels"] = disabled
+        applied.append(_MIGRATION_RISKY_GOLD_DISABLED)
         data["config_migrations"] = applied
         changed = True
 

@@ -25,7 +25,8 @@
     "USOILSPOT": "XTIUSD",
     "US30USD": "US30",
     "US2000USD": "US2000",
-    "DE30EUR": "DE40"
+    "DE30EUR": "DE40",
+    "UK100USD": "UK100"
   },
   "stock_suffix": "-24",
   "symbol_suffixes": [],
@@ -42,7 +43,8 @@
     "USOILSPOT",
     "US30USD",
     "US2000USD",
-    "DE30EUR"
+    "DE30EUR",
+    "UK100USD"
   ],
   "offset_drift": {
     "indices": {
@@ -63,7 +65,7 @@
   },
   "feed_max_staleness_seconds": 120,
   "spread_hour": {
-    "daily_start": "16:45",
+    "daily_start": "15:55",
     "stock_daily_start": "15:45",
     "daily_end": "18:00",
     "sl_strip_start": "16:55",

@@ -30,8 +30,24 @@ DEFAULT_OFFSET_INSTRUMENTS = [
     "US2000USD",
     "USOILSPOT",
     "DE30EUR",
+    "UK100USD",
     "JP225",
 ]
+
+# Default DB→broker symbol map (DB symbol → MT5/broker symbol). Single source for both
+# the Settings.symbol_map default and the symbol-map backfill migration, so an install
+# missing an entry gets the default without overriding any the user has customised.
+_DEFAULT_SYMBOL_MAP = {
+    "SPX500USD": "US500",
+    "NAS100USD": "USTEC",
+    "BTCUSDT": "BTCUSD",
+    "ETHUSDT": "ETHUSD",
+    "USOILSPOT": "XTIUSD",
+    "US30USD": "US30",
+    "US2000USD": "US2000",
+    "DE30EUR": "DE40",
+    "UK100USD": "UK100",
+}
 
 # Symbols every existing install should carry as offset-feed after updating. Applied
 # once per install via `migrate_config` (tracked in `config_migrations`), so a user
@@ -43,6 +59,18 @@ _MIGRATION_OFFSET_BACKFILL = "offset_feed_backfill_v1"
 # $25, indices doubled. Applied once per install via `migrate_config`, so a user may
 # still re-tune any value afterwards without the migration re-applying.
 _MIGRATION_PROXIMITY_BUMP = "proximity_bump_v1"
+
+# Move the forex pending-cancel/placement-block start earlier (16:45 → 15:55) so
+# late-market signals stop activating well before the spread spike. SL stripping is
+# unchanged (sl_strip_start 16:55). Applied once per install via `migrate_config`, so
+# a user may still re-tune daily_start afterwards without the migration re-applying.
+_MIGRATION_SPREAD_HOUR_LATE = "spread_hour_late_market_v1"
+
+# Backfill any missing _DEFAULT_SYMBOL_MAP entry for installs that predate it: without
+# the DB→broker map the offset can't resolve to the broker symbol. Applied via
+# setdefault, so a user who already re-mapped an entry keeps their own choice. UK100 is
+# also added to offset_instruments (it postdates the earlier offset backfill).
+_MIGRATION_SYMBOL_MAP_BACKFILL = "symbol_map_backfill_v1"
 
 
 class SymbolSuffixRule(BaseModel):
@@ -103,7 +131,7 @@ class PollingConfig(BaseModel):
 
 
 class SpreadHourConfig(BaseModel):
-    daily_start: str = "16:45"
+    daily_start: str = "15:55"  # cancel pending / block placement 15 min ahead of the SL-strip window
     stock_daily_start: str = "15:45"  # stocks close at 16:00 — cancel 15 min before
     daily_end: str = "18:00"
     # Filled positions have their SL stripped from here to daily_end so a spread spike
@@ -211,14 +239,7 @@ class Settings(BaseModel):
     lot_sizing: LotSizingConfig = LotSizingConfig()
     polling: PollingConfig = PollingConfig()
     magic_number: int = 20250001
-    symbol_map: dict[str, str] = {
-        "SPX500USD": "US500",
-        "NAS100USD": "USTEC",
-        "BTCUSDT": "BTCUSD",
-        "ETHUSDT": "ETHUSD",
-        "US30USD": "US30",
-        "US2000USD": "US2000",
-    }
+    symbol_map: dict[str, str] = dict(_DEFAULT_SYMBOL_MAP)
     stock_suffix: str = "-24"
     # Per-asset-class broker suffix rules. Each rule appends `suffix` to every MT5
     # symbol whose detected asset class is listed in `asset_classes` (e.g. Exness
@@ -340,6 +361,29 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
                         indices[sym] = value * 2
             data["proximity"] = prox
         applied.append(_MIGRATION_PROXIMITY_BUMP)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_SPREAD_HOUR_LATE not in applied:
+        sh = data.get("spread_hour")
+        if isinstance(sh, dict):
+            sh["daily_start"] = "15:55"
+            data["spread_hour"] = sh
+        applied.append(_MIGRATION_SPREAD_HOUR_LATE)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_SYMBOL_MAP_BACKFILL not in applied:
+        offset = data.get("offset_instruments")
+        if isinstance(offset, list) and "UK100USD" not in offset:
+            offset.append("UK100USD")
+            data["offset_instruments"] = offset
+        smap = data.get("symbol_map")
+        if isinstance(smap, dict):
+            for db_sym, mt5_sym in _DEFAULT_SYMBOL_MAP.items():
+                smap.setdefault(db_sym, mt5_sym)
+            data["symbol_map"] = smap
+        applied.append(_MIGRATION_SYMBOL_MAP_BACKFILL)
         data["config_migrations"] = applied
         changed = True
 

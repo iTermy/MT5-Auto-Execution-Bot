@@ -728,6 +728,11 @@ class Engine:
             # trading gates rely on that), which the "Market closed" banner covers.
             "spread_hour_active": self._scheduler.is_spread_hour()
             and not self._scheduler.is_weekend_window(),
+            # True only once SLs are actually being stripped (spread-hour proper); the
+            # earlier daily_start..sl_strip_start slice is the "late-market" window where
+            # only pending orders are cancelled. Lets the UI split the two banners.
+            "sl_strip_active": self._scheduler.is_sl_strip_window()
+            and not self._scheduler.is_weekend_window(),
             "market_closed": self._scheduler.is_weekend_window(),
             "algo_trading_disabled": mt5_connected and not self._last_trade_allowed,
             "symbol_count": len(self.broker_symbols),

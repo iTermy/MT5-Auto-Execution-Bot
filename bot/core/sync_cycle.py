@@ -1260,7 +1260,7 @@ class SyncCycle:
             signal_rows = [r for r in all_filled_rows if r["signal_id"] == signal_id]
 
             # Cancelled status: only force-close if the cancellation is happening within
-            # the forex weekend window (Fri >=16:45 EST through Sun <18:00 EST), because
+            # the forex weekend window (Fri >=15:55 EST through Sun <18:00 EST), because
             # weekday cancellations on a hit signal are expected (TM extends expiry to the
             # next day) and positions should stay open. Crypto stays tradable through the
             # weekend, but a 'cancelled' TM status is the only directive we have for it,

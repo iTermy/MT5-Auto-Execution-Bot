@@ -16,12 +16,12 @@ def _scheduler() -> MarketScheduler:
 
 
 def test_is_weekend_window_friday_before_cutoff() -> None:
-    # Friday Mar 6, 2026 at 16:44 EST — just before the cutoff
-    assert _scheduler().is_weekend_window(_est(2026, 3, 6, 16, 44)) is False
+    # Friday Mar 6, 2026 at 15:54 EST — just before the cutoff
+    assert _scheduler().is_weekend_window(_est(2026, 3, 6, 15, 54)) is False
 
 
 def test_is_weekend_window_friday_at_cutoff() -> None:
-    assert _scheduler().is_weekend_window(_est(2026, 3, 6, 16, 45)) is True
+    assert _scheduler().is_weekend_window(_est(2026, 3, 6, 15, 55)) is True
 
 
 def test_is_weekend_window_friday_evening() -> None:
@@ -50,7 +50,7 @@ def test_is_weekend_window_thursday() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-asset spread-hour cutoff: stocks cancel earlier (15:45) than the default (16:45)
+# Per-asset spread-hour cutoff: stocks cancel earlier (15:45) than the default (15:55)
 # ---------------------------------------------------------------------------
 
 
@@ -66,14 +66,15 @@ def test_stock_spread_hour_before_cutoff() -> None:
 
 
 def test_default_spread_hour_at_default_cutoff() -> None:
-    # 16:45 EST — default window opens; stocks have already been in theirs since 15:45
+    # 15:55 EST — default forex window opens; stocks have been in theirs since 15:45
     s = _scheduler()
-    assert s.is_spread_hour(_est(2026, 3, 9, 16, 45), stock=False) is True
-    assert s.is_spread_hour(_est(2026, 3, 9, 16, 45), stock=True) is True
+    assert s.is_spread_hour(_est(2026, 3, 9, 15, 54), stock=False) is False
+    assert s.is_spread_hour(_est(2026, 3, 9, 15, 55), stock=False) is True
+    assert s.is_spread_hour(_est(2026, 3, 9, 15, 55), stock=True) is True
 
 
 def test_stock_friday_weekend_starts_at_stock_cutoff() -> None:
-    # Friday 15:45 EST — the stock weekend closure opens early; default waits for 16:45
+    # Friday 15:45 EST — the stock weekend closure opens early; default waits for 15:55
     s = _scheduler()
     assert s.is_spread_hour(_est(2026, 3, 6, 15, 45), stock=True) is True
     assert s.is_spread_hour(_est(2026, 3, 6, 15, 45), stock=False) is False

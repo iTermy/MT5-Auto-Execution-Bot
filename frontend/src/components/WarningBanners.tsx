@@ -49,17 +49,32 @@ function zonedTimeToLocalLabel(hhmm: string, tz: string): string {
 function buildBanners(status: StatusData | null, config: Config | null): BannerDef[] {
   const banners: BannerDef[] = []
 
-  if (status?.spread_hour_active) {
+  // Two consecutive windows share the same underlying gate. The earlier
+  // daily_start..sl_strip_start slice ("late-market") only cancels/blocks pending
+  // orders; the sl_strip_start..daily_end slice ("spread hour") also strips SLs.
+  if (status?.sl_strip_active) {
     const sh = config?.spread_hour
     const window =
       sh != null
-        ? `${zonedTimeToLocalLabel(sh.daily_start, sh.timezone)}–${zonedTimeToLocalLabel(sh.daily_end, sh.timezone)}`
+        ? `${zonedTimeToLocalLabel(sh.sl_strip_start, sh.timezone)}–${zonedTimeToLocalLabel(sh.daily_end, sh.timezone)}`
         : null
     banners.push({
       id: 'spread-hour',
       tone: 'warn',
       title: window ? `Spread hour (${window})` : 'Spread hour',
       text: 'Pending orders are cancelled and stop-losses on filled positions are removed to avoid the spread spike. Crypto is exempt.',
+    })
+  } else if (status?.spread_hour_active) {
+    const sh = config?.spread_hour
+    const window =
+      sh != null
+        ? `${zonedTimeToLocalLabel(sh.daily_start, sh.timezone)}–${zonedTimeToLocalLabel(sh.sl_strip_start, sh.timezone)}`
+        : null
+    banners.push({
+      id: 'late-market',
+      tone: 'warn',
+      title: window ? `Late-market window (${window})` : 'Late-market window',
+      text: 'Pending orders are cancelled and new orders are blocked to avoid late-market activations. Stop-losses on filled positions stay in place until spread hour. Crypto is exempt.',
     })
   }
 

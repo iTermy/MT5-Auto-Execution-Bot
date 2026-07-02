@@ -206,10 +206,13 @@ Clamped to MT5 symbol volume_min/volume_max, rounded to volume_step.
 
 ## Market Hours / Spread Hour (scheduler.py)
 Pause placement + cancel pending during:
-- Mon-Thu: 4:45 PM - 6:00 PM EST
-- Weekend: Fri 4:45 PM - Sun 6:00 PM EST
+- Mon-Thu: 3:55 PM - 6:00 PM EST
+- Weekend: Fri 3:55 PM - Sun 6:00 PM EST
 
-Cancelled orders marked `spread_cancelled` in SQLite. Re-placed automatically when markets reopen (sync cycle sees DB limit still pending + no active SQLite mapping).
+The window opens at 3:55 PM (an hour before the 5:00 PM spread spike) so late-market
+signals stop activating; the earlier 3:55–4:55 slice is a "late-market" phase (pending
+cancelled, SLs untouched). Filled-position SL stripping stays pinned to spread hour
+proper (4:55–6:00 PM, `sl_strip_start`). Cancelled orders marked `spread_cancelled` in SQLite. Re-placed automatically when markets reopen (sync cycle sees DB limit still pending + no active SQLite mapping).
 
 ## News Mode (per-symbol)
 `bot_mode_status.news_mode` is a comma-separated list of news tokens (NULL = no news). Tokens are currency codes (`USD`, `EUR`, `JPY`, …) plus named assets (`GOLD`), or the single token `ALL`. A token applies to an instrument when, aliased, it is a substring of the DB symbol — so `USD` gates EURUSD, USDJPY, XAUUSD, SPX500USD; `GOLD` aliases to `XAU` and gates XAUUSD only. Oil is USD-denominated but its symbol (e.g. USOILSPOT) has no `USD` substring, so `USD` news gates it via asset class. `ALL` gates everything. Crypto and 24h stocks are exempt (same as the spread gate). Parsing/matching live in `symbol_mapper.py` (`parse_news_symbols`, `instrument_under_news`).
@@ -315,7 +318,7 @@ CREATE TABLE IF NOT EXISTS order_mappings (
   "feed_max_staleness_seconds": 120,
 
   "spread_hour": {
-    "daily_start": "16:45",
+    "daily_start": "15:55",
     "daily_end": "18:00",
     "timezone": "US/Eastern",
     "weekend_start_day": "Friday",

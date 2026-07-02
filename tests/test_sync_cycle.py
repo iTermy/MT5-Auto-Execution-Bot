@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from bot.config.settings import ExcludedChannelAssetConfig
 from bot.core.sync_cycle import SyncCycle
 from tests.conftest import (
@@ -1025,6 +1027,83 @@ async def test_auto_tp_profit_position_kept_open_on_weekday(
 
     mock_mt5.close_position.assert_not_called()
     assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9401}
+
+
+# ---------------------------------------------------------------------------
+# Cancel force-exit: 'near_miss' and 'manual' cancels close immediately on any
+# day / asset class; 'expiry' stays gated to the weekend/crypto window because
+# the TM rolls a weekday-expired hit signal over instead of truly closing it.
+# ---------------------------------------------------------------------------
+
+
+async def test_near_miss_cancel_closes_position_on_weekday(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    await _insert_filled(sqlite_db, mt5_ticket=9501, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9501, symbol="USDCAD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9501)
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {
+        1: {"status": "cancelled", "closed_reason": "near_miss"}
+    }
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_cancelled"
+    assert await sqlite_db.get_filled_positions() == []
+
+
+@pytest.mark.parametrize(
+    "closed_reason",
+    ["manual", "news:EUR", "spread_hour", "late_market"],
+)
+async def test_void_cancel_closes_position_on_weekday(
+    sqlite_db, mock_mt5, sample_config, closed_reason
+) -> None:
+    # Any void/false-trigger cancel (operator !cancel, news window, spread hour, late
+    # market) closes on any day — only 'expiry' stays gated.
+    await _insert_filled(sqlite_db, mt5_ticket=9601, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9601, symbol="USDCAD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9601)
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {
+        1: {"status": "cancelled", "closed_reason": closed_reason}
+    }
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_expiry_cancel_keeps_position_open_on_weekday(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # A weekday expiry cancellation (TM rolls the hit signal over) holds the position.
+    await _insert_filled(sqlite_db, mt5_ticket=9701, signal_id=1, symbol="USDCAD")
+    mock_mt5.positions_get.return_value = [make_position(ticket=9701, symbol="USDCAD")]
+
+    supabase = _mock_supabase(signals=[])
+    supabase.fetch_signal_statuses.return_value = {
+        1: {"status": "cancelled", "closed_reason": "expiry"}
+    }
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9701}
 
 
 # ---------------------------------------------------------------------------

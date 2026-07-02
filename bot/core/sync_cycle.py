@@ -56,6 +56,12 @@ class SyncResult:
 
 
 _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
+# 'expiry' is the only cancel reason that keeps a weekday non-crypto position open:
+# the TM rolls a hit signal's expiry forward rather than truly closing it, so those
+# cancels are gated to the weekend/crypto window. Every other cancel reason
+# (near_miss, manual, news:*, spread_hour, late_market) means the signal was voided
+# or falsely triggered, so we force-close on any day and asset class.
+_ROLLOVER_CANCEL_REASONS = frozenset({"expiry"})
 _SL_FAIL_MAX = 5
 _FORCE_EXIT_MAX_ATTEMPTS = 5
 
@@ -1266,8 +1272,13 @@ class SyncCycle:
             # weekend, but a 'cancelled' TM status is the only directive we have for it,
             # so crypto positions always close on cancellation regardless of day/time.
             # 'breakeven' and manual 'profit' statuses close unconditionally.
+            # Cancellations force-close every position regardless of day or asset class
+            # unless the reason is 'expiry' (a rolled-over hit signal). near_miss, manual,
+            # news:*, spread_hour and late_market all mean the signal was voided or falsely
+            # triggered, so our fill must go. The remaining pending limits drop out of the
+            # active fetch and are cancelled by the stale-pending sweep.
             gate_reason = current
-            if current == "cancelled":
+            if current == "cancelled" and closed_reason in _ROLLOVER_CANCEL_REASONS:
                 is_weekend = scheduler.is_weekend_window()
                 if not is_weekend:
                     crypto_rows = [
@@ -1288,6 +1299,8 @@ class SyncCycle:
                     gate_reason = "cancelled_crypto"
                 else:
                     gate_reason = "cancelled_weekend"
+            elif current == "cancelled":
+                gate_reason = f"cancelled_{closed_reason}"
 
             logger.warning(
                 "Forced exit: signal %d status %r -> %r closed_reason=%r reason=%s — closing %d position(s)",

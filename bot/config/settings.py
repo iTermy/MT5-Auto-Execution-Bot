@@ -78,6 +78,13 @@ _MIGRATION_SYMBOL_MAP_BACKFILL = "symbol_map_backfill_v1"
 _RISKY_GOLD_CHANNEL_ID = "1522144546299838524"
 _MIGRATION_RISKY_GOLD_DISABLED = "risky_gold_channel_disabled_v1"
 
+# Move the stock spread-hour windows earlier (both to 15:40) for existing installs. The
+# old sl_strip_stock_start (15:55) fired after the broker had already shut the symbol at
+# the 16:00 close, so the SL strip was rejected with MARKET_CLOSED; 15:40 lands while the
+# session is still open. stock_daily_start moves in step so cancellation stays aligned.
+# Applied once per install, so a user may re-tune either value afterwards.
+_MIGRATION_STOCK_SPREAD_EARLY = "stock_spread_hour_early_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -137,14 +144,18 @@ class PollingConfig(BaseModel):
 
 
 class SpreadHourConfig(BaseModel):
-    daily_start: str = "15:55"  # cancel pending / block placement 15 min ahead of the SL-strip window
-    stock_daily_start: str = "15:45"  # stocks close at 16:00 — cancel 15 min before
+    daily_start: str = (
+        "15:55"  # cancel pending / block placement 15 min ahead of the SL-strip window
+    )
+    stock_daily_start: str = "15:40"  # stocks close at 16:00 — cancel 20 min before
     daily_end: str = "18:00"
     # Filled positions have their SL stripped from here to daily_end so a spread spike
-    # can't stop them out, then it's restored. Starts ~5 min before the spread spike
-    # (forex 17:00, stocks' 16:00 close).
+    # can't stop them out, then it's restored. Starts ~5 min before the spread spike for
+    # forex (17:00 rollover). Stocks strip at 15:40 — the broker shuts the symbol at the
+    # 16:00 close and rejects SL modifications past then, so the strip must land while the
+    # session is still open.
     sl_strip_start: str = "16:55"
-    sl_strip_stock_start: str = "15:55"
+    sl_strip_stock_start: str = "15:40"
     timezone: str = "US/Eastern"
     weekend_start_day: str = "Friday"
     weekend_end_day: str = "Sunday"
@@ -401,6 +412,16 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
             disabled.append(_RISKY_GOLD_CHANNEL_ID)
         data["disabled_channels"] = disabled
         applied.append(_MIGRATION_RISKY_GOLD_DISABLED)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_STOCK_SPREAD_EARLY not in applied:
+        sh = data.get("spread_hour")
+        if isinstance(sh, dict):
+            sh["stock_daily_start"] = "15:40"
+            sh["sl_strip_stock_start"] = "15:40"
+            data["spread_hour"] = sh
+        applied.append(_MIGRATION_STOCK_SPREAD_EARLY)
         data["config_migrations"] = applied
         changed = True
 

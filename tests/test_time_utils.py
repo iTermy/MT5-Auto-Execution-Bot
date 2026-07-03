@@ -55,18 +55,18 @@ def test_is_weekend_window_thursday() -> None:
 
 
 def test_stock_spread_hour_starts_at_stock_cutoff() -> None:
-    # Monday 15:45 EST — stocks are in their window; everything else isn't yet
+    # Monday 15:40 EST — stocks are in their window; everything else isn't yet
     s = _scheduler()
-    assert s.is_spread_hour(_est(2026, 3, 9, 15, 45), stock=True) is True
-    assert s.is_spread_hour(_est(2026, 3, 9, 15, 45), stock=False) is False
+    assert s.is_spread_hour(_est(2026, 3, 9, 15, 40), stock=True) is True
+    assert s.is_spread_hour(_est(2026, 3, 9, 15, 40), stock=False) is False
 
 
 def test_stock_spread_hour_before_cutoff() -> None:
-    assert _scheduler().is_spread_hour(_est(2026, 3, 9, 15, 44), stock=True) is False
+    assert _scheduler().is_spread_hour(_est(2026, 3, 9, 15, 39), stock=True) is False
 
 
 def test_default_spread_hour_at_default_cutoff() -> None:
-    # 15:55 EST — default forex window opens; stocks have been in theirs since 15:45
+    # 15:55 EST — default forex window opens; stocks have been in theirs since 15:40
     s = _scheduler()
     assert s.is_spread_hour(_est(2026, 3, 9, 15, 54), stock=False) is False
     assert s.is_spread_hour(_est(2026, 3, 9, 15, 55), stock=False) is True
@@ -74,10 +74,10 @@ def test_default_spread_hour_at_default_cutoff() -> None:
 
 
 def test_stock_friday_weekend_starts_at_stock_cutoff() -> None:
-    # Friday 15:45 EST — the stock weekend closure opens early; default waits for 15:55
+    # Friday 15:40 EST — the stock weekend closure opens early; default waits for 15:55
     s = _scheduler()
-    assert s.is_spread_hour(_est(2026, 3, 6, 15, 45), stock=True) is True
-    assert s.is_spread_hour(_est(2026, 3, 6, 15, 45), stock=False) is False
+    assert s.is_spread_hour(_est(2026, 3, 6, 15, 40), stock=True) is True
+    assert s.is_spread_hour(_est(2026, 3, 6, 15, 40), stock=False) is False
 
 
 # ---------------------------------------------------------------------------
@@ -92,12 +92,13 @@ def test_sl_strip_window_forex_opens_at_1655() -> None:
     assert s.is_sl_strip_window(_est(2026, 3, 9, 16, 55), stock=False) is True
 
 
-def test_sl_strip_window_stock_opens_at_1555() -> None:
+def test_sl_strip_window_stock_opens_at_1540() -> None:
     s = _scheduler()
-    # Stocks strip 5 min before their 16:00 close; forex isn't stripped yet
-    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 54), stock=True) is False
-    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 55), stock=True) is True
-    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 55), stock=False) is False
+    # Stocks strip 20 min before their 16:00 close, while the session is still open so
+    # the broker accepts the SL modification; forex isn't stripped yet
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 39), stock=True) is False
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 40), stock=True) is True
+    assert s.is_sl_strip_window(_est(2026, 3, 9, 15, 40), stock=False) is False
 
 
 def test_sl_strip_window_closes_at_daily_end() -> None:

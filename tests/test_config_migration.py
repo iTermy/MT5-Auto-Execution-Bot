@@ -5,6 +5,7 @@ from bot.config.settings import (
     _MIGRATION_PROXIMITY_BUMP,
     _MIGRATION_RISKY_GOLD_DISABLED,
     _MIGRATION_SPREAD_HOUR_LATE,
+    _MIGRATION_STOCK_SPREAD_EARLY,
     _MIGRATION_SYMBOL_MAP_BACKFILL,
     _OFFSET_BACKFILL_SYMBOLS,
     _RISKY_GOLD_CHANNEL_ID,
@@ -159,6 +160,35 @@ def test_spread_hour_late_noop_when_key_absent(tmp_path) -> None:
     data = _read(cfg)
     assert "spread_hour" not in data  # new default (15:55) applies at load
     assert _MIGRATION_SPREAD_HOUR_LATE in data["config_migrations"]
+
+
+def test_stock_spread_hour_early_moves_both_stock_starts(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(
+        cfg,
+        {"spread_hour": {"stock_daily_start": "15:45", "sl_strip_stock_start": "15:55"}},
+    )
+
+    migrate_config(cfg)
+
+    sh = _read(cfg)["spread_hour"]
+    assert sh["stock_daily_start"] == "15:40"
+    assert sh["sl_strip_stock_start"] == "15:40"
+    assert _MIGRATION_STOCK_SPREAD_EARLY in _read(cfg)["config_migrations"]
+
+
+def test_stock_spread_hour_early_is_idempotent_and_respects_retuning(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"spread_hour": {"sl_strip_stock_start": "15:55"}})
+    migrate_config(cfg)
+
+    # User re-tunes after the one-time migration.
+    data = _read(cfg)
+    data["spread_hour"]["sl_strip_stock_start"] = "15:50"
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    assert _read(cfg)["spread_hour"]["sl_strip_stock_start"] == "15:50"  # not re-applied
 
 
 def test_symbol_map_backfill_adds_uk100_offset_and_default_maps(tmp_path) -> None:

@@ -1611,7 +1611,7 @@ select.inp {
     transform: translateY(9px);
   }
   to {
-    transform: translateY(0);
+    transform: none;
   }
 }
 @keyframes draw {

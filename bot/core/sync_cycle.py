@@ -985,15 +985,26 @@ class SyncCycle:
                 # the placement proximity check next cycle, re-placing only if price
                 # returns. Signals with fills (or DB-hit) are spared, exactly as offset
                 # drift does: their ladder is mid-trade and must not be disturbed.
+                #
+                # Evaluated per signal as one unit — same min-distance rule placement uses
+                # (_within_proximity over all the signal's limit prices). A ladder is either
+                # in proximity (keep every limit) or out (cancel every limit) together. A
+                # per-limit check here would fight placement: placement arms the whole ladder
+                # whenever its closest limit is near, so cancelling only the farther limits
+                # leaves the closest pending, then the closest drifting out re-arms the whole
+                # ladder next cycle — an endless place-7/cancel-6 churn.
+                drift_by_signal: dict[int, list] = defaultdict(list)
                 for row in sqlite_pending:
                     if row["mt5_ticket"] in repriced_tickets:
                         continue
-                    lid = row["limit_id"]
-                    if lid not in supabase_by_limit:
+                    if row["limit_id"] not in supabase_by_limit:
                         continue
                     if row["signal_id"] in signals_blocked_from_drift:
                         continue
-                    db_sym = supabase_by_limit[lid]["instrument"]
+                    drift_by_signal[row["signal_id"]].append(row)
+
+                for sig_rows in drift_by_signal.values():
+                    db_sym = supabase_by_limit[sig_rows[0]["limit_id"]]["instrument"]
                     mt5_sym = map_symbol(db_sym, config)
                     info = mt5_client.symbol_info(mt5_sym)
                     if info is None:
@@ -1008,24 +1019,27 @@ class SyncCycle:
                         if tick is None:
                             continue
                         mid = (tick.bid + tick.ask) / 2
-                    price = float(supabase_by_limit[lid]["price_level"])
+                    prices = [
+                        float(supabase_by_limit[r["limit_id"]]["price_level"]) for r in sig_rows
+                    ]
                     if _within_proximity(
-                        [price], mid, detect_asset_class(db_sym), info, config.proximity, db_sym
+                        prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym
                     ):
                         continue
                     logger.info(
-                        "Proximity drift: %s ticket=%d @ %.5f (mid %.5f) — cancelling",
+                        "Proximity drift: %s signal=%d (mid %.5f) — cancelling %d limit(s)",
                         db_sym,
-                        row["mt5_ticket"],
-                        price,
+                        sig_rows[0]["signal_id"],
                         mid,
+                        len(sig_rows),
                     )
-                    ok = await self._canceller.cancel_order(
-                        row["mt5_ticket"], mt5_client, sqlite, spread=False
-                    )
-                    result.cancelled += ok
-                    result.errors += not ok
-                    repriced_tickets.add(row["mt5_ticket"])
+                    for row in sig_rows:
+                        ok = await self._canceller.cancel_order(
+                            row["mt5_ticket"], mt5_client, sqlite, spread=False
+                        )
+                        result.cancelled += ok
+                        result.errors += not ok
+                        repriced_tickets.add(row["mt5_ticket"])
 
         # Always detect fills (runs even when placement_active=False or Supabase down)
         mt5_orders = mt5_client.orders_get()

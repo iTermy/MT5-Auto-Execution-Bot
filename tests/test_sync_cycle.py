@@ -507,6 +507,67 @@ async def test_proximity_drift_keeps_near_pending(sqlite_db, mock_mt5, sample_co
     assert len(await sqlite_db.get_pending_orders()) == 1
 
 
+async def test_proximity_drift_keeps_whole_ladder_when_closest_near(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Two-limit signal: one limit ~0.9 pips from mid (inside proximity), one ~90 pips out.
+    # The ladder is evaluated as one unit — since the closest limit is near (same min-distance
+    # rule placement uses), neither limit is cancelled. Cancelling only the far one would fight
+    # placement and churn the whole ladder every cycle.
+    for lid, ticket in ((1, 2001), (2, 2002)):
+        await sqlite_db.insert_order(
+            limit_id=lid,
+            signal_id=1,
+            mt5_ticket=ticket,
+            order_type="buy_limit",
+            lot_size=0.1,
+            placed_at="2026-01-01T00:00:00+00:00",
+            db_stop_loss=1.08500,
+            signal_type="standard",
+        )
+    near = _make_supabase_row(limit_id=1)
+    near["price_level"] = 1.10010  # ~0.9 pips from mid 1.10001
+    far = _make_supabase_row(limit_id=2)  # price_level 1.09100, ~90 pips out
+    supabase = _mock_supabase(signals=[near, far])
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    assert len(await sqlite_db.get_pending_orders()) == 2
+
+
+async def test_proximity_drift_cancels_whole_ladder_when_all_far(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Both limits sit well outside proximity — the whole ladder is cancelled together.
+    for lid, ticket in ((1, 2001), (2, 2002)):
+        await sqlite_db.insert_order(
+            limit_id=lid,
+            signal_id=1,
+            mt5_ticket=ticket,
+            order_type="buy_limit",
+            lot_size=0.1,
+            placed_at="2026-01-01T00:00:00+00:00",
+            db_stop_loss=1.08500,
+            signal_type="standard",
+        )
+    mock_mt5.cancel_pending_order.side_effect = lambda t: make_order_result(ticket=t)
+    a = _make_supabase_row(limit_id=1)  # 1.09100, ~90 pips out
+    b = _make_supabase_row(limit_id=2)
+    b["price_level"] = 1.09000  # ~100 pips out
+    supabase = _mock_supabase(signals=[a, b])
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 2
+    assert len(await sqlite_db.get_pending_orders()) == 0
+
+
 async def test_proximity_drift_spares_signal_with_fills(sqlite_db, mock_mt5, sample_config) -> None:
     # A far pending on a signal that already has a filled sibling is left alone — its
     # ladder is mid-trade, same guard offset drift uses.

@@ -417,6 +417,11 @@ class SyncCycle:
             tp_fired_signals = await sqlite.get_tp_fired_signals()
 
             if placement_active:
+                # Tickets already cancelled by a maintenance loop this cycle (SL change,
+                # offset drift, proximity drift) — so a later loop over the same pending
+                # snapshot doesn't fire a second cancel at an already-gone order.
+                repriced_tickets: set[int] = set()
+
                 # Safety net: cancel any still-pending order on a TP-fired signal. The TP
                 # engine cancels these the moment it fires; this re-cancels if that order
                 # send failed, so a TP'd signal can never leave a live entry behind.
@@ -487,6 +492,7 @@ class SyncCycle:
                         )
                         result.cancelled += ok
                         result.errors += not ok
+                        repriced_tickets.add(row["mt5_ticket"])
 
                 new_limit_ids = supabase_limit_ids - sqlite_limit_ids
 
@@ -923,6 +929,8 @@ class SyncCycle:
                 }
                 signals_blocked_from_drift = signals_with_fills | signals_hit_in_db
                 for row in sqlite_pending:
+                    if row["mt5_ticket"] in repriced_tickets:
+                        continue
                     if row["offset_at_placement"] is None:
                         continue
                     if row["limit_id"] not in supabase_by_limit:
@@ -968,6 +976,56 @@ class SyncCycle:
                         )
                         result.cancelled += ok
                         result.errors += not ok
+                        repriced_tickets.add(row["mt5_ticket"])
+
+                # Proximity drift: cancel active pendings that have walked outside their
+                # proximity threshold. Proximity is otherwise only a placement gate, so a
+                # limit placed while near price — or before the threshold was tightened —
+                # would sit forever as the market moves away. Cancelled here it re-enters
+                # the placement proximity check next cycle, re-placing only if price
+                # returns. Signals with fills (or DB-hit) are spared, exactly as offset
+                # drift does: their ladder is mid-trade and must not be disturbed.
+                for row in sqlite_pending:
+                    if row["mt5_ticket"] in repriced_tickets:
+                        continue
+                    lid = row["limit_id"]
+                    if lid not in supabase_by_limit:
+                        continue
+                    if row["signal_id"] in signals_blocked_from_drift:
+                        continue
+                    db_sym = supabase_by_limit[lid]["instrument"]
+                    mt5_sym = map_symbol(db_sym, config)
+                    info = mt5_client.symbol_info(mt5_sym)
+                    if info is None:
+                        continue
+                    if needs_offset(db_sym, config):
+                        live_row = live_prices.get(db_sym)
+                        if live_row is None:
+                            continue
+                        mid = (float(live_row["bid"]) + float(live_row["ask"])) / 2
+                    else:
+                        tick = mt5_client.symbol_info_tick(mt5_sym)
+                        if tick is None:
+                            continue
+                        mid = (tick.bid + tick.ask) / 2
+                    price = float(supabase_by_limit[lid]["price_level"])
+                    if _within_proximity(
+                        [price], mid, detect_asset_class(db_sym), info, config.proximity, db_sym
+                    ):
+                        continue
+                    logger.info(
+                        "Proximity drift: %s ticket=%d @ %.5f (mid %.5f) — cancelling",
+                        db_sym,
+                        row["mt5_ticket"],
+                        price,
+                        mid,
+                    )
+                    ok = await self._canceller.cancel_order(
+                        row["mt5_ticket"], mt5_client, sqlite, spread=False
+                    )
+                    result.cancelled += ok
+                    result.errors += not ok
+                    repriced_tickets.add(row["mt5_ticket"])
 
         # Always detect fills (runs even when placement_active=False or Supabase down)
         mt5_orders = mt5_client.orders_get()

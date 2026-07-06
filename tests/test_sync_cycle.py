@@ -450,6 +450,100 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
     assert len(rows) == 0
 
 
+# ---------------------------------------------------------------------------
+# Proximity drift: a placed pending that walks outside proximity is cancelled
+# ---------------------------------------------------------------------------
+
+
+async def test_proximity_drift_cancels_far_pending(sqlite_db, mock_mt5, sample_config) -> None:
+    # Known EURUSD pending sitting ~90 pips from the broker mid (1.10001) — well outside
+    # the 15-pip forex proximity. SL matches the DB so the SL-change loop stays out of it.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=2001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=2001)
+
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1)])  # price_level 1.09100
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 1
+    mock_mt5.cancel_pending_order.assert_called_once_with(2001)
+    assert len(await sqlite_db.get_pending_orders()) == 0
+
+
+async def test_proximity_drift_keeps_near_pending(sqlite_db, mock_mt5, sample_config) -> None:
+    # Same setup but the limit sits ~1 pip from the broker mid — inside proximity, so it
+    # must be left alone (not cancelled, not re-placed).
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=2001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    row = _make_supabase_row(limit_id=1)
+    row["price_level"] = 1.10010  # ~0.9 pips from mid 1.10001
+    supabase = _mock_supabase(signals=[row])
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    assert len(await sqlite_db.get_pending_orders()) == 1
+
+
+async def test_proximity_drift_spares_signal_with_fills(sqlite_db, mock_mt5, sample_config) -> None:
+    # A far pending on a signal that already has a filled sibling is left alone — its
+    # ladder is mid-trade, same guard offset drift uses.
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=2001,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=1,
+        mt5_ticket=2002,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+    )
+    await sqlite_db.mark_filled_and_set_position_ticket(2002, 5002, "2026-01-01T00:01:00+00:00")
+
+    supabase = _mock_supabase(
+        signals=[_make_supabase_row(limit_id=1), _make_supabase_row(limit_id=2)]
+    )
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+
+
 async def test_placement_skips_limit_past_current_price(sqlite_db, mock_mt5, sample_config) -> None:
     # New EURUSD long limit whose price is at/above current ask — would have to
     # be a buy_stop. Should be skipped, not placed as a stop.
@@ -764,6 +858,7 @@ async def test_news_cancels_only_matching_symbol(sqlite_db, mock_mt5, sample_con
 
     eur = _make_supabase_row(limit_id=1, signal_id=1, instrument="EURUSD")
     gbp = _make_supabase_row(limit_id=2, signal_id=2, instrument="GBPAUD")
+    gbp["price_level"] = 1.10010  # near the mock mid so proximity drift leaves it alone
     supabase = _mock_supabase(signals=[eur, gbp], news_mode="USD")
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -1237,7 +1332,7 @@ async def test_drift_check_skipped_within_interval(sqlite_db, mock_mt5, sample_c
 
     row = _make_supabase_row(limit_id=10, instrument="SPX500USD")
     row["stop_loss"] = 4000.0
-    row["price_level"] = 4510.0
+    row["price_level"] = 4590.5  # on the feed mid, so proximity drift stays out of it
     supabase = _mock_supabase(
         signals=[row],
         live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},

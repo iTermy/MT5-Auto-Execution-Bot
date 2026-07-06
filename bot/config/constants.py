@@ -5,7 +5,7 @@ _PRODUCTION_LICENSE_URL: str = ""
 _PRODUCTION_UPDATE_MANIFEST_URL: str = ""
 
 MAGIC_NUMBER: int = 20250001
-BOT_VERSION: str = "1.5.1"
+BOT_VERSION: str = "1.5.2"
 
 
 class AssetClass(str, Enum):

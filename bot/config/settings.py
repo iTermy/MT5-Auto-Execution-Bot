@@ -156,6 +156,12 @@ _MIGRATION_STOCK_PROXIMITY = "stock_proximity_overrides_v1"
 # set their own F40 value keeps it.
 _MIGRATION_INDEX_F40 = "index_proximity_f40_v1"
 
+# Slow the live-price feed pull from 2s to 5s to cut Supabase pooler egress. Existing
+# installs that saved settings via the UI have the old value pinned in config.json
+# (the full model is written back), so the changed default alone never reaches them.
+# Only touch the pinned old default (2) — a user who deliberately set another value keeps it.
+_MIGRATION_LIVE_PRICE_INTERVAL = "live_price_interval_5s_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -217,10 +223,13 @@ class PollingConfig(BaseModel):
     # 1s fill/TP loop keeps running against the last cached snapshot.
     signal_fetch_interval_seconds: int = 5
     mode_gate_interval_seconds: int = 15
+    # Feed health flips only on feed degradation and is a dashboard indicator, not a
+    # trading gate, so it's pulled far less often than the news/vol mode gates.
+    feed_health_interval_seconds: int = 60
     # Feed prices are cached this long between pulls. The offset is anchored to each
-    # row's updated_at and cached 300s, so a couple seconds of fetch staleness is
+    # row's updated_at and cached 300s, so a few seconds of fetch staleness is
     # immaterial; a newly-appeared offset symbol still forces an immediate refetch.
-    live_price_interval_seconds: int = 2
+    live_price_interval_seconds: int = 5
 
 
 class SpreadHourConfig(BaseModel):
@@ -555,6 +564,15 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
                 indices.setdefault("F40", 40.0)
                 data["proximity"] = prox
         applied.append(_MIGRATION_INDEX_F40)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_LIVE_PRICE_INTERVAL not in applied:
+        polling = data.get("polling")
+        if isinstance(polling, dict) and polling.get("live_price_interval_seconds") == 2:
+            polling["live_price_interval_seconds"] = 5
+            data["polling"] = polling
+        applied.append(_MIGRATION_LIVE_PRICE_INTERVAL)
         data["config_migrations"] = applied
         changed = True
 

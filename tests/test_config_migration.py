@@ -2,6 +2,7 @@ import json
 
 from bot.config.settings import (
     _MIGRATION_INDEX_F40,
+    _MIGRATION_LIVE_PRICE_INTERVAL,
     _MIGRATION_OFFSET_BACKFILL,
     _MIGRATION_PROXIMITY_BUMP,
     _MIGRATION_RISKY_GOLD_DISABLED,
@@ -353,6 +354,38 @@ def test_index_f40_respects_existing_value(tmp_path) -> None:
     migrate_config(cfg)
 
     assert _read(cfg)["proximity"]["indices"]["F40"] == 60.0  # user's value not overwritten
+
+
+def test_live_price_interval_bumped_from_pinned_default(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"polling": {"live_price_interval_seconds": 2}})
+
+    migrate_config(cfg)
+
+    assert _read(cfg)["polling"]["live_price_interval_seconds"] == 5
+    assert _MIGRATION_LIVE_PRICE_INTERVAL in _read(cfg)["config_migrations"]
+
+
+def test_live_price_interval_respects_custom_value(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"polling": {"live_price_interval_seconds": 10}})
+
+    migrate_config(cfg)
+
+    assert _read(cfg)["polling"]["live_price_interval_seconds"] == 10  # user's value untouched
+
+
+def test_live_price_interval_is_idempotent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"polling": {"live_price_interval_seconds": 2}})
+    migrate_config(cfg)
+
+    # User later drops back to 2 after the one-time migration — must not be re-bumped.
+    data = _read(cfg)
+    data["polling"]["live_price_interval_seconds"] = 2
+    _write(cfg, data)
+    migrate_config(cfg)
+    assert _read(cfg)["polling"]["live_price_interval_seconds"] == 2
 
 
 def test_missing_file_is_noop(tmp_path) -> None:

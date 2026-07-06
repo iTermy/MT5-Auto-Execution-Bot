@@ -586,12 +586,12 @@ class SyncCycle:
                 }
 
                 # Egress guard: feed health flips only on feed degradation, so it's cached
-                # and refreshed on mode_gate_interval_seconds rather than every cycle.
+                # and refreshed on feed_health_interval_seconds rather than every cycle.
                 stale_feeds: set[str] = set()
                 if not self._feed_health_failed:
                     if (
                         cache_now - self._feed_health_cache_at
-                    ) >= config.polling.mode_gate_interval_seconds:
+                    ) >= config.polling.feed_health_interval_seconds:
                         try:
                             feed_health = await supabase.fetch_feed_health()
                             self._stale_feeds_cache = {

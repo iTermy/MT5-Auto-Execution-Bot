@@ -133,6 +133,10 @@ def proximity_threshold(
         return prox.metals
 
     if asset_class == AssetClass.CRYPTO:
+        s = db_sym.upper()
+        for sym, threshold in prox.crypto_overrides.items():
+            if sym.upper() in s:
+                return threshold
         return prox.crypto
 
     if asset_class == AssetClass.OIL:

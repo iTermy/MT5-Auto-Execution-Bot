@@ -153,6 +153,9 @@
       "WMT.NAS":   0.66,
       "XOM.NYSE":  1.0,
       "XYZ.NYSE":  1.5
+    },
+    "crypto_overrides": {
+      "ETHUSDT": 40.0
     }
   },
   "tp_config": {

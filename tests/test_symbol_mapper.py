@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from bot.config.constants import AssetClass
-from bot.config.settings import OffsetDriftConfig
+from bot.config.settings import OffsetDriftConfig, ProximityConfig
 from bot.trading.symbol_mapper import (
     db_symbol_from_mt5,
     detect_asset_class,
@@ -10,6 +10,7 @@ from bot.trading.symbol_mapper import (
     map_symbol,
     offset_drift_threshold,
     parse_news_symbols,
+    proximity_threshold,
 )
 from tests.conftest import make_settings
 
@@ -91,6 +92,18 @@ def test_offset_drift_threshold_resolves_per_asset_class() -> None:
     assert offset_drift_threshold(AssetClass.CRYPTO, drift, "BTCUSDT") == drift.crypto
     assert offset_drift_threshold(AssetClass.OIL, drift, "USOILSPOT") == drift.oil
     assert offset_drift_threshold(AssetClass.METALS, drift, "XAUUSD") == drift.metals
+
+
+# ---------------------------------------------------------------------------
+# proximity_threshold — crypto per-symbol overrides fall back to the flat value
+# ---------------------------------------------------------------------------
+
+
+def test_crypto_proximity_override_beats_flat_default() -> None:
+    prox = ProximityConfig(crypto=1000.0, crypto_overrides={"ETHUSDT": 40.0})
+    # ETH resolves to its override; BTC (no override) keeps the flat crypto value.
+    assert proximity_threshold(AssetClass.CRYPTO, None, prox, "ETHUSDT") == 40.0
+    assert proximity_threshold(AssetClass.CRYPTO, None, prox, "BTCUSDT") == 1000.0
 
 
 # ---------------------------------------------------------------------------

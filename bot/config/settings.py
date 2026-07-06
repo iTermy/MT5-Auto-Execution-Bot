@@ -162,6 +162,12 @@ _MIGRATION_INDEX_F40 = "index_proximity_f40_v1"
 # Only touch the pinned old default (2) — a user who deliberately set another value keeps it.
 _MIGRATION_LIVE_PRICE_INTERVAL = "live_price_interval_5s_v1"
 
+# Seed a per-symbol crypto proximity for ETH. The flat `crypto` threshold (1000) is
+# tuned for BTC (~$100k); on ETH (~$3k) it's ~30% of price, so ETH limits place far from
+# the market. setdefault, so a user who set their own ETHUSDT value keeps it.
+_CRYPTO_PROXIMITY_OVERRIDES = {"ETHUSDT": 40.0}
+_MIGRATION_CRYPTO_PROXIMITY = "crypto_proximity_overrides_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -271,6 +277,7 @@ class ProximityConfig(BaseModel):
         "JP225": 200.0,
     }
     stock_overrides: dict[str, float] = {}
+    crypto_overrides: dict[str, float] = {}
 
 
 class OffsetDriftConfig(BaseModel):
@@ -573,6 +580,19 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
             polling["live_price_interval_seconds"] = 5
             data["polling"] = polling
         applied.append(_MIGRATION_LIVE_PRICE_INTERVAL)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_CRYPTO_PROXIMITY not in applied:
+        prox = data.get("proximity")
+        if isinstance(prox, dict):
+            existing = prox.get("crypto_overrides")
+            existing = existing if isinstance(existing, dict) else {}
+            for sym, value in _CRYPTO_PROXIMITY_OVERRIDES.items():
+                existing.setdefault(sym, value)
+            prox["crypto_overrides"] = existing
+            data["proximity"] = prox
+        applied.append(_MIGRATION_CRYPTO_PROXIMITY)
         data["config_migrations"] = applied
         changed = True
 

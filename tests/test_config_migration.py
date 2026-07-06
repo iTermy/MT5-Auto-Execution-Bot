@@ -1,6 +1,8 @@
 import json
 
 from bot.config.settings import (
+    _CRYPTO_PROXIMITY_OVERRIDES,
+    _MIGRATION_CRYPTO_PROXIMITY,
     _MIGRATION_INDEX_F40,
     _MIGRATION_LIVE_PRICE_INTERVAL,
     _MIGRATION_OFFSET_BACKFILL,
@@ -386,6 +388,40 @@ def test_live_price_interval_is_idempotent(tmp_path) -> None:
     _write(cfg, data)
     migrate_config(cfg)
     assert _read(cfg)["polling"]["live_price_interval_seconds"] == 2
+
+
+def test_crypto_proximity_seeds_eth_when_absent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"proximity": {"crypto": 1000.0}})
+
+    migrate_config(cfg)
+
+    overrides = _read(cfg)["proximity"]["crypto_overrides"]
+    assert overrides["ETHUSDT"] == _CRYPTO_PROXIMITY_OVERRIDES["ETHUSDT"]
+    assert _MIGRATION_CRYPTO_PROXIMITY in _read(cfg)["config_migrations"]
+
+
+def test_crypto_proximity_respects_existing_value(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"proximity": {"crypto_overrides": {"ETHUSDT": 25.0}}})
+
+    migrate_config(cfg)
+
+    assert _read(cfg)["proximity"]["crypto_overrides"]["ETHUSDT"] == 25.0  # not overwritten
+
+
+def test_crypto_proximity_is_idempotent_and_respects_removal(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"proximity": {"crypto": 1000.0}})
+    migrate_config(cfg)
+
+    # User removes the seeded ETH override after the one-time migration.
+    data = _read(cfg)
+    del data["proximity"]["crypto_overrides"]["ETHUSDT"]
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    assert "ETHUSDT" not in _read(cfg)["proximity"]["crypto_overrides"]  # not re-seeded
 
 
 def test_missing_file_is_noop(tmp_path) -> None:

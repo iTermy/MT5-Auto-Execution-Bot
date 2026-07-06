@@ -141,6 +141,15 @@ class PollingConfig(BaseModel):
     tp_active_interval_seconds: int = 1
     tp_trailing_interval_seconds: int = 2
     license_heartbeat_seconds: int = 900
+    # Egress guard: the active-signal set and the news/vol mode gates change at
+    # human speed, so they're re-pulled on these slower intervals even while the
+    # 1s fill/TP loop keeps running against the last cached snapshot.
+    signal_fetch_interval_seconds: int = 5
+    mode_gate_interval_seconds: int = 15
+    # Feed prices are cached this long between pulls. The offset is anchored to each
+    # row's updated_at and cached 300s, so a couple seconds of fetch staleness is
+    # immaterial; a newly-appeared offset symbol still forces an immediate refetch.
+    live_price_interval_seconds: int = 2
 
 
 class SpreadHourConfig(BaseModel):

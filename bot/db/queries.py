@@ -1,6 +1,15 @@
 # Supabase (PostgreSQL) — asyncpg, positional params $1 $2 ...
 
-FETCH_ACTIVE_SIGNALS_WITH_LIMITS = """
+# One round-trip covering the three active-signal sets the sync cycle needs, folded
+# to cut pooler egress. The caller splits the result by (signal_status, limit_status):
+#   - active+pending limits to place (s.status in active/hit AND l.status='pending')
+#   - 'hit' limits to spare from stale-cancel: the TM's feed reached the level but our
+#     broker hasn't filled yet (sub-pip mismatch); a final signal status drops the
+#     signal out, so genuine cancels/closes still cancel.
+#   - every limit of a 'profit'-marked signal (no limit-status filter — marking 'profit'
+#     flips still-pending limits to 'cancelled'): mapped {limit_id: signal_id} so the
+#     caller can spare the ones it still holds while a filled position remains.
+FETCH_SIGNAL_SETS = """
 SELECT
     s.id              AS signal_id,
     s.instrument,
@@ -12,37 +21,13 @@ SELECT
     s.closed_reason,
     l.id              AS limit_id,
     l.price_level,
-    l.sequence_number
+    l.sequence_number,
+    l.status          AS limit_status
 FROM signals s
 JOIN limits l ON l.signal_id = s.id
-WHERE s.status IN ('active', 'hit')
-  AND l.status = 'pending'
+WHERE (s.status IN ('active', 'hit') AND l.status IN ('pending', 'hit'))
+   OR s.status = 'profit'
 ORDER BY s.id, l.sequence_number
-"""
-
-# Limits the TM has marked 'hit' on a still-live signal. Their local pending
-# order is held (not stale-cancelled) — the feed reached the level but our
-# broker hasn't filled yet, usually a sub-pip mismatch. A final signal status
-# drops the signal out of this set, so genuine cancels/closes still cancel.
-FETCH_HIT_LIMIT_IDS = """
-SELECT l.id AS limit_id
-FROM signals s
-JOIN limits l ON l.signal_id = s.id
-WHERE s.status IN ('active', 'hit')
-  AND l.status = 'hit'
-"""
-
-# Every limit of a signal the TM marked 'profit'. Marking 'profit' is a final
-# status on the TM side, which flips the signal's still-pending limits to
-# 'cancelled' (not 'pending'), so we can't filter on the limit status here. We
-# map each limit to its signal and let the caller spare the ones we still hold
-# as local pending orders while a filled position remains — keeping the
-# remaining entries live until our own TP engine closes the trade.
-FETCH_PROFIT_LIMIT_IDS = """
-SELECT l.id AS limit_id, l.signal_id
-FROM signals s
-JOIN limits l ON l.signal_id = s.id
-WHERE s.status = 'profit'
 """
 
 FETCH_LIVE_PRICES = """

@@ -41,9 +41,11 @@ def _mock_supabase(
     profit_limit_ids=None,
 ):
     sb = AsyncMock()
-    sb.fetch_active_signals.return_value = signals or []
-    sb.fetch_hit_limit_ids.return_value = set(hit_limit_ids or [])
-    sb.fetch_profit_limit_ids.return_value = dict(profit_limit_ids or {})
+    sb.fetch_signal_sets.return_value = (
+        signals or [],
+        set(hit_limit_ids or []),
+        dict(profit_limit_ids or {}),
+    )
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
     sb.fetch_mode_gates.return_value = (news_mode, vol_guard)

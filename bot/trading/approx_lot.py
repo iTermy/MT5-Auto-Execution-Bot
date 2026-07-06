@@ -119,9 +119,7 @@ def compute_recommendations(
         # Per-limit lots are step-multiples, so scaling by an integer stays on-step;
         # round to shed binary float artifacts (0.3 * 3 -> 0.8999999999999999).
         return [
-            LotRecommendation(
-                r.symbol, r.signal_type, "total_lot", round(r.value * _AVG_LIMITS, 8)
-            )
+            LotRecommendation(r.symbol, r.signal_type, "total_lot", round(r.value * _AVG_LIMITS, 8))
             for r in out
         ]
 

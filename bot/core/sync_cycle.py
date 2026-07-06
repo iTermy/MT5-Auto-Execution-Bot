@@ -141,6 +141,19 @@ class SyncCycle:
             int, str
         ] = {}  # signal_id -> force-exit status at first detection
         self._feed_health_failed: bool = False
+        # Egress-guard caches: the active-signal set, mode gates, and feed health
+        # change at human speed, so re-pulling them every 1s sync cycle wastes pooler
+        # egress. Each is refreshed only when its interval lapses (see PollingConfig);
+        # downstream placement/gating still runs every cycle against the cached snapshot.
+        self._signal_sets_cache: tuple[list, set[int], dict[int, int]] | None = None
+        self._signal_sets_cache_at: float = 0.0
+        self._gates_cache: tuple[str | None, str | None] | None = None
+        self._gates_cache_at: float = 0.0
+        self._stale_feeds_cache: set[str] = set()
+        self._feed_health_cache_at: float = 0.0
+        self._live_prices_cache: dict = {}
+        self._live_prices_cache_at: float = 0.0
+        self._live_prices_requested: set[str] = set()
         # Snapshots read by DashboardCache to render unplaced "watching" signals.
         # Preserved across Supabase outages so the UI doesn't blank out.
         self.last_supabase_rows: list | None = None
@@ -236,16 +249,31 @@ class SyncCycle:
         manual_sids = {sid for sid, a in actions.items() if a == "manual"}
         unmanaged_sids = skipped_sids | manual_sids
 
-        try:
-            supabase_rows = await supabase.fetch_active_signals()
-        except Exception:
-            logger.error(
-                "Supabase fetch failed — skipping placement phase, running fill detection only",
-                exc_info=True,
-            )
-            supabase_rows = None
+        # Egress guard: pull the active-signal set only when the cache has lapsed;
+        # reuse the last snapshot otherwise so the 1s fill/TP loop doesn't re-fetch
+        # the whole set every cycle. On a fetch failure we skip the placement phase
+        # (run fill detection only), exactly as before.
+        cache_now = time.monotonic()
+        signal_sets = self._signal_sets_cache
+        if signal_sets is None or (
+            (cache_now - self._signal_sets_cache_at) >= config.polling.signal_fetch_interval_seconds
+        ):
+            try:
+                signal_sets = await supabase.fetch_signal_sets()
+                self._signal_sets_cache = signal_sets
+                self._signal_sets_cache_at = cache_now
+            except Exception:
+                logger.error(
+                    "Supabase fetch failed — skipping placement phase, running fill detection only",
+                    exc_info=True,
+                )
+                signal_sets = None
 
-        if supabase_rows is not None:
+        supabase_rows = None
+        hit_limit_ids: set[int] = set()
+        profit_limit_signal: dict[int, int] = {}
+        if signal_sets is not None:
+            supabase_rows, hit_limit_ids, profit_limit_signal = signal_sets
             supabase_rows = self._apply_exclusions(supabase_rows, config)
 
             sqlite_active = await sqlite.get_all_active()
@@ -262,33 +290,17 @@ class SyncCycle:
             supabase_limit_ids = set(supabase_by_limit)
             sqlite_limit_ids = {r["limit_id"] for r in sqlite_active}
 
-            # Limits the TM marked 'hit' while their signal is still live. Their
-            # local pending order is held by the stale-pending sweep below — the
-            # feed reached the level but our broker hasn't filled (sub-pip
-            # mismatch). Defaults empty on failure, reverting to plain stale-cancel.
-            try:
-                hit_limit_ids = await supabase.fetch_hit_limit_ids()
-            except Exception:
-                logger.error(
-                    "Hit-limit fetch failed — stale-pending will not spare hit limits",
-                    exc_info=True,
-                )
-                hit_limit_ids = set()
-
-            # Still-pending limits on a 'profit'-marked signal we still hold a filled
-            # position for. The TM marking 'profit' drops the signal out of the active
-            # set, but we keep its remaining entries live until our own TP engine closes
-            # the trade — once we're flat the signal leaves filled_sids and the limits
-            # fall back to normal stale-cancellation.
+            # hit_limit_ids: limits the TM marked 'hit' while their signal is still live.
+            # Their local pending order is held by the stale-pending sweep below — the
+            # feed reached the level but our broker hasn't filled (sub-pip mismatch).
+            #
+            # profit_held_limit_ids: still-pending limits on a 'profit'-marked signal we
+            # still hold a filled position for. The TM marking 'profit' drops the signal
+            # out of the active set, but we keep its remaining entries live until our own
+            # TP engine closes the trade — once we're flat the signal leaves filled_sids
+            # and the limits fall back to normal stale-cancellation. Both sets come from
+            # the single fetch_signal_sets round-trip above.
             filled_sids = {r["signal_id"] for r in sqlite_active if r["status"] == "filled"}
-            try:
-                profit_limit_signal = await supabase.fetch_profit_limit_ids()
-            except Exception:
-                logger.error(
-                    "Profit-limit fetch failed — stale-pending will not spare profit limits",
-                    exc_info=True,
-                )
-                profit_limit_signal = {}
             profit_held_limit_ids = {
                 lid for lid, sid in profit_limit_signal.items() if sid in filled_sids
             }
@@ -305,14 +317,26 @@ class SyncCycle:
             # it, its tokens are folded into the same set so they cancel/close trades
             # identically. Fetched regardless of placement_active so force-exits still
             # fire while placement is paused.
+            # Egress guard: mode gates track news/vol windows (minute-scale), so they're
+            # cached and refreshed on mode_gate_interval_seconds rather than every cycle.
+            # A fetch failure reuses the last-known gates so gating survives a brief blip.
             news_symbols: frozenset[str] = frozenset()
-            try:
-                news_mode_raw, vol_guard_raw = await supabase.fetch_mode_gates()
+            gates = self._gates_cache
+            if gates is None or (
+                (cache_now - self._gates_cache_at) >= config.polling.mode_gate_interval_seconds
+            ):
+                try:
+                    gates = await supabase.fetch_mode_gates()
+                    self._gates_cache = gates
+                    self._gates_cache_at = cache_now
+                except Exception:
+                    logger.error("Failed to fetch bot mode gates", exc_info=True)
+                    gates = self._gates_cache
+            if gates is not None:
+                news_mode_raw, vol_guard_raw = gates
                 news_symbols = parse_news_symbols(news_mode_raw)
                 if config.volatility_guard:
                     news_symbols |= parse_news_symbols(vol_guard_raw)
-            except Exception:
-                logger.error("Failed to fetch bot mode gates", exc_info=True)
 
             # 'risky' signals are disabled entirely inside their UTC windows (no
             # crypto/24h exemption — the gate is signal-type based, not instrument based).
@@ -358,18 +382,33 @@ class SyncCycle:
                     r for r in sqlite_pending if not _is_blocked(_instr_of(r), r["signal_type"])
                 ]
 
-            # Always fetch live_prices for every offset symbol in the active signal
-            # set — used for placement, drift checks, SL sync, and the dashboard's
-            # "Closest Signals" view (which needs feed_mid for offset symbols).
+            # Feed prices for every offset symbol in the active signal set — used for
+            # placement, drift checks, SL sync, and the dashboard's "Closest Signals"
+            # view. Egress guard: refetch only when the interval lapses OR a newly-
+            # appeared offset symbol isn't cached yet (so a brand-new signal is priced
+            # immediately, no added latency). A fetch failure reuses the last snapshot.
             offset_needed: set[str] = {
                 r["instrument"] for r in supabase_rows if needs_offset(r["instrument"], config)
             }
             live_prices: dict = {}
             if offset_needed:
-                try:
-                    live_prices = await supabase.fetch_live_prices(list(offset_needed))
-                except Exception:
-                    logger.error("Live prices fetch failed", exc_info=True)
+                # "missing" is measured against the last requested set, not the returned
+                # rows: an offset symbol the feed never publishes has no row but was still
+                # asked for, so it must not force a refetch every cycle.
+                missing = offset_needed - self._live_prices_requested
+                if missing or (
+                    (cache_now - self._live_prices_cache_at)
+                    >= config.polling.live_price_interval_seconds
+                ):
+                    try:
+                        self._live_prices_cache = await supabase.fetch_live_prices(
+                            list(offset_needed)
+                        )
+                        self._live_prices_cache_at = cache_now
+                        self._live_prices_requested = set(offset_needed)
+                    except Exception:
+                        logger.error("Live prices fetch failed", exc_info=True)
+                live_prices = self._live_prices_cache
 
             # Signals our own TP engine has already fired on. Once we TP a signal we
             # tear down its remaining limits and must never re-enter them, even while
@@ -546,20 +585,29 @@ class SyncCycle:
                     )
                 }
 
+                # Egress guard: feed health flips only on feed degradation, so it's cached
+                # and refreshed on mode_gate_interval_seconds rather than every cycle.
                 stale_feeds: set[str] = set()
                 if not self._feed_health_failed:
-                    try:
-                        feed_health = await supabase.fetch_feed_health()
-                        stale_feeds = {
-                            feed
-                            for feed, status in feed_health.items()
-                            if status in ("degraded", "down")
-                        }
-                        if stale_feeds:
-                            logger.warning("Stale feeds detected: %s", stale_feeds)
-                    except Exception:
-                        logger.warning("feed_health unavailable — skipping feed staleness checks")
-                        self._feed_health_failed = True
+                    if (
+                        cache_now - self._feed_health_cache_at
+                    ) >= config.polling.mode_gate_interval_seconds:
+                        try:
+                            feed_health = await supabase.fetch_feed_health()
+                            self._stale_feeds_cache = {
+                                feed
+                                for feed, status in feed_health.items()
+                                if status in ("degraded", "down")
+                            }
+                            self._feed_health_cache_at = cache_now
+                            if self._stale_feeds_cache:
+                                logger.warning("Stale feeds detected: %s", self._stale_feeds_cache)
+                        except Exception:
+                            logger.warning(
+                                "feed_health unavailable — skipping feed staleness checks"
+                            )
+                            self._feed_health_failed = True
+                    stale_feeds = self._stale_feeds_cache
 
                 # Group all Supabase rows by signal for lot calculation
                 by_signal: dict[int, list] = defaultdict(list)

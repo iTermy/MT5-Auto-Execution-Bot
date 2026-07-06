@@ -4,12 +4,10 @@ import logging
 import asyncpg
 
 from bot.db.queries import (
-    FETCH_ACTIVE_SIGNALS_WITH_LIMITS,
     FETCH_FEED_HEALTH,
-    FETCH_HIT_LIMIT_IDS,
     FETCH_LIVE_PRICES,
     FETCH_MODE_GATES,
-    FETCH_PROFIT_LIMIT_IDS,
+    FETCH_SIGNAL_SETS,
     FETCH_SIGNAL_STATUS,
     FETCH_SIGNAL_STATUSES,
     UPSERT_USER_SNAPSHOT,
@@ -71,19 +69,28 @@ class SupabaseDB:
             await self._pool.close()
             logger.info("Supabase pool closed")
 
-    async def fetch_active_signals(self) -> list[asyncpg.Record]:
+    async def fetch_signal_sets(
+        self,
+    ) -> tuple[list[asyncpg.Record], set[int], dict[int, int]]:
+        """The three active-signal sets in one round-trip (egress guard): the
+        active+pending rows to place, the TM-marked 'hit' limit ids to spare from
+        stale-cancel, and the {limit_id: signal_id} map for 'profit'-marked signals."""
         async with self._pool.acquire() as conn:
-            return await conn.fetch(FETCH_ACTIVE_SIGNALS_WITH_LIMITS)
-
-    async def fetch_hit_limit_ids(self) -> set[int]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(FETCH_HIT_LIMIT_IDS)
-        return {row["limit_id"] for row in rows}
-
-    async def fetch_profit_limit_ids(self) -> dict[int, int]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(FETCH_PROFIT_LIMIT_IDS)
-        return {row["limit_id"]: row["signal_id"] for row in rows}
+            rows = await conn.fetch(FETCH_SIGNAL_SETS)
+        active = [
+            r
+            for r in rows
+            if r["signal_status"] in ("active", "hit") and r["limit_status"] == "pending"
+        ]
+        hit_limit_ids = {
+            r["limit_id"]
+            for r in rows
+            if r["signal_status"] in ("active", "hit") and r["limit_status"] == "hit"
+        }
+        profit_limit_signal = {
+            r["limit_id"]: r["signal_id"] for r in rows if r["signal_status"] == "profit"
+        }
+        return active, hit_limit_ids, profit_limit_signal
 
     async def fetch_live_prices(self, symbols: list[str]) -> dict[str, asyncpg.Record]:
         async with self._pool.acquire() as conn:

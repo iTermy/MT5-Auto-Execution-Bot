@@ -60,6 +60,21 @@ def get_config(
         threshold_unit = "dollars"
         partial_close_percent = 100
         trailing_distance = 0.0
+    elif signal_type == "risky":
+        # Dedicated config: dollar threshold with normal trailing/partial close. Its own
+        # base (not the asset-class base) so gold risky defaults to $4, and an optional
+        # per-asset-class override.
+        risky = tp.risky
+        profit_threshold = risky.profit_threshold
+        threshold_unit = risky.threshold_unit
+        trailing_distance = risky.trailing_distance
+        partial_close_percent = risky.partial_close_percent
+        ov = risky.overrides.get(key)
+        if ov is not None:
+            profit_threshold = ov.profit_threshold
+            trailing_distance = ov.trailing_distance
+            if ov.partial_close_percent is not None:
+                partial_close_percent = ov.partial_close_percent
     else:
         override_map = {
             "scalp": tp.scalp_overrides,

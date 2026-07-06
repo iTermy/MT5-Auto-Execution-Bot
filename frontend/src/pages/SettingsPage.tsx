@@ -61,6 +61,7 @@ const LOT_SIGNAL_TYPES: { value: string; label: string }[] = [
   { value: 'toll', label: 'Toll' },
   { value: 'pa', label: 'PA' },
   { value: '1-1', label: '1-1' },
+  { value: 'risky', label: 'Risky' },
 ]
 
 // Concrete signal types (no "all") — used for the wholesale skip checkboxes.
@@ -298,7 +299,7 @@ function CollapsibleSection({
   )
 }
 
-type SectionKey = 'lot' | 'tp' | 'oneToOne' | 'symbols' | 'excluded' | 'misc'
+type SectionKey = 'lot' | 'tp' | 'oneToOne' | 'risky' | 'symbols' | 'excluded' | 'misc'
 
 interface Props {
   config: Config | null
@@ -334,6 +335,11 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const [expandedAsset, setExpandedAsset] = useState<AssetKey | null>(null)
   const [oneToOneDefault, setOneToOneDefault] = useState('10')
   const [oneToOneRows, setOneToOneRows] = useState<OneToOneOverrideRow[]>([])
+  const [riskyTp, setRiskyTp] = useState('4')
+  const [riskyTrail, setRiskyTrail] = useState('2')
+  const [riskyPartial, setRiskyPartial] = useState('50')
+  const [riskySl, setRiskySl] = useState('') // '' = use the signal's DB stop-loss
+  const [riskyWindows, setRiskyWindows] = useState<string[]>([])
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([])
   const [brokerSymbols, setBrokerSymbols] = useState<string[]>([])
   const [notFoundSymbols, setNotFoundSymbols] = useState<string[]>([])
@@ -350,6 +356,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
       lot: true,
       tp: true,
       oneToOne: true,
+      risky: true,
       symbols: true,
       excluded: true,
       misc: true,
@@ -502,6 +509,13 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
         }))
       )
 
+      const risky = tp.risky
+      setRiskyTp(String(risky?.profit_threshold ?? 4))
+      setRiskyTrail(String(risky?.trailing_distance ?? 2))
+      setRiskyPartial(String(risky?.partial_close_percent ?? 50))
+      setRiskySl(risky?.stop_loss == null ? '' : String(risky.stop_loss))
+      setRiskyWindows(risky?.disabled_windows ?? ['21:55-23:10', '00:55-02:00', '11:55-14:00'])
+
       // Group per-symbol instrument overrides by detected asset class.
       const grouped = Object.fromEntries(
         ASSET_CLASSES.map(a => [a, [] as InstrumentOverrideRow[]])
@@ -647,6 +661,21 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
 
   function addOneToOneRow() {
     setOneToOneRows(prev => [...prev, { asset: '', value: '10' }])
+    touch()
+  }
+
+  function updateRiskyWindow(i: number, value: string) {
+    setRiskyWindows(prev => prev.map((w, j) => (j === i ? value : w)))
+    touch()
+  }
+
+  function addRiskyWindow() {
+    setRiskyWindows(prev => [...prev, ''])
+    touch()
+  }
+
+  function removeRiskyWindow(i: number) {
+    setRiskyWindows(prev => prev.filter((_, j) => j !== i))
     touch()
   }
 
@@ -982,11 +1011,22 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
           .map(r => [r.asset.trim(), parseFloat(r.value) || 0])
       ),
     }
+    const slParsed = parseFloat(riskySl)
+    const risky = {
+      profit_threshold: parseFloat(riskyTp) || 4,
+      threshold_unit: 'dollars',
+      trailing_distance: parseFloat(riskyTrail) || 0,
+      partial_close_percent: parseInt(riskyPartial, 10) || 50,
+      stop_loss: riskySl.trim() === '' || isNaN(slParsed) ? null : slParsed,
+      disabled_windows: riskyWindows.map(w => w.trim()).filter(Boolean),
+      overrides: config!.tp_config.risky?.overrides ?? {},
+    }
     return {
       ...config!.tp_config,
       ...assetEntries,
       ...overrideMaps,
       one_to_one: oneToOne,
+      risky,
       instrument_overrides: buildInstrumentOverrides(),
     } as TPConfig
   }
@@ -2315,6 +2355,119 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
         </table>
         <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addOneToOneRow}>
           + Add asset override
+        </button>
+      </CollapsibleSection>
+
+      {/* RISKY */}
+      <CollapsibleSection
+        head={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <h3>Risky</h3>
+            <span className="sub">
+              Trailing TP · custom stop-loss from the deepest limit · disabled in the UTC windows
+              below
+            </span>
+          </div>
+        }
+        open={openSections.risky}
+        onToggle={() => toggleSection('risky')}
+      >
+        <div
+          style={{
+            display: 'flex',
+            gap: 28,
+            alignItems: 'flex-end',
+            flexWrap: 'wrap',
+            marginBottom: 18,
+          }}
+        >
+          <div className="field">
+            <label>TP ($)</label>
+            <input
+              className="inp num mono"
+              value={riskyTp}
+              onChange={e => {
+                setRiskyTp(e.target.value)
+                touch()
+              }}
+              style={{ width: 100 }}
+            />
+          </div>
+          <div className="field">
+            <label>Trailing distance ($)</label>
+            <input
+              className="inp num mono"
+              value={riskyTrail}
+              onChange={e => {
+                setRiskyTrail(e.target.value)
+                touch()
+              }}
+              style={{ width: 100 }}
+            />
+          </div>
+          <div className="field">
+            <label>Partial close (%)</label>
+            <input
+              className="inp num mono"
+              value={riskyPartial}
+              onChange={e => {
+                setRiskyPartial(e.target.value)
+                touch()
+              }}
+              style={{ width: 100 }}
+            />
+          </div>
+          <div className="field">
+            <label>Custom SL ($ from deepest limit)</label>
+            <input
+              className="inp num mono"
+              value={riskySl}
+              onChange={e => {
+                setRiskySl(e.target.value)
+                touch()
+              }}
+              placeholder="DB default"
+              style={{ width: 130 }}
+            />
+          </div>
+        </div>
+        <span className="sub" style={{ display: 'block', marginBottom: 18 }}>
+          Leave Custom SL blank to use the stop-loss from the signal. When set, it applies to every
+          limit measured from the deepest one (lowest for longs, highest for shorts).
+        </span>
+        <label style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
+          Disabled windows (UTC)
+        </label>
+        <table className="tbl" style={{ maxWidth: 320 }}>
+          <thead>
+            <tr>
+              <th>Window (HH:MM-HH:MM)</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {riskyWindows.map((w, i) => (
+              <tr key={i}>
+                <td>
+                  <input
+                    className="inp mono"
+                    value={w}
+                    onChange={e => updateRiskyWindow(i, e.target.value)}
+                    placeholder="21:55-23:10"
+                    style={{ width: 180 }}
+                  />
+                </td>
+                <td style={{ width: 40 }}>
+                  <button className="btn sm ghost" onClick={() => removeRiskyWindow(i)}>
+                    ×
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={addRiskyWindow}>
+          + Add window
         </button>
       </CollapsibleSection>
 

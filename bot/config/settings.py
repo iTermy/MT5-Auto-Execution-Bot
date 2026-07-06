@@ -225,6 +225,30 @@ class OneToOneConfig(BaseModel):
     overrides: dict[str, float] = {}  # per asset_class override (dollars)
 
 
+class RiskyConfig(BaseModel):
+    # TP behaves like a normal trailing type (dollar threshold, partial close, trailing),
+    # not a fixed full-close like 1-1. Currently only gold, but keyed on signal_type so
+    # any instrument tagged 'risky' in the DB is covered.
+    profit_threshold: float = 4.0
+    threshold_unit: str = "dollars"
+    trailing_distance: float = 2.0
+    partial_close_percent: int = 50
+    # Custom stop-loss distance in the instrument's price units, measured from the
+    # signal's deepest limit. None = use the signal's DB stop-loss. When set it overrides
+    # the DB SL for every limit of a risky signal: SL = deepest_limit - distance (long),
+    # deepest_limit + distance (short), where deepest = lowest (long) / highest (short).
+    stop_loss: float | None = None
+    # UTC windows "HH:MM-HH:MM" during which risky signals are disabled entirely —
+    # pending limits cancelled, filled positions force-closed, placement blocked. They
+    # re-place after the window if still active in the DB.
+    disabled_windows: list[str] = [
+        "21:55-23:10",
+        "00:55-02:00",
+        "11:55-14:00",
+    ]
+    overrides: dict[str, ScalpOverrideConfig] = {}  # per asset_class
+
+
 class TPConfig(BaseModel):
     partial_close_percent: int = 50
     forex: AssetTPConfig
@@ -239,6 +263,7 @@ class TPConfig(BaseModel):
     swing_overrides: dict[str, ScalpOverrideConfig] = {}
     pa_overrides: dict[str, ScalpOverrideConfig] = {}
     one_to_one: OneToOneConfig = OneToOneConfig()
+    risky: RiskyConfig = RiskyConfig()
     instrument_overrides: dict[str, dict] = {}
 
 

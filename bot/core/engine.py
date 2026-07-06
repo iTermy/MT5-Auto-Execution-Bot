@@ -51,7 +51,9 @@ class Engine:
         self._license = license_validator
         self._update_checker = update_checker
         self._update_installer = UpdateInstaller()
-        self._scheduler = MarketScheduler(config.spread_hour)
+        self._scheduler = MarketScheduler(
+            config.spread_hour, config.tp_config.risky.disabled_windows
+        )
         self._sync_cycle = SyncCycle()
         self._reconciler = Reconciler()
         self._trading_active = True
@@ -301,7 +303,9 @@ class Engine:
             new_config = load_config()
             if new_config is not None:
                 self._config = new_config
-                self._scheduler = MarketScheduler(new_config.spread_hour)
+                self._scheduler = MarketScheduler(
+                    new_config.spread_hour, new_config.tp_config.risky.disabled_windows
+                )
         return False
 
     async def _wait_for_license_config(self) -> None:
@@ -316,7 +320,9 @@ class Engine:
             new_config = load_config()
             if new_config is not None:
                 self._config = new_config
-                self._scheduler = MarketScheduler(new_config.spread_hour)
+                self._scheduler = MarketScheduler(
+                    new_config.spread_hour, new_config.tp_config.risky.disabled_windows
+                )
         logger.info("License key configured — proceeding with engine startup")
 
     async def _sync_loop(self) -> None:
@@ -341,7 +347,9 @@ class Engine:
                 if new_config:
                     old_license_key = self._config.license_key
                     self._config = new_config
-                    self._scheduler = MarketScheduler(new_config.spread_hour)
+                    self._scheduler = MarketScheduler(
+                        new_config.spread_hour, new_config.tp_config.risky.disabled_windows
+                    )
                     if (
                         self._license is not None
                         and new_config.license_key

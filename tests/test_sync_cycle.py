@@ -55,7 +55,41 @@ def _mock_scheduler(cancel_pending=False):
     sched = MagicMock()
     sched.should_cancel_pending.return_value = cancel_pending
     sched.should_block_placement.return_value = False
+    sched.is_risky_disabled.return_value = False
     return sched
+
+
+def _risky_row(signal_id, direction, price_level):
+    return {
+        "signal_id": signal_id,
+        "signal_type": "risky",
+        "direction": direction,
+        "price_level": price_level,
+    }
+
+
+def test_risky_sl_map_none_when_no_custom_sl() -> None:
+    from tests.conftest import make_settings
+
+    cfg = make_settings()  # risky.stop_loss defaults to None
+    rows = [_risky_row(1, "long", 3300.0)]
+    assert SyncCycle()._risky_sl_map(rows, cfg) == {}
+
+
+def test_risky_sl_map_deepest_limit() -> None:
+    from tests.conftest import make_settings
+
+    cfg = make_settings()
+    cfg.tp_config.risky.stop_loss = 5.0
+    rows = [
+        _risky_row(1, "long", 3320.0),
+        _risky_row(1, "long", 3300.0),  # deepest (lowest) for a long
+        _risky_row(2, "short", 3380.0),
+        _risky_row(2, "short", 3400.0),  # deepest (highest) for a short
+        {"signal_id": 3, "signal_type": "standard", "direction": "long", "price_level": 3300.0},
+    ]
+    out = SyncCycle()._risky_sl_map(rows, cfg)
+    assert out == {1: 3295.0, 2: 3405.0}  # 3300-5 (long), 3400+5 (short); standard ignored
 
 
 # ---------------------------------------------------------------------------

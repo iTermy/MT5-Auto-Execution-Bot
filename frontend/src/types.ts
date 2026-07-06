@@ -78,6 +78,16 @@ export interface OneToOneConfig {
   overrides: Record<string, number>
 }
 
+export interface RiskyConfig {
+  profit_threshold: number
+  threshold_unit: string
+  trailing_distance: number
+  partial_close_percent: number
+  stop_loss: number | null
+  disabled_windows: string[]
+  overrides: Record<string, ScalpOverrideConfig>
+}
+
 export interface TPConfig {
   partial_close_percent: number
   forex: AssetTPConfig
@@ -92,6 +102,7 @@ export interface TPConfig {
   swing_overrides: Record<string, ScalpOverrideConfig>
   pa_overrides: Record<string, ScalpOverrideConfig>
   one_to_one: OneToOneConfig
+  risky: RiskyConfig
   instrument_overrides: Record<string, Record<string, unknown>>
 }
 
@@ -100,7 +111,7 @@ export interface SymbolSuffixRule {
   asset_classes: string[]
 }
 
-export type SignalType = 'standard' | 'scalp' | 'swing' | 'toll' | 'pa' | '1-1'
+export type SignalType = 'standard' | 'scalp' | 'swing' | 'toll' | 'pa' | '1-1' | 'risky'
 
 export interface PollingConfig {
   supabase_interval_seconds: number

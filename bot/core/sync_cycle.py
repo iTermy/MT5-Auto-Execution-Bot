@@ -130,6 +130,8 @@ class SyncCycle:
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # News force-exit consecutive failure tracking (separate from status force-exit)
         self._news_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
+        # Risky-window force-exit consecutive failure tracking
+        self._risky_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # Profit-weekend force-exit consecutive failure tracking (separate from the above)
         self._profit_weekend_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # Spread-hour SL strip/restore consecutive failure tracking (log suppression)
@@ -144,6 +146,27 @@ class SyncCycle:
         self.last_supabase_rows: list | None = None
         self.last_live_prices: dict = {}
         self.last_sqlite_pending_limit_ids: set[int] = set()
+
+    def _risky_sl_map(self, supabase_rows: list, config: Settings) -> dict[int, float]:
+        """Custom shared stop-loss price per risky signal, or {} when no custom SL is
+        configured. Measured from the signal's deepest limit (lowest for longs, highest
+        for shorts) so every limit shares one SL. Computed from the still-pending limits
+        in the active fetch — the common case where a risky signal is placed as a set."""
+        dist = config.tp_config.risky.stop_loss
+        if dist is None:
+            return {}
+        by_sig: dict[int, list] = defaultdict(list)
+        for r in supabase_rows:
+            if (r["signal_type"] or "") == "risky":
+                by_sig[r["signal_id"]].append(r)
+        out: dict[int, float] = {}
+        for sid, rows in by_sig.items():
+            prices = [float(r["price_level"]) for r in rows]
+            if rows[0]["direction"] == "long":
+                out[sid] = min(prices) - dist
+            else:
+                out[sid] = max(prices) + dist
+        return out
 
     def _apply_exclusions(self, rows: list, config: Settings) -> list:
         excluded_syms = {s.upper() for s in config.excluded_symbols}
@@ -291,13 +314,21 @@ class SyncCycle:
             except Exception:
                 logger.error("Failed to fetch bot mode gates", exc_info=True)
 
+            # 'risky' signals are disabled entirely inside their UTC windows (no
+            # crypto/24h exemption — the gate is signal-type based, not instrument based).
+            risky_disabled = scheduler.is_risky_disabled(now)
+            # Custom shared SL per risky signal (empty when no custom SL configured).
+            risky_sl_by_signal = self._risky_sl_map(supabase_rows, config)
+
             def _instr_of(row) -> str:
                 lid = row["limit_id"]
                 if lid in supabase_by_limit:
                     return supabase_by_limit[lid]["instrument"]
                 return db_symbol_from_mt5(row["symbol"] or "", config)
 
-            def _is_blocked(instr: str) -> bool:
+            def _is_blocked(instr: str, signal_type: str = "standard") -> bool:
+                if signal_type == "risky" and risky_disabled:
+                    return True
                 if _gate_exempt(instr, config):
                     return False
                 if instrument_under_news(instr, news_symbols):
@@ -308,7 +339,7 @@ class SyncCycle:
             if placement_active:
                 blocked = 0
                 for row in sqlite_pending:
-                    if not _is_blocked(_instr_of(row)):
+                    if not _is_blocked(_instr_of(row), row["signal_type"]):
                         continue
                     ok = await self._canceller.cancel_order(
                         row["mt5_ticket"], mt5_client, sqlite, spread=True
@@ -317,13 +348,15 @@ class SyncCycle:
                     result.errors += not ok
                     blocked += 1
                 if blocked:
-                    logger.info("Spread/news gate cancelled %d pending order(s)", blocked)
+                    logger.info("Spread/news/risky gate cancelled %d pending order(s)", blocked)
 
                 # Drop blocked rows from the pre-gate snapshot so downstream loops
                 # (stale-pending, SL change, offset drift) skip the just-cancelled orders.
                 # sqlite_limit_ids is intentionally NOT refreshed: the cancelled limits
                 # should still be treated as 'known' (not as new placement candidates).
-                sqlite_pending = [r for r in sqlite_pending if not _is_blocked(_instr_of(r))]
+                sqlite_pending = [
+                    r for r in sqlite_pending if not _is_blocked(_instr_of(r), r["signal_type"])
+                ]
 
             # Always fetch live_prices for every offset symbol in the active signal
             # set — used for placement, drift checks, SL sync, and the dashboard's
@@ -382,7 +415,9 @@ class SyncCycle:
                     result.cancelled += ok
                     result.errors += not ok
 
-                # Cancel pending orders whose signal SL changed (re-places next cycle)
+                # Cancel pending orders whose signal SL changed (re-places next cycle).
+                # For a risky signal with a custom SL the reference is the recomputed
+                # deepest-limit SL, not the DB stop-loss (which we deliberately override).
                 for row in sqlite_pending:
                     lid = row["limit_id"]
                     if lid not in supabase_by_limit:
@@ -390,7 +425,12 @@ class SyncCycle:
                     stored_sl = row["db_stop_loss"]
                     if stored_sl is None:
                         continue
-                    current_sl = float(supabase_by_limit[lid]["stop_loss"])
+                    risky_sl = risky_sl_by_signal.get(row["signal_id"])
+                    current_sl = (
+                        risky_sl
+                        if risky_sl is not None
+                        else float(supabase_by_limit[lid]["stop_loss"])
+                    )
                     mt5_sym = map_symbol(supabase_by_limit[lid]["instrument"], config)
                     sym = mt5_client.symbol_info(mt5_sym)
                     if sym is None:
@@ -500,7 +540,10 @@ class SyncCycle:
                 new_limit_ids = {
                     lid
                     for lid in new_limit_ids
-                    if not _is_blocked(supabase_by_limit[lid]["instrument"])
+                    if not _is_blocked(
+                        supabase_by_limit[lid]["instrument"],
+                        supabase_by_limit[lid]["signal_type"],
+                    )
                 }
 
                 stale_feeds: set[str] = set()
@@ -749,8 +792,10 @@ class SyncCycle:
                         row0 = supabase_by_limit[lids[0]]
                         all_prices = [float(r["price_level"]) for r in by_signal[sig_id]]
                         mt5_sym = map_symbol(row0["instrument"], config)
+                        risky_sl = risky_sl_by_signal.get(sig_id)
+                        sl_for_lot = risky_sl if risky_sl is not None else float(row0["stop_loss"])
                         signal_lots[sig_id] = lot_calc.calculate(
-                            float(row0["stop_loss"]),
+                            sl_for_lot,
                             all_prices,
                             mt5_sym,
                             row0["signal_type"] or "standard",
@@ -765,7 +810,7 @@ class SyncCycle:
                             continue
 
                         db_sym = row["instrument"]
-                        if _is_blocked(db_sym):
+                        if _is_blocked(db_sym, row["signal_type"]):
                             continue
                         mt5_sym = map_symbol(db_sym, config)
                         lot = signal_lots[sig_id]
@@ -790,11 +835,14 @@ class SyncCycle:
                                 result.errors += 1
                                 continue
 
+                        risky_sl = risky_sl_by_signal.get(sig_id)
+                        db_sl = risky_sl if risky_sl is not None else float(row["stop_loss"])
+
                         outcome = await self._placer.place_order(
                             signal_id=sig_id,
                             limit_id=lid,
                             direction=row["direction"],
-                            db_stop_loss=float(row["stop_loss"]),
+                            db_stop_loss=db_sl,
                             db_price=float(row["price_level"]),
                             signal_type=row["signal_type"] or "standard",
                             mt5_symbol=mt5_sym,
@@ -935,6 +983,13 @@ class SyncCycle:
             sqlite, mt5_client, mt5_positions, scheduler, config, unmanaged_sids
         )
 
+        # Force-close any filled 'risky' position while a risky-disabled window is active.
+        # Runs unconditionally (even on a Supabase outage) so no risky trade survives the
+        # window; pending risky limits are cancelled by the placement-phase gate above.
+        await self._check_risky_window_exits(
+            sqlite, mt5_client, mt5_positions, scheduler, unmanaged_sids
+        )
+
         if supabase_rows is not None:
             # Build signal-level lookup from supabase rows for SL sync and forced exit
             supabase_by_signal: dict[int, dict] = {}
@@ -995,6 +1050,10 @@ class SyncCycle:
             # SL deliberately removed for spread-hour protection — don't re-apply it
             # here even if the signal's DB stop-loss changed mid-window.
             if row["sl_stripped"]:
+                continue
+            # Risky signal on a user-defined custom SL: the placed SL is derived from the
+            # deepest limit, not the DB stop-loss, so never sync it back to the DB value.
+            if row["signal_type"] == "risky" and config.tp_config.risky.stop_loss is not None:
                 continue
 
             ticket = row["mt5_ticket"]
@@ -1434,6 +1493,73 @@ class SyncCycle:
                 if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
                     logger.error(
                         "News exit abandoned: ticket=%d signal=%d after %d attempts — "
+                        "manual intervention required",
+                        ticket,
+                        row["signal_id"],
+                        new_count,
+                    )
+
+    async def _check_risky_window_exits(
+        self,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        mt5_positions: list,
+        scheduler: MarketScheduler,
+        unmanaged_sids: set[int],
+    ) -> None:
+        """Force-close every filled 'risky' position while a risky-disabled window is
+        active — no risky trade may stay open through the window. Mirrors the news
+        force-exit (stop trailing, close, mark closed) with capped retries. Idempotent:
+        a closed position is gone from MT5 and skipped next cycle."""
+        if not scheduler.is_risky_disabled():
+            return
+        filled = await sqlite.get_filled_positions()
+        if not filled:
+            return
+
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+
+        for row in filled:
+            if row["signal_id"] in unmanaged_sids:
+                continue
+            if (row["signal_type"] or "") != "risky":
+                continue
+            ticket = row["mt5_ticket"]
+            pos = pos_by_ticket.get(ticket)
+            if pos is None:
+                continue
+
+            if self._risky_exit_fail_count.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
+                continue
+
+            await sqlite.set_trailing(ticket, 0)
+            res = mt5_client.close_position(
+                ticket=pos.ticket,
+                symbol=pos.symbol,
+                volume=pos.volume,
+                position_type=pos.type,
+                comment="force_risky_window",
+            )
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+                if realized_pnl is None:
+                    realized_pnl = pos.profit
+                await sqlite.mark_closed(ticket, realized_pnl)
+                self._risky_exit_fail_count.pop(ticket, None)
+                logger.warning(
+                    "Risky-window exit closed ticket=%d signal=%d symbol=%s",
+                    ticket,
+                    row["signal_id"],
+                    pos.symbol,
+                )
+            else:
+                retcode = res.retcode if res else "None"
+                logger.error("Risky-window exit close failed ticket=%d retcode=%s", ticket, retcode)
+                new_count = self._risky_exit_fail_count.get(ticket, 0) + 1
+                self._risky_exit_fail_count[ticket] = new_count
+                if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
+                    logger.error(
+                        "Risky-window exit abandoned: ticket=%d signal=%d after %d attempts — "
                         "manual intervention required",
                         ticket,
                         row["signal_id"],

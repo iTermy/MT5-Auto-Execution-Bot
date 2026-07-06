@@ -198,6 +198,15 @@
       "profit_threshold": 10.0,
       "overrides": {}
     },
+    "risky": {
+      "profit_threshold": 4.0,
+      "threshold_unit": "dollars",
+      "trailing_distance": 2.0,
+      "partial_close_percent": 50,
+      "stop_loss": null,
+      "disabled_windows": ["21:55-23:10", "00:55-02:00", "11:55-14:00"],
+      "overrides": {}
+    },
     "instrument_overrides": {
       "XAUUSD": {
         "standard": { "profit_threshold": 7.0, "trailing_distance": 5.0, "partial_close_percent": 50 },

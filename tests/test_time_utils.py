@@ -11,8 +11,16 @@ def _est(year, month, day, hour, minute) -> datetime:
     return tz.localize(datetime(year, month, day, hour, minute))
 
 
+def _utc(hour, minute) -> datetime:
+    return pytz.utc.localize(datetime(2026, 7, 6, hour, minute))
+
+
 def _scheduler() -> MarketScheduler:
     return MarketScheduler(SpreadHourConfig())
+
+
+def _risky_scheduler() -> MarketScheduler:
+    return MarketScheduler(SpreadHourConfig(), ["21:55-23:10", "00:55-02:00", "11:55-14:00"])
 
 
 def test_is_weekend_window_friday_before_cutoff() -> None:
@@ -42,6 +50,31 @@ def test_is_weekend_window_sunday_at_open() -> None:
 
 def test_is_weekend_window_monday_morning() -> None:
     assert _scheduler().is_weekend_window(_est(2026, 3, 9, 9, 0)) is False
+
+
+def test_is_risky_disabled_inside_each_window() -> None:
+    sch = _risky_scheduler()
+    assert sch.is_risky_disabled(_utc(22, 0)) is True  # 21:55-23:10
+    assert sch.is_risky_disabled(_utc(1, 0)) is True  # 00:55-02:00
+    assert sch.is_risky_disabled(_utc(12, 0)) is True  # 11:55-14:00
+
+
+def test_is_risky_disabled_boundaries() -> None:
+    sch = _risky_scheduler()
+    assert sch.is_risky_disabled(_utc(21, 54)) is False  # just before start
+    assert sch.is_risky_disabled(_utc(21, 55)) is True  # start inclusive
+    assert sch.is_risky_disabled(_utc(23, 10)) is False  # end exclusive
+
+
+def test_is_risky_disabled_outside_all_windows() -> None:
+    sch = _risky_scheduler()
+    assert sch.is_risky_disabled(_utc(15, 0)) is False
+    assert sch.is_risky_disabled(_utc(3, 0)) is False
+
+
+def test_is_risky_disabled_no_windows_configured() -> None:
+    # A scheduler built without risky windows never disables.
+    assert _scheduler().is_risky_disabled(_utc(22, 0)) is False
 
 
 def test_is_weekend_window_thursday() -> None:

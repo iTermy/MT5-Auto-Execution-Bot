@@ -27,8 +27,13 @@ def _parse_time(s: str) -> time:
     return time(int(h), int(m))
 
 
+def _parse_window(s: str) -> tuple[time, time]:
+    start, end = s.split("-")
+    return _parse_time(start), _parse_time(end)
+
+
 class MarketScheduler:
-    def __init__(self, config: SpreadHourConfig) -> None:
+    def __init__(self, config: SpreadHourConfig, risky_windows: list[str] | None = None) -> None:
         self._tz = pytz.timezone(config.timezone)
         self._start = _parse_time(config.daily_start)
         self._stock_start = _parse_time(config.stock_daily_start)
@@ -37,6 +42,8 @@ class MarketScheduler:
         self._end = _parse_time(config.daily_end)
         self._weekend_start = _DAY_MAP[config.weekend_start_day.lower()]
         self._weekend_end = _DAY_MAP[config.weekend_end_day.lower()]
+        # UTC windows during which 'risky' signals are disabled entirely.
+        self._risky_windows = [_parse_window(w) for w in (risky_windows or [])]
 
     def _in_session(self, start: time, now: datetime | None) -> bool:
         now_local = (now or datetime.now(UTC)).astimezone(self._tz)
@@ -70,6 +77,21 @@ class MarketScheduler:
 
     def should_block_placement(self, now: datetime | None = None, stock: bool = False) -> bool:
         return self.is_spread_hour(now, stock)
+
+    def is_risky_disabled(self, now: datetime | None = None) -> bool:
+        """True inside any configured UTC window where 'risky' signals are disabled.
+        Windows are compared in UTC; one that ends at/before it starts is treated as
+        wrapping past midnight."""
+        if not self._risky_windows:
+            return False
+        t = (now or datetime.now(UTC)).astimezone(pytz.utc).time()
+        for start, end in self._risky_windows:
+            if start <= end:
+                if start <= t < end:
+                    return True
+            elif t >= start or t < end:
+                return True
+        return False
 
     def is_weekend_window(self, now: datetime | None = None) -> bool:
         """Forex weekend window: Friday >=15:55 EST through Sunday <18:00 EST.

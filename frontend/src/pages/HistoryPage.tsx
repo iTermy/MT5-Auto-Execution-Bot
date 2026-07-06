@@ -210,6 +210,7 @@ export function HistoryPage() {
                 { value: 'toll', label: 'Toll' },
                 { value: 'pa', label: 'PA' },
                 { value: '1-1', label: '1-1' },
+                { value: 'risky', label: 'Risky' },
               ]}
               onChange={setTypeFilter}
             />

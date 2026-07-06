@@ -1,6 +1,11 @@
 from bot.config.constants import AssetClass
+from bot.config.settings import RiskyConfig, ScalpOverrideConfig
 from bot.tp.asset_config import get_config
 from tests.conftest import make_settings
+
+
+def _settings_with_risky(risky: RiskyConfig):
+    return make_settings(tp_config=make_settings().tp_config.model_copy(update={"risky": risky}))
 
 
 def _settings_with_overrides(instrument_overrides: dict):
@@ -80,3 +85,50 @@ def test_nested_override_supports_partial_field_overrides() -> None:
     sc = get_config(AssetClass.INDICES, "scalp", cfg, instrument="NAS100USD")
     assert sc.profit_threshold == 30.0
     assert sc.trailing_distance == 5.0  # indices default, not overridden
+
+
+def test_risky_uses_its_own_base_not_asset_class() -> None:
+    # Default risky config: $4 dollar threshold, $2 trailing, 50% partial close.
+    cfg = _settings_with_risky(RiskyConfig())
+    out = get_config(AssetClass.METALS, "risky", cfg, instrument="XAUUSD")
+    assert out.profit_threshold == 4.0
+    assert out.threshold_unit == "dollars"
+    assert out.trailing_distance == 2.0
+    assert out.partial_close_percent == 50
+
+
+def test_risky_per_asset_class_override() -> None:
+    cfg = _settings_with_risky(
+        RiskyConfig(
+            profit_threshold=4.0,
+            overrides={
+                "metals": ScalpOverrideConfig(
+                    profit_threshold=6.0, trailing_distance=3.0, partial_close_percent=75
+                )
+            },
+        )
+    )
+    out = get_config(AssetClass.METALS, "risky", cfg, instrument="XAUUSD")
+    assert out.profit_threshold == 6.0
+    assert out.trailing_distance == 3.0
+    assert out.partial_close_percent == 75
+    # An asset class without an override keeps the risky base.
+    other = get_config(AssetClass.INDICES, "risky", cfg, instrument="SPX500USD")
+    assert other.profit_threshold == 4.0
+
+
+def test_risky_instrument_override_applies_on_top() -> None:
+    # A nested instrument override with a "risky" block still wins over the risky base.
+    base = _settings_with_risky(RiskyConfig())
+    cfg = make_settings(
+        tp_config=base.tp_config.model_copy(
+            update={
+                "instrument_overrides": {
+                    "XAUUSD": {"risky": {"profit_threshold": 8.0, "trailing_distance": 6.0}}
+                }
+            }
+        )
+    )
+    out = get_config(AssetClass.METALS, "risky", cfg, instrument="XAUUSD")
+    assert out.profit_threshold == 8.0
+    assert out.trailing_distance == 6.0

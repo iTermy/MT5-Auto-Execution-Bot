@@ -1,14 +1,17 @@
 import json
 
 from bot.config.settings import (
+    _MIGRATION_INDEX_F40,
     _MIGRATION_OFFSET_BACKFILL,
     _MIGRATION_PROXIMITY_BUMP,
     _MIGRATION_RISKY_GOLD_DISABLED,
     _MIGRATION_SPREAD_HOUR_LATE,
+    _MIGRATION_STOCK_PROXIMITY,
     _MIGRATION_STOCK_SPREAD_EARLY,
     _MIGRATION_SYMBOL_MAP_BACKFILL,
     _OFFSET_BACKFILL_SYMBOLS,
     _RISKY_GOLD_CHANNEL_ID,
+    _STOCK_PROXIMITY_OVERRIDES,
     migrate_config,
 )
 
@@ -91,7 +94,8 @@ def test_proximity_bump_sets_forex_metals_and_doubles_indices(tmp_path) -> None:
     assert prox["forex_pips"] == 15.0
     assert prox["forex_jpy_pips"] == 15.0
     assert prox["metals"] == 25.0
-    assert prox["indices"] == {"SPX": 40.0, "NAS": 100.0, "CUSTOM": 14.0}
+    # F40 is also backfilled (its migration runs in the same pass).
+    assert prox["indices"] == {"SPX": 40.0, "NAS": 100.0, "CUSTOM": 14.0, "F40": 40.0}
     assert _MIGRATION_PROXIMITY_BUMP in _read(cfg)["config_migrations"]
 
 
@@ -270,6 +274,85 @@ def test_risky_gold_disable_is_idempotent_and_respects_reenable(tmp_path) -> Non
 
     migrate_config(cfg)
     assert _RISKY_GOLD_CHANNEL_ID not in _read(cfg)["disabled_channels"]  # not re-added
+
+
+def test_stock_proximity_replaces_bare_keys_with_canonical(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    # Old shipped set: sparse bare tickers that would shadow full-symbol keys.
+    _write(cfg, {"proximity": {"stocks": 5.0, "stock_overrides": {"AAPL": 0.64, "MU": 1.0}}})
+
+    migrate_config(cfg)
+
+    overrides = _read(cfg)["proximity"]["stock_overrides"]
+    assert overrides == _STOCK_PROXIMITY_OVERRIDES  # bare keys dropped, canonical applied
+    assert "AAPL" not in overrides  # old bare key gone (would shadow "AAPL.NAS")
+    assert overrides["AAPL.NAS"] == 2.0
+    assert overrides["GOOGL.NAS"] == 5.0  # real traded symbol covered alongside GOOG.NAS
+    assert _MIGRATION_STOCK_PROXIMITY in _read(cfg)["config_migrations"]
+
+
+def test_stock_proximity_preserves_custom_full_symbol_keys(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"proximity": {"stock_overrides": {"AAPL": 0.64, "SMCI.NAS": 3.3}}})
+
+    migrate_config(cfg)
+
+    overrides = _read(cfg)["proximity"]["stock_overrides"]
+    assert overrides["SMCI.NAS"] == 3.3  # user's custom full-symbol override kept
+    assert "AAPL" not in overrides  # bare key still dropped
+
+
+def test_stock_proximity_is_idempotent_and_respects_retuning(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"proximity": {"stock_overrides": {"AAPL": 0.64}}})
+    migrate_config(cfg)
+
+    # User re-tunes after the one-time migration.
+    data = _read(cfg)
+    data["proximity"]["stock_overrides"]["AAPL.NAS"] = 3.5
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    assert _read(cfg)["proximity"]["stock_overrides"]["AAPL.NAS"] == 3.5  # not re-applied
+
+
+def test_stock_proximity_noop_when_proximity_absent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {})
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert "proximity" not in data  # new default applies at load
+    assert _MIGRATION_STOCK_PROXIMITY in data["config_migrations"]
+
+
+def test_index_f40_backfilled_when_absent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    # Pre-apply the index-doubling bump so it doesn't skew this migration's assertions.
+    _write(
+        cfg,
+        {"config_migrations": [_MIGRATION_PROXIMITY_BUMP], "proximity": {"indices": {"SPX": 40.0}}},
+    )
+
+    migrate_config(cfg)
+
+    indices = _read(cfg)["proximity"]["indices"]
+    assert indices["F40"] == 40.0
+    assert indices["SPX"] == 40.0  # existing entries preserved
+    assert _MIGRATION_INDEX_F40 in _read(cfg)["config_migrations"]
+
+
+def test_index_f40_respects_existing_value(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(
+        cfg,
+        {"config_migrations": [_MIGRATION_PROXIMITY_BUMP], "proximity": {"indices": {"F40": 60.0}}},
+    )
+
+    migrate_config(cfg)
+
+    assert _read(cfg)["proximity"]["indices"]["F40"] == 60.0  # user's value not overwritten
 
 
 def test_missing_file_is_noop(tmp_path) -> None:

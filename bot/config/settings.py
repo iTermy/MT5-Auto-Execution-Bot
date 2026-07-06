@@ -85,6 +85,77 @@ _MIGRATION_RISKY_GOLD_DISABLED = "risky_gold_channel_disabled_v1"
 # Applied once per install, so a user may re-tune either value afterwards.
 _MIGRATION_STOCK_SPREAD_EARLY = "stock_spread_hour_early_v1"
 
+# Canonical per-symbol stock placement-proximity distances (price units), keyed by DB
+# symbol and substring-matched in proximity_threshold. Ships in config.example.json for
+# new installs and is applied to existing installs via _MIGRATION_STOCK_PROXIMITY. The
+# old shipped set was sparse bare tickers (AAPL, AMD, …), so any unlisted stock fell
+# through to the wide `stocks` default (5.0) and placed regardless of distance — churning
+# Supabase/MT5 calls. Full-symbol keys avoid the bare-ticker substring collisions (e.g.
+# "MU" inside "TMUS"). A user may re-tune any value afterwards.
+_STOCK_PROXIMITY_OVERRIDES = {
+    "AAPL.NAS": 2.0,
+    "AAXJ.NAS": 0.45,
+    "ABNB.NAS": 0.5,
+    "ACLS.NAS": 4.0,
+    "ACMR.NAS": 4.0,
+    "AMD.NAS": 3.0,
+    "AMZN.NAS": 2.0,
+    "ANF.NAS": 1.0,
+    "ANF.NYSE": 1.0,
+    "AVGO.NAS": 3.0,
+    "BAC.NYSE": 0.6,
+    "BIDU.NAS": 1.0,
+    "CLSK.NAS": 0.5,
+    "COIN.NAS": 3.0,
+    "COST.NAS": 5.0,
+    "CRWD.NAS": 8.0,
+    "CSCO.NAS": 0.51,
+    "CTAS.NAS": 2.0,
+    "GGLS.NAS": 0.7,
+    "GILD.NAS": 1.5,
+    "GOOG.NAS": 5.0,
+    "GOOGL.NAS": 5.0,
+    "INTC.NAS": 1.0,
+    "ISRG.NAS": 3.0,
+    "LIN.NAS": 3.0,
+    "LRCX.NAS": 2.0,
+    "MARA.NAS": 0.2,
+    "MRNA.NAS": 1.0,
+    "MSFT.NAS": 4.0,
+    "MSTR.NAS": 3.0,
+    "MU.NAS": 7.5,
+    "NFLX.NAS": 0.75,
+    "NKE.NYSE": 2.0,
+    "NVDA.NAS": 2.0,
+    "PDD.NAS": 0.5,
+    "PEP.NAS": 1.0,
+    "PLTR.NAS": 2.0,
+    "PTON.NAS": 0.1,
+    "PYPL.NAS": 1.0,
+    "QCOM.NAS": 1.0,
+    "QQQ.NAS": 2.5,
+    "RIVN.NAS": 0.15,
+    "RKLB.NAS": 1.0,
+    "SBUX.NAS": 0.5,
+    "SNDK.NAS": 40.0,
+    "SNPS.NAS": 10.0,
+    "SOFI.NAS": 0.3,
+    "SPY.NYSE": 3.0,
+    "TMUS.NAS": 1.5,
+    "TSLA.NAS": 2.5,
+    "UAL.NAS": 1.0,
+    "WMT.NAS": 0.66,
+    "XOM.NYSE": 1.0,
+    "XYZ.NYSE": 1.5,
+}
+_MIGRATION_STOCK_PROXIMITY = "stock_proximity_overrides_v1"
+
+# Backfill the F40 (CAC 40) index proximity for existing installs. F40 is now classified
+# as an index (added to _INDEX_KEYWORDS); without a proximity.indices entry the index gate
+# returns None (no filter) and F40 limits place unconditionally. setdefault, so a user who
+# set their own F40 value keeps it.
+_MIGRATION_INDEX_F40 = "index_proximity_f40_v1"
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -456,6 +527,34 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
             sh["sl_strip_stock_start"] = "15:40"
             data["spread_hour"] = sh
         applied.append(_MIGRATION_STOCK_SPREAD_EARLY)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_STOCK_PROXIMITY not in applied:
+        prox = data.get("proximity")
+        if isinstance(prox, dict):
+            existing = prox.get("stock_overrides")
+            existing = existing if isinstance(existing, dict) else {}
+            # Drop the old bare-ticker keys (AAPL, AMD, …): left in place they'd shadow
+            # the new full-symbol keys via substring matching (first match wins). Custom
+            # full-symbol overrides the user added are kept, then the canonical set is
+            # applied on top.
+            merged = {k: v for k, v in existing.items() if "." in k}
+            merged.update(_STOCK_PROXIMITY_OVERRIDES)
+            prox["stock_overrides"] = merged
+            data["proximity"] = prox
+        applied.append(_MIGRATION_STOCK_PROXIMITY)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_INDEX_F40 not in applied:
+        prox = data.get("proximity")
+        if isinstance(prox, dict):
+            indices = prox.get("indices")
+            if isinstance(indices, dict):
+                indices.setdefault("F40", 40.0)
+                data["proximity"] = prox
+        applied.append(_MIGRATION_INDEX_F40)
         data["config_migrations"] = applied
         changed = True
 

@@ -46,6 +46,7 @@ from tests.conftest import make_settings
         ),  # contains NAS keyword; NOT crypto (len>6 check comes after)
         ("DAX40", AssetClass.INDICES),
         ("DE30EUR", AssetClass.INDICES),  # German index — DE30 keyword
+        ("F40", AssetClass.INDICES),  # CAC 40 — F40 keyword
         ("JP225", AssetClass.INDICES),
         ("USOILSPOT", AssetClass.OIL),  # offset-fed oil instrument
         # Crypto — ends USD/USDT and len > 6

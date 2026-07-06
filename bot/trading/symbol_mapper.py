@@ -10,6 +10,7 @@ _INDEX_KEYWORDS = (
     "DAX",
     "DE30",
     "DE40",
+    "F40",
     "JP225",
     "UK100",
     "US30",

@@ -187,7 +187,11 @@ function MultiClassPicker({
   }, [open])
   const summary = selected.length ? selected.join(', ') : 'Select asset classes'
   return (
-    <div ref={ref} style={{ position: 'relative', width: 280 }}>
+    <div
+      ref={ref}
+      data-classpicker-open={open ? '' : undefined}
+      style={{ position: 'relative', width: 280 }}
+    >
       <div className="inp sel mono" onClick={() => setOpen(o => !o)} style={{ width: '100%' }}>
         <span
           className={selected.length ? undefined : 'faint'}

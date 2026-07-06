@@ -1646,6 +1646,13 @@ select.inp {
 .page > *:nth-child(5) {
   animation-delay: 0.16s;
 }
+/* The fadeUp animation leaves each card its own stacking context, which traps
+   any absolutely-positioned dropdown inside behind later sibling cards. Lift the
+   card holding an open picker into the positive z-index tier so it paints above. */
+.page > *:has([data-classpicker-open]) {
+  position: relative;
+  z-index: 5;
+}
 
 .legend {
   display: flex;

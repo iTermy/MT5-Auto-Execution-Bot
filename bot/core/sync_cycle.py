@@ -154,6 +154,15 @@ class SyncCycle:
         self._live_prices_cache: dict = {}
         self._live_prices_cache_at: float = 0.0
         self._live_prices_requested: set[str] = set()
+        # Force-exit status snapshot for filled signals (egress guard, same shape as the
+        # caches above): refreshed on forced_exit_status_interval_seconds, or immediately
+        # when a newly filled signal appears so a force-exit directive is never missed.
+        self._status_cache: dict[int, dict] | None = None
+        self._status_cache_at: float = 0.0
+        self._status_requested: set[int] = set()
+        # DB instruments whose feed has gone dark and already been warned about — cleared
+        # when the feed recovers so the warning fires once per dark episode, not per cycle.
+        self._logged_dark_feeds: set[str] = set()
         # Snapshots read by DashboardCache to render unplaced "watching" signals.
         # Preserved across Supabase outages so the UI doesn't blank out.
         self.last_supabase_rows: list | None = None
@@ -733,14 +742,21 @@ class SyncCycle:
                                 if supabase_by_limit[lid]["instrument"] == instrument
                             )
                             if count:
-                                logger.warning(
-                                    "Live price dark for %s (%.0fs old) — skipping %d limit(s)",
-                                    instrument,
-                                    age,
-                                    count,
-                                )
+                                if instrument not in self._logged_dark_feeds:
+                                    logger.warning(
+                                        "Live price dark for %s (%.0fs old) — skipping %d limit(s)",
+                                        instrument,
+                                        age,
+                                        count,
+                                    )
+                                    self._logged_dark_feeds.add(instrument)
                                 result.errors += count
                             stale_instruments.add(instrument)
+                        else:
+                            self._logged_dark_feeds.discard(instrument)
+                    # Drop feeds no longer in the active set so a re-listed signal warns
+                    # afresh and the set stays bounded.
+                    self._logged_dark_feeds &= offset_needed
 
                     # Group new limits by signal; apply proximity filter per signal
                     new_by_signal: dict[int, list[int]] = defaultdict(list)
@@ -1395,6 +1411,31 @@ class SyncCycle:
                 retcode,
             )
 
+    async def _filled_statuses(
+        self, supabase: SupabaseDB, filled_sids: set[int], config: Settings
+    ) -> dict[int, dict]:
+        """Force-exit statuses for the filled set, throttled to spare the 1-2s loop from
+        re-querying the pooler every cycle while positions sit filled (common when a close
+        is blocked by spread/market hours). A signal not yet in the cached set forces an
+        immediate refetch — so a fresh fill or a post-restart set is never gated — and a
+        fetch failure reuses the last snapshot so force-exits survive a brief pooler blip."""
+        cache_now = time.monotonic()
+        if (
+            self._status_cache is None
+            or bool(filled_sids - self._status_requested)
+            or (cache_now - self._status_cache_at)
+            >= config.polling.forced_exit_status_interval_seconds
+        ):
+            try:
+                self._status_cache = await supabase.fetch_signal_statuses(list(filled_sids))
+                self._status_cache_at = cache_now
+                self._status_requested = set(filled_sids)
+            except Exception:
+                logger.error("Failed to fetch signal statuses", exc_info=True)
+                if self._status_cache is None:
+                    self._status_cache = {}
+        return self._status_cache
+
     async def _check_forced_exits(
         self,
         supabase: SupabaseDB,
@@ -1410,7 +1451,7 @@ class SyncCycle:
             self._last_signal_status.clear()
             return
 
-        status_map = await supabase.fetch_signal_statuses(list(filled_sids))
+        status_map = await self._filled_statuses(supabase, filled_sids, config)
 
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
         all_filled_rows = await sqlite.get_filled_positions()
@@ -1710,7 +1751,7 @@ class SyncCycle:
         if not filled_sids:
             return
 
-        status_map = await supabase.fetch_signal_statuses(list(filled_sids))
+        status_map = await self._filled_statuses(supabase, filled_sids, config)
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
 
         for row in await sqlite.get_filled_positions():

@@ -22,6 +22,15 @@ _POOL_MIN_SIZE = 1
 _POOL_MAX_SIZE = 3
 _POOL_RETRY_ATTEMPTS = 4
 _POOL_RETRY_DELAY = 8.0
+# Recycle idle connections well before the Supabase pooler reaps them (it kills idle
+# server sessions in ~1-2 min). A connection asyncpg still believes is live but whose
+# socket the pooler/NAT silently dropped is the classic source of a hung query.
+_POOL_INACTIVE_LIFETIME = 30.0
+# Hard bound on acquiring a connection (waiting for a free slot AND establishing a new
+# one). command_timeout bounds query execution; together they guarantee no pool call can
+# wedge forever, so a dropped socket surfaces as a caught error the sync loop retries
+# instead of silently freezing every DB-backed loop until a manual restart.
+_ACQUIRE_TIMEOUT = 15.0
 
 
 class SupabaseDB:
@@ -38,6 +47,7 @@ class SupabaseDB:
                     min_size=_POOL_MIN_SIZE,
                     max_size=_POOL_MAX_SIZE,
                     command_timeout=10,
+                    max_inactive_connection_lifetime=_POOL_INACTIVE_LIFETIME,
                     ssl="require",
                     # statement_cache_size=0 disables client-side prepared statements
                     # so the same code works with Supabase's transaction-mode pooler
@@ -69,13 +79,17 @@ class SupabaseDB:
             await self._pool.close()
             logger.info("Supabase pool closed")
 
+    def _acquire(self):
+        # Every query goes through here so the acquire timeout is impossible to forget.
+        return self._pool.acquire(timeout=_ACQUIRE_TIMEOUT)
+
     async def fetch_signal_sets(
         self,
     ) -> tuple[list[asyncpg.Record], set[int], dict[int, int]]:
         """The three active-signal sets in one round-trip (egress guard): the
         active+pending rows to place, the TM-marked 'hit' limit ids to spare from
         stale-cancel, and the {limit_id: signal_id} map for 'profit'-marked signals."""
-        async with self._pool.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(FETCH_SIGNAL_SETS)
         active = [
             r
@@ -93,16 +107,16 @@ class SupabaseDB:
         return active, hit_limit_ids, profit_limit_signal
 
     async def fetch_live_prices(self, symbols: list[str]) -> dict[str, asyncpg.Record]:
-        async with self._pool.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(FETCH_LIVE_PRICES, symbols)
         return {row["symbol"]: row for row in rows}
 
     async def fetch_signal_status(self, signal_id: int) -> str | None:
-        async with self._pool.acquire() as conn:
+        async with self._acquire() as conn:
             return await conn.fetchval(FETCH_SIGNAL_STATUS, signal_id)
 
     async def fetch_signal_statuses(self, signal_ids: list[int]) -> dict[int, dict]:
-        async with self._pool.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(FETCH_SIGNAL_STATUSES, signal_ids)
         return {
             row["id"]: {"status": row["status"], "closed_reason": row["closed_reason"]}
@@ -112,7 +126,7 @@ class SupabaseDB:
     async def fetch_mode_gates(self) -> tuple[str | None, str | None]:
         """Return (news_mode, vol_guard) from the single bot_mode_status row. Both are
         comma-separated token lists (or 'ALL'), NULL when the respective mode is off."""
-        async with self._pool.acquire() as conn:
+        async with self._acquire() as conn:
             row = await conn.fetchrow(FETCH_MODE_GATES)
         if row is None:
             return None, None
@@ -120,7 +134,7 @@ class SupabaseDB:
 
     async def fetch_feed_health(self) -> dict[str, str]:
         """Return {feed_name: status} from the feed_health table."""
-        async with self._pool.acquire() as conn:
+        async with self._acquire() as conn:
             rows = await conn.fetch(FETCH_FEED_HEALTH)
         return {row["feed"]: row["status"] for row in rows}
 
@@ -143,7 +157,7 @@ class SupabaseDB:
         if self._pool is None:
             return
         try:
-            async with self._pool.acquire() as conn:
+            async with self._acquire() as conn:
                 await conn.execute(
                     UPSERT_USER_SNAPSHOT,
                     license_key,

@@ -236,6 +236,11 @@ class PollingConfig(BaseModel):
     # row's updated_at and cached 300s, so a few seconds of fetch staleness is
     # immaterial; a newly-appeared offset symbol still forces an immediate refetch.
     live_price_interval_seconds: int = 5
+    # Force-exit status polling for filled positions. Kept short (a manual TM close must
+    # land promptly) but throttled so a filled-but-uncloseable position — held open
+    # through spread/market-hours — doesn't re-query the pooler every 1s cycle. A newly
+    # filled signal forces an immediate refetch so a directive is never missed.
+    forced_exit_status_interval_seconds: int = 2
 
 
 class SpreadHourConfig(BaseModel):

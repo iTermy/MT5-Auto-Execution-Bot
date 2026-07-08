@@ -8,7 +8,10 @@
 #     signal out, so genuine cancels/closes still cancel.
 #   - every limit of a 'profit'-marked signal (no limit-status filter — marking 'profit'
 #     flips still-pending limits to 'cancelled'): mapped {limit_id: signal_id} so the
-#     caller can spare the ones it still holds while a filled position remains.
+#     caller can spare the ones it still holds while a filled position remains. Scoped to
+#     $1 (the caller's currently-filled signal ids) — the caller discards every profit row
+#     whose signal it isn't holding, so pulling the unbounded historical set (which grows
+#     forever and blew pooler egress) is pure waste. Empty array => no profit rows.
 FETCH_SIGNAL_SETS = """
 SELECT
     s.id              AS signal_id,
@@ -26,7 +29,7 @@ SELECT
 FROM signals s
 JOIN limits l ON l.signal_id = s.id
 WHERE (s.status IN ('active', 'hit') AND l.status IN ('pending', 'hit'))
-   OR s.status = 'profit'
+   OR (s.status = 'profit' AND s.id = ANY($1::bigint[]))
 ORDER BY s.id, l.sequence_number
 """
 

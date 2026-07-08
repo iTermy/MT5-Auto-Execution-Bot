@@ -147,6 +147,7 @@ class SyncCycle:
         # downstream placement/gating still runs every cycle against the cached snapshot.
         self._signal_sets_cache: tuple[list, set[int], dict[int, int]] | None = None
         self._signal_sets_cache_at: float = 0.0
+        self._signal_sets_cache_sids: set[int] = set()
         self._gates_cache: tuple[str | None, str | None] | None = None
         self._gates_cache_at: float = 0.0
         self._stale_feeds_cache: set[str] = set()
@@ -258,19 +259,31 @@ class SyncCycle:
         manual_sids = {sid for sid, a in actions.items() if a == "manual"}
         unmanaged_sids = skipped_sids | manual_sids
 
+        # Locally-held filled signals scope the 'profit' branch of the fetch below: we
+        # only ever keep profit rows for signals we still hold a position on, so the query
+        # pulls just those instead of every historical profit signal (that unbounded set
+        # was the pooler-egress leak). Cheap local SQLite read, so it runs every cycle.
+        sqlite_active = await sqlite.get_all_active()
+        filled_sids = {r["signal_id"] for r in sqlite_active if r["status"] == "filled"}
+
         # Egress guard: pull the active-signal set only when the cache has lapsed;
         # reuse the last snapshot otherwise so the 1s fill/TP loop doesn't re-fetch
-        # the whole set every cycle. On a fetch failure we skip the placement phase
-        # (run fill detection only), exactly as before.
+        # the whole set every cycle. A change in filled_sids also invalidates the cache
+        # so a freshly-filled 'profit' signal's remaining limits are spared immediately
+        # rather than waiting out the interval. On a fetch failure we skip the placement
+        # phase (run fill detection only), exactly as before.
         cache_now = time.monotonic()
         signal_sets = self._signal_sets_cache
-        if signal_sets is None or (
-            (cache_now - self._signal_sets_cache_at) >= config.polling.signal_fetch_interval_seconds
+        if (
+            signal_sets is None
+            or filled_sids != self._signal_sets_cache_sids
+            or (cache_now - self._signal_sets_cache_at) >= config.polling.signal_fetch_interval_seconds
         ):
             try:
-                signal_sets = await supabase.fetch_signal_sets()
+                signal_sets = await supabase.fetch_signal_sets(list(filled_sids))
                 self._signal_sets_cache = signal_sets
                 self._signal_sets_cache_at = cache_now
+                self._signal_sets_cache_sids = filled_sids
             except Exception:
                 logger.error(
                     "Supabase fetch failed — skipping placement phase, running fill detection only",
@@ -285,7 +298,6 @@ class SyncCycle:
             supabase_rows, hit_limit_ids, profit_limit_signal = signal_sets
             supabase_rows = self._apply_exclusions(supabase_rows, config)
 
-            sqlite_active = await sqlite.get_all_active()
             # Skipped/manual signals are dropped from the working pending set so no
             # gate, stale-cancel, SL-change, or drift loop touches them. Skipped
             # pending is cancelled by _apply_skips; manual pending is left orphaned.
@@ -308,8 +320,8 @@ class SyncCycle:
             # out of the active set, but we keep its remaining entries live until our own
             # TP engine closes the trade — once we're flat the signal leaves filled_sids
             # and the limits fall back to normal stale-cancellation. Both sets come from
-            # the single fetch_signal_sets round-trip above.
-            filled_sids = {r["signal_id"] for r in sqlite_active if r["status"] == "filled"}
+            # the single fetch_signal_sets round-trip above (its 'profit' branch is already
+            # scoped to filled_sids, so this filter is exact rather than a pruning step).
             profit_held_limit_ids = {
                 lid for lid, sid in profit_limit_signal.items() if sid in filled_sids
             }

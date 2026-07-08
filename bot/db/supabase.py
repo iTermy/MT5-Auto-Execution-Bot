@@ -84,13 +84,15 @@ class SupabaseDB:
         return self._pool.acquire(timeout=_ACQUIRE_TIMEOUT)
 
     async def fetch_signal_sets(
-        self,
+        self, held_signal_ids: list[int]
     ) -> tuple[list[asyncpg.Record], set[int], dict[int, int]]:
         """The three active-signal sets in one round-trip (egress guard): the
         active+pending rows to place, the TM-marked 'hit' limit ids to spare from
-        stale-cancel, and the {limit_id: signal_id} map for 'profit'-marked signals."""
+        stale-cancel, and the {limit_id: signal_id} map for 'profit'-marked signals.
+        The 'profit' branch is scoped to held_signal_ids (the caller's currently-filled
+        signals) — every other profit row would be discarded downstream anyway."""
         async with self._acquire() as conn:
-            rows = await conn.fetch(FETCH_SIGNAL_SETS)
+            rows = await conn.fetch(FETCH_SIGNAL_SETS, held_signal_ids)
         active = [
             r
             for r in rows

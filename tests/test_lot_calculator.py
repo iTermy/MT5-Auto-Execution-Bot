@@ -346,3 +346,30 @@ def test_fallback_when_symbol_info_none(mock_mt5, sample_config) -> None:
     lot = calc.calculate(stop_loss=1.09000, limit_prices=[1.09100], mt5_symbol="UNKNOWN")
 
     assert lot == pytest.approx(sample_config.lot_sizing.fixed_lot, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# resolve_lot_mode — config snapshot for tp_outcomes final rows
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_lot_mode_global(sample_config) -> None:
+    from bot.trading.lot_calculator import resolve_lot_mode
+
+    out = resolve_lot_mode(sample_config, "EURUSD", "standard", None)
+    assert out == {"mode": "risk_percent", "value": 1.0, "source": "global"}
+
+
+def test_resolve_lot_mode_exception_wins(sample_config) -> None:
+    from bot.config.settings import LotExceptionConfig
+    from bot.trading.lot_calculator import resolve_lot_mode
+
+    cfg = sample_config.model_copy(deep=True)
+    cfg.lot_sizing.exceptions.append(
+        LotExceptionConfig(symbol="XAUUSD", mode="total_lot", value=0.6)
+    )
+
+    out = resolve_lot_mode(cfg, "XAUUSD", "toll", None)
+    assert out == {"mode": "total_lot", "value": 0.6, "source": "exception"}
+    # Other symbols still resolve globally
+    assert resolve_lot_mode(cfg, "EURUSD", "toll", None)["source"] == "global"

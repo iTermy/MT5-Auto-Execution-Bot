@@ -7,6 +7,8 @@ import {
   stopEngine,
   shutdownEngine,
   updateConfig,
+  resetConfig,
+  fetchConfig,
   scanMt5Terminals,
   fetchMt5Symbols,
   fetchNotFoundSymbols,
@@ -318,6 +320,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const [fixedLotDefault, setFixedLotDefault] = useState('0.01')
   const [totalLotDefault, setTotalLotDefault] = useState('0.1')
   const [maxLot, setMaxLot] = useState('5.0')
+  const [skipLimitsAt, setSkipLimitsAt] = useState('6')
   const [lotExceptions, setLotExceptions] = useState<LotExceptionRow[]>([])
   const [approxLoading, setApproxLoading] = useState(false)
   const [approxMsg, setApproxMsg] = useState<{ kind: 'success' | 'error'; text: string } | null>(
@@ -400,6 +403,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const initFromConfig = useCallback((cfg: Config) => {
     setLotMode(cfg.lot_sizing.mode)
     setMaxLot(String(cfg.lot_sizing.max_lot_per_order))
+    setSkipLimitsAt(String(cfg.lot_sizing.skip_limits_at ?? 6))
     setLicenseKey(cfg.license_key)
     setMt5TerminalPath(cfg.mt5_terminal_path ?? '')
 
@@ -1068,6 +1072,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
           fixed_lot: parseFloat(fixedLotDefault) || 0.01,
           total_lot: parseFloat(totalLotDefault) || 0.1,
           max_lot_per_order: parseFloat(maxLot) || 5.0,
+          skip_limits_at: skipLimitsAt === '' ? 6 : Math.max(0, parseInt(skipLimitsAt, 10) || 0),
           exceptions: buildLotExceptions(),
         },
         tp_config: buildTpConfig(),
@@ -1099,6 +1104,31 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
     if (config) {
       initFromConfig(config)
       setDirty(false)
+    }
+  }
+
+  async function handleRestoreDefaults() {
+    if (
+      !window.confirm(
+        'Restore all settings to the bot defaults? Your license key, terminal path, and symbol mappings are kept. This cannot be undone.'
+      )
+    ) {
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await resetConfig()
+      const fresh = await fetchConfig()
+      onConfigSaved(fresh)
+      initFromConfig(fresh)
+      setSaving(false)
+      setDirty(false)
+      setToast(true)
+      setTimeout(() => setToast(false), 2600)
+    } catch (e) {
+      setSaving(false)
+      setError(e instanceof Error ? e.message : 'Restore defaults failed')
     }
   }
 
@@ -1593,6 +1623,18 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
               value={maxLot}
               onChange={e => {
                 setMaxLot(e.target.value)
+                touch()
+              }}
+              style={{ width: 100 }}
+            />
+          </div>
+          <div className="field">
+            <label>Skip signals with ≥ N limits (0 = off)</label>
+            <input
+              className="inp num mono"
+              value={skipLimitsAt}
+              onChange={e => {
+                setSkipLimitsAt(e.target.value)
                 touch()
               }}
               style={{ width: 100 }}
@@ -2908,6 +2950,14 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
 
       {/* SAVE */}
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+        <button
+          className="btn ghost"
+          onClick={handleRestoreDefaults}
+          disabled={saving}
+          style={{ marginRight: 'auto', color: 'var(--neg)' }}
+        >
+          Restore defaults
+        </button>
         <button className="btn ghost" onClick={handleDiscard}>
           Reset
         </button>

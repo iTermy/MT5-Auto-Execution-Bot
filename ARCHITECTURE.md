@@ -150,10 +150,26 @@ Column reference (key columns; remainder are self-explanatory):
 | `exit_reason` | `final` only: `trailing_stop` / `tp_full` / `stop_loss` (heuristic from row state — not a precise close-cause audit) |
 | `total_volume`, `partial_close_pct`, `bot_version`, `tp_strategy`, `notes` | execution context |
 | `mt5_account`, `channel_id`, `written_at` | account, source channel, insert time |
+| `symbol_normalized` | DB symbol with broker suffixes stripped (`XAUUSDm`/`USDCAD.pro` → `XAUUSD`/`USDCAD`) — group analysis on this, not `symbol` |
+| `account_equity` / `account_balance` | MT5 account state at write time (weight users, spot glitched accounts) |
+| `entry_slippage_points` | `final` only: avg (actual fill − intended limit price) in broker points, adverse-positive by direction; NULL when fill prices weren't captured |
+| `exit_slippage_points` | avg close slippage in broker points, adverse-positive, bot-initiated closes only. **NULL means broker-side SL/trailing exit (unmeasurable), not zero** |
+
+`notes` on **final** rows is a config snapshot: `{profit_threshold, threshold_unit,
+trailing_distance, partial_close_percent, lot: {mode, value, source}, disable_auto_tp,
+skip_limits_at}` — so trailing-vs-fixed comparisons aren't confounded by per-user settings.
+Trigger rows keep `notes = {"non_trailing_count": N}`.
+
+**Trigger-row dedupe**: the SQLite guard table `trigger_recorded` (PK `(signal_id,
+mt5_account, level_sequence)`) is claimed before every trigger-row write. A failed close
+re-qualifies the TP every ~1s cycle and used to spam identical trigger rows; now each fill
+depth writes exactly once. Cleared by `clear_history` alongside the other guards. Close
+retry behaviour is unchanged — only the duplicate INSERT is suppressed.
 
 Adding columns requires an owner-run `ALTER TABLE tp_outcomes ADD COLUMN IF NOT EXISTS ...` in the
 Supabase SQL editor — the bot only INSERTs. The local SQLite side (`order_mappings.sequence_number`
-/ `mfe_price` / `mae_price`, `signal_finalized` table) auto-migrates on startup.
+/ `mfe_price` / `mae_price` / `fill_price` / `exit_slippage_points`, `signal_finalized` and
+`trigger_recorded` tables) auto-migrates on startup.
 
 ## Spread Adjustment (order_placer.py)
 On every pending order placement, adjust price and SL for current spread:

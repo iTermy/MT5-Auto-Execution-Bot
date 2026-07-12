@@ -246,6 +246,18 @@ class TPEngine:
 
             newest_row = max(non_trailing_rows, key=lambda r: r["mt5_ticket"])
 
+            # One trigger row per fill depth: a failed close re-qualifies every
+            # cycle and would otherwise re-write this row every ~1s.
+            level_seq = (
+                newest_row["sequence_number"] if newest_row["sequence_number"] is not None else -1
+            )
+            if not await sqlite.mark_trigger_recorded(
+                signal_id, mt5_account_login or 0, level_seq
+            ):
+                return
+
+            acct = mt5_client.account_info()
+
             outcome = TPOutcome(
                 signal_id=signal_id,
                 mt5_account=mt5_account_login or 0,
@@ -282,6 +294,9 @@ class TPEngine:
                 level_sequence=newest_row["sequence_number"],
                 total_levels=summary["total"],
                 seconds_to_trigger=_seconds_since(newest_row["filled_at"]),
+                symbol_normalized=db_sym,
+                account_equity=acct.equity if acct else None,
+                account_balance=acct.balance if acct else None,
             )
             await self._outcomes_writer.record(outcome)
         except Exception:

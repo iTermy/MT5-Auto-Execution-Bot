@@ -7,10 +7,12 @@ from bot.db.queries import (
     CLEAR_HISTORY,
     CLEAR_SIGNAL_FINALIZED,
     CLEAR_SIGNAL_TP_FIRED,
+    CLEAR_TRIGGER_RECORDED,
     CREATE_ORDER_MAPPINGS,
     CREATE_SIGNAL_ACTIONS,
     CREATE_SIGNAL_FINALIZED,
     CREATE_SIGNAL_TP_FIRED,
+    CREATE_TRIGGER_RECORDED,
     DELETE_CLAIMED_ORDER,
     DELETE_SIGNAL_ACTION,
     GET_ALL_ACTIVE,
@@ -39,7 +41,9 @@ from bot.db.queries import (
     MARK_FILLED,
     MARK_SIGNAL_FINALIZED,
     MARK_SIGNAL_TP_FIRED,
+    MARK_TRIGGER_RECORDED,
     PROMOTE_CLAIMED_TO_PENDING,
+    SET_EXIT_SLIPPAGE,
     SET_SIGNAL_ACTION,
     SET_SL_STRIPPED,
     SET_TRAILING,
@@ -81,6 +85,7 @@ class SQLiteDB:
         await self._db.execute(CREATE_SIGNAL_FINALIZED)
         await self._db.execute(CREATE_SIGNAL_TP_FIRED)
         await self._db.execute(CREATE_SIGNAL_ACTIONS)
+        await self._db.execute(CREATE_TRIGGER_RECORDED)
         await self._db.commit()
         # Migrations for existing databases
         for col in (
@@ -91,6 +96,8 @@ class SQLiteDB:
             "mfe_price REAL NOT NULL DEFAULT 0",
             "mae_price REAL NOT NULL DEFAULT 0",
             "sl_stripped INTEGER NOT NULL DEFAULT 0",
+            "fill_price REAL",
+            "exit_slippage_points REAL",
         ):
             name = col.split()[0]
             try:
@@ -172,15 +179,21 @@ class SQLiteDB:
         )
         await self._db.commit()
 
-    async def mark_filled(self, mt5_ticket: int, filled_at: str) -> None:
-        await self._db.execute(MARK_FILLED, (filled_at, mt5_ticket))
+    async def mark_filled(
+        self, mt5_ticket: int, filled_at: str, fill_price: float | None = None
+    ) -> None:
+        await self._db.execute(MARK_FILLED, (filled_at, fill_price, mt5_ticket))
         await self._db.commit()
 
     async def mark_filled_and_set_position_ticket(
-        self, order_ticket: int, position_ticket: int, filled_at: str
+        self,
+        order_ticket: int,
+        position_ticket: int,
+        filled_at: str,
+        fill_price: float | None = None,
     ) -> None:
         """Atomically mark filled and update the ticket in one transaction (H7)."""
-        await self._db.execute(MARK_FILLED, (filled_at, order_ticket))
+        await self._db.execute(MARK_FILLED, (filled_at, fill_price, order_ticket))
         if position_ticket != order_ticket:
             await self._db.execute(UPDATE_TICKET, (position_ticket, order_ticket))
         await self._db.commit()
@@ -231,6 +244,22 @@ class SQLiteDB:
     async def update_excursion(self, mt5_ticket: int, mfe_price: float, mae_price: float) -> None:
         await self._db.execute(UPDATE_EXCURSION, (mfe_price, mae_price, mt5_ticket))
         await self._db.commit()
+
+    async def set_exit_slippage(self, mt5_ticket: int, points: float) -> None:
+        await self._db.execute(SET_EXIT_SLIPPAGE, (points, mt5_ticket))
+        await self._db.commit()
+
+    async def mark_trigger_recorded(
+        self, signal_id: int, mt5_account: int, level_sequence: int
+    ) -> bool:
+        """Claim the trigger-outcome write for one fill depth. Returns True only if
+        this call inserted the row — the caller that loses the claim skips the write."""
+        cursor = await self._db.execute(
+            MARK_TRIGGER_RECORDED,
+            (signal_id, mt5_account, level_sequence, datetime.now(UTC).isoformat()),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
 
     async def get_settled_unfinalized_signals(self) -> list[int]:
         async with self._db.execute(GET_SETTLED_UNFINALIZED_SIGNALS) as cursor:
@@ -388,6 +417,7 @@ class SQLiteDB:
         cursor = await self._db.execute(CLEAR_HISTORY)
         await self._db.execute(CLEAR_SIGNAL_FINALIZED)
         await self._db.execute(CLEAR_SIGNAL_TP_FIRED)
+        await self._db.execute(CLEAR_TRIGGER_RECORDED)
         await self._db.commit()
         return cursor.rowcount
 

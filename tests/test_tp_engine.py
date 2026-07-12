@@ -212,6 +212,44 @@ async def test_execute_closes_earlier_positions_first(sqlite_db, mock_mt5) -> No
 # ---------------------------------------------------------------------------
 
 
+async def test_failing_close_writes_one_trigger_row(sqlite_db, mock_mt5, sample_config) -> None:
+    # A close that keeps failing re-qualifies the signal every cycle; the
+    # trigger_recorded guard must still yield exactly one outcome row.
+    pos = make_position(
+        ticket=1001, symbol="XAUUSD", price_open=4459.0, volume=0.3, type=0, profit=11.4
+    )
+    mock_mt5.positions_get.return_value = [pos]
+    mock_mt5.symbol_info_tick.return_value = make_tick(symbol="XAUUSD", bid=4465.0, ask=4465.2)
+    mock_mt5.symbol_info.return_value = make_symbol_info(
+        name="XAUUSD", digits=2, point=0.01, trade_tick_value=1.0, trade_tick_size=1.0
+    )
+    mock_mt5.account_info.return_value = make_account_info()
+    mock_mt5.close_position.return_value = make_order_result(ticket=1001, retcode=10013)
+
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=7,
+        mt5_ticket=1001,
+        order_type="buy_limit",
+        lot_size=0.3,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=4440.0,
+        signal_type="standard",
+        mt5_price=4459.0,
+        symbol="XAUUSD",
+        sequence_number=3,
+    )
+    await sqlite_db.mark_filled(1001, "2026-01-01T00:01:00+00:00")
+
+    writer = AsyncMock()
+    engine = TPEngine(outcomes_writer=writer)
+    await engine.run_cycle(mock_mt5, sqlite_db, sample_config)
+    await engine.run_cycle(mock_mt5, sqlite_db, sample_config)
+    await engine.run_cycle(mock_mt5, sqlite_db, sample_config)
+
+    writer.record.assert_awaited_once()
+
+
 async def test_run_cycle_records_trigger_outcome(sqlite_db, mock_mt5, sample_config) -> None:
     # XAUUSD long: entry 4459, bid 4465 → move 6 >= metals threshold 4.0 → triggers.
     pos = make_position(

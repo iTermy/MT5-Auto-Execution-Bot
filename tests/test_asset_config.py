@@ -88,13 +88,13 @@ def test_nested_override_supports_partial_field_overrides() -> None:
 
 
 def test_risky_uses_its_own_base_not_asset_class() -> None:
-    # Default risky config: $4 dollar threshold, $2 trailing, 50% partial close.
+    # Default risky config: $4 dollar threshold, $2 trailing, trail-full exit.
     cfg = _settings_with_risky(RiskyConfig())
     out = get_config(AssetClass.METALS, "risky", cfg, instrument="XAUUSD")
     assert out.profit_threshold == 4.0
     assert out.threshold_unit == "dollars"
     assert out.trailing_distance == 2.0
-    assert out.partial_close_percent == 50
+    assert out.partial_close_percent == 0
 
 
 def test_risky_per_asset_class_override() -> None:

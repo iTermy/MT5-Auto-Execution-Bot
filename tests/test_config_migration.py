@@ -6,6 +6,7 @@ from bot.config.settings import (
     _MIGRATION_INDEX_F40,
     _MIGRATION_LIVE_PRICE_INTERVAL,
     _MIGRATION_OFFSET_BACKFILL,
+    _MIGRATION_PROFIT_DEFAULTS,
     _MIGRATION_PROXIMITY_BUMP,
     _MIGRATION_RISKY_GOLD_DISABLED,
     _MIGRATION_SPREAD_HOUR_LATE,
@@ -428,3 +429,71 @@ def test_missing_file_is_noop(tmp_path) -> None:
     cfg = tmp_path / "does_not_exist.json"
     migrate_config(cfg)  # must not raise
     assert not cfg.exists()
+
+
+def test_profit_defaults_adds_skip_limits_and_flips_default_partials(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(
+        cfg,
+        {
+            "lot_sizing": {"mode": "risk_percent", "risk_percent": 5.0},
+            "tp_config": {
+                "partial_close_percent": 50,
+                "metals": {
+                    "profit_threshold": 5.0,
+                    "threshold_unit": "dollars",
+                    "trailing_distance": 3.0,
+                    "partial_close_percent": 75,
+                },
+                "forex": {
+                    "profit_threshold": 10.0,
+                    "threshold_unit": "pips",
+                    "trailing_distance": 7.0,
+                    "partial_close_percent": 33,
+                },
+                "toll_overrides": {
+                    "metals": {
+                        "profit_threshold": 5.0,
+                        "trailing_distance": 3.0,
+                        "partial_close_percent": 75,
+                    }
+                },
+            },
+        },
+    )
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert data["lot_sizing"]["skip_limits_at"] == 6
+    tp = data["tp_config"]
+    assert tp["partial_close_percent"] == 0  # old default 50 flipped
+    assert tp["metals"]["partial_close_percent"] == 0  # old default 75 flipped
+    assert tp["forex"]["partial_close_percent"] == 33  # user-customized value preserved
+    assert tp["toll_overrides"]["metals"]["partial_close_percent"] == 0  # nested flip
+    assert _MIGRATION_PROFIT_DEFAULTS in data["config_migrations"]
+
+
+def test_profit_defaults_respects_explicit_skip_limits(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"lot_sizing": {"mode": "fixed", "skip_limits_at": 0}})
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert data["lot_sizing"]["skip_limits_at"] == 0  # user's explicit off is kept
+    assert data["lot_sizing"]["mode"] == "fixed"  # mode never touched
+
+
+def test_profit_defaults_is_idempotent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"lot_sizing": {"mode": "risk_percent"}})
+    migrate_config(cfg)
+
+    # User flips a partial back to 50 after the one-time migration.
+    data = _read(cfg)
+    data["lot_sizing"]["skip_limits_at"] = 9
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    assert _read(cfg)["lot_sizing"]["skip_limits_at"] == 9  # not re-applied

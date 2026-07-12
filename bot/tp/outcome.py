@@ -63,3 +63,8 @@ class TPOutcome:
     seconds_to_trigger: float | None = None
     hold_seconds: float | None = None
     exit_reason: str | None = None
+    symbol_normalized: str | None = None  # DB symbol with broker suffix stripped
+    account_equity: float | None = None
+    account_balance: float | None = None
+    entry_slippage_points: float | None = None  # adverse-positive, broker points
+    exit_slippage_points: float | None = None  # NULL for broker-side SL/trailing exits

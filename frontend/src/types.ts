@@ -57,6 +57,7 @@ export interface LotSizingConfig {
   fixed_lot: number | Record<string, number>
   total_lot: number | Record<string, number>
   max_lot_per_order: number
+  skip_limits_at?: number
   exceptions?: LotExceptionConfig[]
 }
 

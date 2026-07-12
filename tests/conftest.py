@@ -27,24 +27,37 @@ def make_settings(**overrides) -> Settings:
             mode="risk_percent", risk_percent=1.0, fixed_lot=0.01, max_lot_per_order=5.0
         ),
         polling=PollingConfig(),
+        # partial_close_percent=50 throughout: many tests exercise the partial-close
+        # path explicitly (the shipped default is now 0 = trail full).
         tp_config=TPConfig(
             partial_close_percent=50,
-            forex=AssetTPConfig(profit_threshold=7, threshold_unit="pips", trailing_distance=3),
-            forex_jpy=AssetTPConfig(profit_threshold=7, threshold_unit="pips", trailing_distance=3),
+            forex=AssetTPConfig(
+                profit_threshold=7, threshold_unit="pips", trailing_distance=3,
+                partial_close_percent=50,
+            ),
+            forex_jpy=AssetTPConfig(
+                profit_threshold=7, threshold_unit="pips", trailing_distance=3,
+                partial_close_percent=50,
+            ),
             metals=AssetTPConfig(
-                profit_threshold=4.0, threshold_unit="dollars", trailing_distance=2.0
+                profit_threshold=4.0, threshold_unit="dollars", trailing_distance=2.0,
+                partial_close_percent=50,
             ),
             indices=AssetTPConfig(
-                profit_threshold=20.0, threshold_unit="dollars", trailing_distance=5.0
+                profit_threshold=20.0, threshold_unit="dollars", trailing_distance=5.0,
+                partial_close_percent=50,
             ),
             stocks=AssetTPConfig(
-                profit_threshold=1.0, threshold_unit="dollars", trailing_distance=0.5
+                profit_threshold=1.0, threshold_unit="dollars", trailing_distance=0.5,
+                partial_close_percent=50,
             ),
             crypto=AssetTPConfig(
-                profit_threshold=300.0, threshold_unit="dollars", trailing_distance=50.0
+                profit_threshold=300.0, threshold_unit="dollars", trailing_distance=50.0,
+                partial_close_percent=50,
             ),
             oil=AssetTPConfig(
-                profit_threshold=0.5, threshold_unit="dollars", trailing_distance=0.2
+                profit_threshold=0.5, threshold_unit="dollars", trailing_distance=0.2,
+                partial_close_percent=50,
             ),
         ),
     )

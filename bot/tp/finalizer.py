@@ -9,7 +9,7 @@ from bot.mt5.client import MT5Client
 from bot.tp.asset_config import get_config
 from bot.tp.engine import _resolve_risk_percent
 from bot.tp.outcome import TPOutcome
-from bot.trading.lot_calculator import price_distance_to_money
+from bot.trading.lot_calculator import price_distance_to_money, resolve_lot_mode
 from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,6 @@ class TPFinalizer:
             return
 
         acct = mt5_client.account_info()
-        mt5_account = acct.login if acct else 0
         now_iso = datetime.now(UTC).isoformat()
 
         for signal_id in signal_ids:
@@ -48,14 +47,14 @@ class TPFinalizer:
             if not await sqlite.mark_signal_finalized(signal_id, now_iso):
                 continue
             try:
-                await self._record_final(signal_id, mt5_account, mt5_client, sqlite, config)
+                await self._record_final(signal_id, acct, mt5_client, sqlite, config)
             except Exception:
                 logger.error("TP final outcome failed signal=%d", signal_id, exc_info=True)
 
     async def _record_final(
         self,
         signal_id: int,
-        mt5_account: int,
+        acct,
         mt5_client: MT5Client,
         sqlite: SQLiteDB,
         config: Settings,
@@ -108,14 +107,37 @@ class TPFinalizer:
             else None
         )
 
+        direction = "long" if (agg["order_type"] or "").startswith("buy") else "short"
+
+        # Entry slippage in broker points, adverse-positive: longs filling above
+        # the intended limit price are worse off; shorts mirrored.
+        entry_slippage = None
+        avg_fill = agg["avg_fill_price"]
+        avg_intended = agg["avg_intended_price"]
+        if avg_fill is not None and avg_intended is not None and sym_info and sym_info.point > 0:
+            diff = avg_fill - avg_intended
+            entry_slippage = (diff if direction == "long" else -diff) / sym_info.point
+
+        # Resolved exit/lot config so trailing-vs-fixed analysis is not confounded
+        # by per-user settings.
+        notes = {
+            "profit_threshold": asset_cfg.profit_threshold,
+            "threshold_unit": asset_cfg.threshold_unit,
+            "trailing_distance": asset_cfg.trailing_distance,
+            "partial_close_percent": asset_cfg.partial_close_percent,
+            "lot": resolve_lot_mode(config, mt5_symbol, signal_type, agg["channel_id"]),
+            "disable_auto_tp": config.disable_auto_tp,
+            "skip_limits_at": config.lot_sizing.skip_limits_at,
+        }
+
         outcome = TPOutcome(
             signal_id=signal_id,
-            mt5_account=mt5_account,
+            mt5_account=acct.login if acct else 0,
             channel_id=agg["channel_id"],
             signal_type=signal_type,
             asset_class=asset_class.value,
             symbol=mt5_symbol,
-            direction="long" if (agg["order_type"] or "").startswith("buy") else "short",
+            direction=direction,
             total_limits=summary["total"],
             limits_filled=summary["filled"] + summary["closed"],
             limits_pending=summary["pending"],
@@ -140,5 +162,11 @@ class TPFinalizer:
             total_levels=summary["total"],
             hold_seconds=hold_seconds,
             exit_reason=exit_reason,
+            notes=notes,
+            symbol_normalized=db_sym,
+            account_equity=acct.equity if acct else None,
+            account_balance=acct.balance if acct else None,
+            entry_slippage_points=entry_slippage,
+            exit_slippage_points=agg["avg_exit_slippage"],
         )
         await self._writer.record(outcome)

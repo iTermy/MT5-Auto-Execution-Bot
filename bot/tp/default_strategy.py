@@ -25,6 +25,20 @@ def _pip_size(point: float, digits: int) -> float:
     return point * (10 if digits in (3, 5) else 1)
 
 
+async def _record_exit_slippage(res, pos: PositionInfo, mt5_client: MT5Client, sqlite: SQLiteDB) -> None:
+    """Persist adverse-positive close slippage in broker points. Best-effort analytics."""
+    try:
+        sym = mt5_client.symbol_info(pos.symbol)
+        if sym is None or sym.point <= 0 or not res.requested_price or not res.price:
+            return
+        diff = res.price - res.requested_price
+        # Closing a long sells: filling below the requested price is adverse. Short mirrored.
+        slip = (-diff if pos.type == 0 else diff) / sym.point
+        await sqlite.set_exit_slippage(pos.ticket, slip)
+    except Exception:
+        logger.debug("exit slippage record failed ticket=%d", pos.ticket, exc_info=True)
+
+
 class DefaultTPStrategy:
     def __init__(self) -> None:
         self._trailing = TrailingStopManager()
@@ -127,6 +141,7 @@ class DefaultTPStrategy:
                 if realized_pnl is None:
                     realized_pnl = pos.profit
                 await sqlite.mark_closed(pos.ticket, realized_pnl)
+                await _record_exit_slippage(res, pos, mt5_client, sqlite)
                 result.closed_tickets.append(pos.ticket)
                 logger.info(
                     "TP closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
@@ -160,6 +175,7 @@ class DefaultTPStrategy:
                 if realized_pnl is None:
                     realized_pnl = newest.profit
                 await sqlite.mark_closed(newest.ticket, realized_pnl)
+                await _record_exit_slippage(res, newest, mt5_client, sqlite)
                 result.closed_tickets.append(newest.ticket)
                 logger.info(
                     "TP fully closed ticket=%d signal=%d vol=%.2f pnl=%.2f",
@@ -206,6 +222,7 @@ class DefaultTPStrategy:
                 )
                 if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                     await sqlite.set_trailing(newest.ticket)
+                    await _record_exit_slippage(res, newest, mt5_client, sqlite)
                     result.closed_tickets.append(newest.ticket)
                     result.trailed_tickets.append(newest.ticket)
                     logger.info(

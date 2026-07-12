@@ -69,6 +69,42 @@ async def update_config(config: Settings) -> dict:
     return {"ok": True}
 
 
+# Keys that survive a reset: credentials, install identity, broker/symbol wiring,
+# and the applied-migrations list (the fresh template already embodies them).
+_RESET_PRESERVE = (
+    "license_key",
+    "mt5_terminal_path",
+    "instance_id",
+    "disclaimer_accepted",
+    "config_migrations",
+    "symbol_map",
+    "stock_suffix",
+    "symbol_suffixes",
+    "stock_no_suffix",
+    "offset_instruments",
+)
+
+
+@router.post("/api/config/reset")
+async def reset_config() -> dict:
+    """Restore config.json to the bundled defaults, keeping license, terminal path,
+    and broker/symbol wiring. Same template used for first-run config creation."""
+    bundle_dir = Path(getattr(sys, "_MEIPASS", "."))
+    template = bundle_dir / "config.example.json"
+    if not template.exists():
+        raise HTTPException(500, "bundled config template not found")
+    try:
+        current = json.loads(_CONFIG_PATH.read_text())
+    except FileNotFoundError:
+        raise HTTPException(404, "config.json not found") from None
+    fresh = json.loads(template.read_text())
+    for key in _RESET_PRESERVE:
+        if key in current:
+            fresh[key] = current[key]
+    _CONFIG_PATH.write_text(json.dumps(fresh, indent=2))
+    return {"ok": True}
+
+
 @router.post("/api/disclaimer/accept")
 async def accept_disclaimer() -> dict:
     """Persist the user's one-time risk-disclaimer acceptance. Targeted raw-JSON write

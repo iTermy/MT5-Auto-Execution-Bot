@@ -377,6 +377,7 @@ class MT5Client:
             volume=volume,
             price=result.price,
             comment=result.comment,
+            requested_price=price,
         )
 
     def modify_position_sl(self, ticket: int, symbol: str, new_sl: float) -> OrderResult | None:

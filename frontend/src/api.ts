@@ -34,6 +34,11 @@ export async function updateConfig(config: Config): Promise<void> {
   if (!r.ok) throw new Error(`PUT /api/config ${r.status}`)
 }
 
+export async function resetConfig(): Promise<void> {
+  const r = await fetch('/api/config/reset', { method: 'POST' })
+  if (!r.ok) throw new Error(`POST /api/config/reset ${r.status}`)
+}
+
 export async function acceptDisclaimer(): Promise<void> {
   const r = await fetch('/api/disclaimer/accept', { method: 'POST' })
   if (!r.ok) throw new Error(`POST /api/disclaimer/accept ${r.status}`)

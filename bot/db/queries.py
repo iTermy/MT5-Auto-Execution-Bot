@@ -22,6 +22,7 @@ SELECT
     s.type            AS signal_type,
     s.channel_id,
     s.closed_reason,
+    s.total_limits,
     l.id              AS limit_id,
     l.price_level,
     l.sequence_number,
@@ -75,7 +76,9 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     channel_id              INTEGER,
     sequence_number         INTEGER,
     mfe_price               REAL NOT NULL DEFAULT 0,
-    mae_price               REAL NOT NULL DEFAULT 0
+    mae_price               REAL NOT NULL DEFAULT 0,
+    fill_price              REAL,
+    exit_slippage_points    REAL
 )
 """
 
@@ -88,7 +91,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 MARK_FILLED = """
-UPDATE order_mappings SET status = 'filled', filled_at = ? WHERE mt5_ticket = ?
+UPDATE order_mappings SET status = 'filled', filled_at = ?, fill_price = ? WHERE mt5_ticket = ?
+"""
+
+SET_EXIT_SLIPPAGE = """
+UPDATE order_mappings SET exit_slippage_points = ? WHERE mt5_ticket = ?
 """
 
 MARK_CANCELLED = """
@@ -225,6 +232,28 @@ CREATE TABLE IF NOT EXISTS signal_finalized (
 )
 """
 
+# SQLite — dedupe guard for trigger-stage tp_outcomes rows. One row per fill depth:
+# a failed close used to re-qualify every TP cycle (~1s) and spam identical trigger
+# rows into Supabase. Trading behaviour (close retries) is unaffected.
+CREATE_TRIGGER_RECORDED = """
+CREATE TABLE IF NOT EXISTS trigger_recorded (
+    signal_id      BIGINT NOT NULL,
+    mt5_account    BIGINT NOT NULL,
+    level_sequence INTEGER NOT NULL,
+    recorded_at    TEXT NOT NULL,
+    PRIMARY KEY (signal_id, mt5_account, level_sequence)
+)
+"""
+
+MARK_TRIGGER_RECORDED = """
+INSERT OR IGNORE INTO trigger_recorded (signal_id, mt5_account, level_sequence, recorded_at)
+VALUES (?, ?, ?, ?)
+"""
+
+CLEAR_TRIGGER_RECORDED = """
+DELETE FROM trigger_recorded
+"""
+
 # SQLite — guard table marking a signal our own TP engine has fired on. Once we TP a
 # signal locally we cancel its remaining limits and must never re-enter them, even while
 # the signal is still active in Supabase (the TM/DB may lag, or the user may run a tighter
@@ -314,7 +343,12 @@ SELECT
     SUM(CASE WHEN order_type != 'remainder' THEN lot_size ELSE 0 END)    AS total_volume,
     SUM(CASE WHEN order_type != 'remainder'
              THEN mt5_price_at_placement * lot_size ELSE 0 END)          AS entry_x_volume,
-    MAX(CASE WHEN order_type != 'remainder' THEN order_type END)         AS order_type
+    MAX(CASE WHEN order_type != 'remainder' THEN order_type END)         AS order_type,
+    AVG(CASE WHEN order_type != 'remainder' AND fill_price IS NOT NULL
+             THEN fill_price END)                                        AS avg_fill_price,
+    AVG(CASE WHEN order_type != 'remainder' AND fill_price IS NOT NULL
+             THEN mt5_price_at_placement END)                            AS avg_intended_price,
+    AVG(exit_slippage_points)                                            AS avg_exit_slippage
 FROM order_mappings
 WHERE signal_id = ? AND status = 'closed'
 """
@@ -378,7 +412,9 @@ INSERT INTO tp_outcomes (
     risk_per_limit, r_multiple, risk_percent_cfg,
     bot_version, tp_strategy, notes,
     stage, mfe_price, mfe_r, mae_price, mae_r,
-    level_sequence, total_levels, seconds_to_trigger, hold_seconds, exit_reason
+    level_sequence, total_levels, seconds_to_trigger, hold_seconds, exit_reason,
+    symbol_normalized, account_equity, account_balance,
+    entry_slippage_points, exit_slippage_points
 )
 VALUES (
     $1, $2, $3, $4, $5,
@@ -391,7 +427,9 @@ VALUES (
     $23, $24, $25,
     $26, $27, $28,
     $29, $30, $31, $32, $33,
-    $34, $35, $36, $37, $38
+    $34, $35, $36, $37, $38,
+    $39, $40, $41,
+    $42, $43
 )
 """
 

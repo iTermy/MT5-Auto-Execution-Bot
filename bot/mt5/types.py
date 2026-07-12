@@ -25,6 +25,7 @@ class OrderResult:
     volume: float
     price: float
     comment: str
+    requested_price: float = 0.0  # price sent in the request (for slippage measurement)
 
 
 @dataclass

@@ -168,6 +168,14 @@ _MIGRATION_LIVE_PRICE_INTERVAL = "live_price_interval_5s_v1"
 _CRYPTO_PROXIMITY_OVERRIDES = {"ETHUSDT": 40.0}
 _MIGRATION_CRYPTO_PROXIMITY = "crypto_proximity_overrides_v1"
 
+# v1.6.0 data-driven defaults: 6+ limit signals are negative-expectancy (win size
+# compresses as levels stack), and trailing exits outperformed fixed TP (+0.253 vs
+# +0.127 avg R on real executions), so full-position trailing becomes the default
+# exit. Only values still at the old shipped defaults are flipped — anything the
+# user customized is preserved.
+_MIGRATION_PROFIT_DEFAULTS = "profit_defaults_v160"
+_OLD_PARTIAL_CLOSE_DEFAULTS = (50, 75)
+
 
 class SymbolSuffixRule(BaseModel):
     suffix: str
@@ -201,13 +209,16 @@ class ExcludedChannelAssetConfig(BaseModel):
 
 
 class LotSizingConfig(BaseModel):
-    mode: str = "risk_percent"
+    mode: str = "total_lot"
     risk_percent: float | dict[str, float] = 1.0
     fixed_lot: float | dict[str, float] = 0.01
     # Total lots for a signal, split evenly across its limits (more limits = less per
     # limit = lower risk). Same per-instrument dict form as fixed_lot.
     total_lot: float | dict[str, float] = 0.1
     max_lot_per_order: float = 5.0
+    # Skip signals carrying this many limits or more at placement (0 = off). Data:
+    # 6+ limit signals are net losers despite a ~92% win rate.
+    skip_limits_at: int = 6
     exceptions: list[LotExceptionConfig] = []
 
     @field_validator("exceptions", mode="before")
@@ -312,7 +323,8 @@ class AssetTPConfig(BaseModel):
     profit_threshold: float
     threshold_unit: str
     trailing_distance: float
-    partial_close_percent: int = 50
+    # 0 = trail the full position (default: trailing exits beat fixed TP on real data)
+    partial_close_percent: int = 0
 
 
 class ScalpOverrideConfig(BaseModel):
@@ -333,7 +345,7 @@ class RiskyConfig(BaseModel):
     profit_threshold: float = 4.0
     threshold_unit: str = "dollars"
     trailing_distance: float = 2.0
-    partial_close_percent: int = 50
+    partial_close_percent: int = 0
     # Custom stop-loss distance in the instrument's price units, measured from the
     # signal's deepest limit. None = use the signal's DB stop-loss. When set it overrides
     # the DB SL for every limit of a risky signal: SL = deepest_limit - distance (long),
@@ -351,7 +363,7 @@ class RiskyConfig(BaseModel):
 
 
 class TPConfig(BaseModel):
-    partial_close_percent: int = 50
+    partial_close_percent: int = 0
     forex: AssetTPConfig
     forex_jpy: AssetTPConfig
     metals: AssetTPConfig
@@ -598,6 +610,27 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
             prox["crypto_overrides"] = existing
             data["proximity"] = prox
         applied.append(_MIGRATION_CRYPTO_PROXIMITY)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_PROFIT_DEFAULTS not in applied:
+        ls = data.get("lot_sizing")
+        if isinstance(ls, dict):
+            ls.setdefault("skip_limits_at", 6)
+            data["lot_sizing"] = ls
+
+        def _flip_partial(node: object) -> None:
+            # Old shipped defaults (50/75) become trail-full (0); user-customized
+            # values are preserved. Recurses into per-type/instrument overrides.
+            if not isinstance(node, dict):
+                return
+            if node.get("partial_close_percent") in _OLD_PARTIAL_CLOSE_DEFAULTS:
+                node["partial_close_percent"] = 0
+            for value in node.values():
+                _flip_partial(value)
+
+        _flip_partial(data.get("tp_config"))
+        applied.append(_MIGRATION_PROFIT_DEFAULTS)
         data["config_migrations"] = applied
         changed = True
 

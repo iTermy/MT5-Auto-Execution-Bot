@@ -2,14 +2,20 @@
   "license_key": "",
   "mt5_terminal_path": "",
   "lot_sizing": {
-    "mode": "risk_percent",
+    "mode": "total_lot",
     "risk_percent": 5.0,
     "fixed_lot": 0.01,
     "total_lot": 0.1,
     "max_lot_per_order": 999.0,
     "exceptions": [
-      { "symbol": "XAUUSD", "signal_type": "all", "mode": "risk_percent", "value": 5.0 }
-    ]
+      {
+        "symbol": "XAUUSD",
+        "signal_type": "all",
+        "mode": "risk_percent",
+        "value": 5.0
+      }
+    ],
+    "skip_limits_at": 6
   },
   "polling": {
     "supabase_interval_seconds": 30,
@@ -99,126 +105,170 @@
       "JP225": 200.0
     },
     "stock_overrides": {
-      "AAPL.NAS":  2.0,
-      "AAXJ.NAS":  0.45,
-      "ABNB.NAS":  0.5,
-      "ACLS.NAS":  4.0,
-      "ACMR.NAS":  4.0,
-      "AMD.NAS":   3.0,
-      "AMZN.NAS":  2.0,
-      "ANF.NAS":   1.0,
-      "ANF.NYSE":  1.0,
-      "AVGO.NAS":  3.0,
-      "BAC.NYSE":  0.6,
-      "BIDU.NAS":  1.0,
-      "CLSK.NAS":  0.5,
-      "COIN.NAS":  3.0,
-      "COST.NAS":  5.0,
-      "CRWD.NAS":  8.0,
-      "CSCO.NAS":  0.51,
-      "CTAS.NAS":  2.0,
-      "GGLS.NAS":  0.7,
-      "GILD.NAS":  1.5,
-      "GOOG.NAS":  5.0,
+      "AAPL.NAS": 2.0,
+      "AAXJ.NAS": 0.45,
+      "ABNB.NAS": 0.5,
+      "ACLS.NAS": 4.0,
+      "ACMR.NAS": 4.0,
+      "AMD.NAS": 3.0,
+      "AMZN.NAS": 2.0,
+      "ANF.NAS": 1.0,
+      "ANF.NYSE": 1.0,
+      "AVGO.NAS": 3.0,
+      "BAC.NYSE": 0.6,
+      "BIDU.NAS": 1.0,
+      "CLSK.NAS": 0.5,
+      "COIN.NAS": 3.0,
+      "COST.NAS": 5.0,
+      "CRWD.NAS": 8.0,
+      "CSCO.NAS": 0.51,
+      "CTAS.NAS": 2.0,
+      "GGLS.NAS": 0.7,
+      "GILD.NAS": 1.5,
+      "GOOG.NAS": 5.0,
       "GOOGL.NAS": 5.0,
-      "INTC.NAS":  1.0,
-      "ISRG.NAS":  3.0,
-      "LIN.NAS":   3.0,
-      "LRCX.NAS":  2.0,
-      "MARA.NAS":  0.2,
-      "MRNA.NAS":  1.0,
-      "MSFT.NAS":  4.0,
-      "MSTR.NAS":  3.0,
-      "MU.NAS":    7.5,
-      "NFLX.NAS":  0.75,
-      "NKE.NYSE":  2.0,
-      "NVDA.NAS":  2.0,
-      "PDD.NAS":   0.5,
-      "PEP.NAS":   1.0,
-      "PLTR.NAS":  2.0,
-      "PTON.NAS":  0.1,
-      "PYPL.NAS":  1.0,
-      "QCOM.NAS":  1.0,
-      "QQQ.NAS":   2.5,
-      "RIVN.NAS":  0.15,
-      "RKLB.NAS":  1.0,
-      "SBUX.NAS":  0.5,
-      "SNDK.NAS":  40.0,
-      "SNPS.NAS":  10.0,
-      "SOFI.NAS":  0.3,
-      "SPY.NYSE":  3.0,
-      "TMUS.NAS":  1.5,
-      "TSLA.NAS":  2.5,
-      "UAL.NAS":   1.0,
-      "WMT.NAS":   0.66,
-      "XOM.NYSE":  1.0,
-      "XYZ.NYSE":  1.5
+      "INTC.NAS": 1.0,
+      "ISRG.NAS": 3.0,
+      "LIN.NAS": 3.0,
+      "LRCX.NAS": 2.0,
+      "MARA.NAS": 0.2,
+      "MRNA.NAS": 1.0,
+      "MSFT.NAS": 4.0,
+      "MSTR.NAS": 3.0,
+      "MU.NAS": 7.5,
+      "NFLX.NAS": 0.75,
+      "NKE.NYSE": 2.0,
+      "NVDA.NAS": 2.0,
+      "PDD.NAS": 0.5,
+      "PEP.NAS": 1.0,
+      "PLTR.NAS": 2.0,
+      "PTON.NAS": 0.1,
+      "PYPL.NAS": 1.0,
+      "QCOM.NAS": 1.0,
+      "QQQ.NAS": 2.5,
+      "RIVN.NAS": 0.15,
+      "RKLB.NAS": 1.0,
+      "SBUX.NAS": 0.5,
+      "SNDK.NAS": 40.0,
+      "SNPS.NAS": 10.0,
+      "SOFI.NAS": 0.3,
+      "SPY.NYSE": 3.0,
+      "TMUS.NAS": 1.5,
+      "TSLA.NAS": 2.5,
+      "UAL.NAS": 1.0,
+      "WMT.NAS": 0.66,
+      "XOM.NYSE": 1.0,
+      "XYZ.NYSE": 1.5
     },
     "crypto_overrides": {
       "ETHUSDT": 40.0
     }
   },
   "tp_config": {
-    "partial_close_percent": 75,
+    "partial_close_percent": 0,
     "forex": {
       "profit_threshold": 10.0,
       "threshold_unit": "pips",
       "trailing_distance": 7.0,
-      "partial_close_percent": 75
+      "partial_close_percent": 0
     },
     "forex_jpy": {
       "profit_threshold": 10.0,
       "threshold_unit": "pips",
       "trailing_distance": 7.0,
-      "partial_close_percent": 50
+      "partial_close_percent": 0
     },
     "metals": {
       "profit_threshold": 7.0,
       "threshold_unit": "dollars",
       "trailing_distance": 5.0,
-      "partial_close_percent": 75
+      "partial_close_percent": 0
     },
     "indices": {
       "profit_threshold": 15.0,
       "threshold_unit": "dollars",
       "trailing_distance": 15.0,
-      "partial_close_percent": 75
+      "partial_close_percent": 0
     },
     "stocks": {
       "profit_threshold": 5.0,
       "threshold_unit": "dollars",
       "trailing_distance": 5.0,
-      "partial_close_percent": 75
+      "partial_close_percent": 0
     },
     "crypto": {
       "profit_threshold": 500.0,
       "threshold_unit": "dollars",
       "trailing_distance": 500.0,
-      "partial_close_percent": 75
+      "partial_close_percent": 0
     },
     "oil": {
       "profit_threshold": 0.5,
       "threshold_unit": "dollars",
       "trailing_distance": 0.5,
-      "partial_close_percent": 75
+      "partial_close_percent": 0
     },
     "scalp_overrides": {
-      "forex": { "profit_threshold": 5.0, "trailing_distance": 4.0 },
-      "forex_jpy": { "profit_threshold": 5.0, "trailing_distance": 4.0, "partial_close_percent": 75 },
-      "metals": { "profit_threshold": 5.0, "trailing_distance": 5.0 },
-      "indices": { "profit_threshold": 15.0, "trailing_distance": 15.0 },
-      "stocks": { "profit_threshold": 5.0, "trailing_distance": 5.0 },
-      "crypto": { "profit_threshold": 300.0, "trailing_distance": 300.0 },
-      "oil": { "profit_threshold": 0.3, "trailing_distance": 0.3 }
+      "forex": {
+        "profit_threshold": 5.0,
+        "trailing_distance": 4.0
+      },
+      "forex_jpy": {
+        "profit_threshold": 5.0,
+        "trailing_distance": 4.0,
+        "partial_close_percent": 0
+      },
+      "metals": {
+        "profit_threshold": 5.0,
+        "trailing_distance": 5.0
+      },
+      "indices": {
+        "profit_threshold": 15.0,
+        "trailing_distance": 15.0
+      },
+      "stocks": {
+        "profit_threshold": 5.0,
+        "trailing_distance": 5.0
+      },
+      "crypto": {
+        "profit_threshold": 300.0,
+        "trailing_distance": 300.0
+      },
+      "oil": {
+        "profit_threshold": 0.3,
+        "trailing_distance": 0.3
+      }
     },
     "swing_overrides": {
-      "forex": { "profit_threshold": 35.0, "trailing_distance": 35.0 },
-      "forex_jpy": { "profit_threshold": 35.0, "trailing_distance": 35.0, "partial_close_percent": 75 },
-      "metals": { "profit_threshold": 35.0, "trailing_distance": 25.0 },
-      "indices": { "profit_threshold": 75.0, "trailing_distance": 75.0 },
-      "stocks": { "profit_threshold": 25.0, "trailing_distance": 25.0 },
-      "crypto": { "profit_threshold": 2500.0, "trailing_distance": 2500.0 },
-      "oil": { "profit_threshold": 2.5, "trailing_distance": 2.5 }
+      "forex": {
+        "profit_threshold": 35.0,
+        "trailing_distance": 35.0
+      },
+      "forex_jpy": {
+        "profit_threshold": 35.0,
+        "trailing_distance": 35.0,
+        "partial_close_percent": 0
+      },
+      "metals": {
+        "profit_threshold": 35.0,
+        "trailing_distance": 25.0
+      },
+      "indices": {
+        "profit_threshold": 75.0,
+        "trailing_distance": 75.0
+      },
+      "stocks": {
+        "profit_threshold": 25.0,
+        "trailing_distance": 25.0
+      },
+      "crypto": {
+        "profit_threshold": 2500.0,
+        "trailing_distance": 2500.0
+      },
+      "oil": {
+        "profit_threshold": 2.5,
+        "trailing_distance": 2.5
+      }
     },
     "toll_overrides": {},
     "pa_overrides": {},
@@ -230,96 +280,588 @@
       "profit_threshold": 4.0,
       "threshold_unit": "dollars",
       "trailing_distance": 2.0,
-      "partial_close_percent": 50,
+      "partial_close_percent": 0,
       "stop_loss": null,
-      "disabled_windows": ["21:55-23:10", "00:55-02:00", "11:55-14:00"],
+      "disabled_windows": [
+        "21:55-23:10",
+        "00:55-02:00",
+        "11:55-14:00"
+      ],
       "overrides": {}
     },
     "instrument_overrides": {
       "XAUUSD": {
-        "standard": { "profit_threshold": 7.0, "trailing_distance": 5.0, "partial_close_percent": 50 },
-        "scalp":    { "profit_threshold": 5.0, "trailing_distance": 5.0, "partial_close_percent": 50 },
-        "swing":    { "profit_threshold": 35.0, "trailing_distance": 25.0 },
-        "toll":     { "profit_threshold": 5.0, "trailing_distance": 5.0 },
-        "pa":       { "profit_threshold": 10.0, "trailing_distance": 10.0 }
+        "standard": {
+          "profit_threshold": 7.0,
+          "trailing_distance": 5.0,
+          "partial_close_percent": 0
+        },
+        "scalp": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0,
+          "partial_close_percent": 0
+        },
+        "swing": {
+          "profit_threshold": 35.0,
+          "trailing_distance": 25.0
+        },
+        "toll": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0
+        },
+        "pa": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
       },
       "XAGUSD": {
-        "standard": { "profit_threshold": 0.5, "trailing_distance": 0.5 },
-        "scalp":    { "profit_threshold": 0.5, "trailing_distance": 0.5 },
-        "swing":    { "profit_threshold": 2.5, "trailing_distance": 2.5 }
+        "standard": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "scalp": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "swing": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        }
       },
       "SPX500USD": {
-        "standard": { "profit_threshold": 20.0, "trailing_distance": 20.0 },
-        "scalp":    { "profit_threshold": 15.0, "trailing_distance": 15.0 },
-        "swing":    { "profit_threshold": 100.0, "trailing_distance": 100.0 },
-        "toll":     { "profit_threshold": 10.0, "trailing_distance": 10.0 }
+        "standard": {
+          "profit_threshold": 20.0,
+          "trailing_distance": 20.0
+        },
+        "scalp": {
+          "profit_threshold": 15.0,
+          "trailing_distance": 15.0
+        },
+        "swing": {
+          "profit_threshold": 100.0,
+          "trailing_distance": 100.0
+        },
+        "toll": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
       },
       "NAS100USD": {
-        "standard": { "profit_threshold": 75.0, "trailing_distance": 75.0 },
-        "scalp":    { "profit_threshold": 50.0, "trailing_distance": 50.0 },
-        "swing":    { "profit_threshold": 375.0, "trailing_distance": 375.0 }
+        "standard": {
+          "profit_threshold": 75.0,
+          "trailing_distance": 75.0
+        },
+        "scalp": {
+          "profit_threshold": 50.0,
+          "trailing_distance": 50.0
+        },
+        "swing": {
+          "profit_threshold": 375.0,
+          "trailing_distance": 375.0
+        }
       },
       "US30USD": {
-        "standard": { "profit_threshold": 60.0, "trailing_distance": 60.0 },
-        "scalp":    { "profit_threshold": 40.0, "trailing_distance": 40.0 },
-        "swing":    { "profit_threshold": 300.0, "trailing_distance": 300.0 }
+        "standard": {
+          "profit_threshold": 60.0,
+          "trailing_distance": 60.0
+        },
+        "scalp": {
+          "profit_threshold": 40.0,
+          "trailing_distance": 40.0
+        },
+        "swing": {
+          "profit_threshold": 300.0,
+          "trailing_distance": 300.0
+        }
       },
       "US2000USD": {
-        "default": { "profit_threshold": 5.0, "trailing_distance": 5.0 }
+        "default": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0
+        }
       },
       "DE30EUR": {
-        "standard": { "profit_threshold": 50.0, "trailing_distance": 50.0 },
-        "scalp":    { "profit_threshold": 30.0, "trailing_distance": 30.0 },
-        "swing":    { "profit_threshold": 250.0, "trailing_distance": 250.0 }
+        "standard": {
+          "profit_threshold": 50.0,
+          "trailing_distance": 50.0
+        },
+        "scalp": {
+          "profit_threshold": 30.0,
+          "trailing_distance": 30.0
+        },
+        "swing": {
+          "profit_threshold": 250.0,
+          "trailing_distance": 250.0
+        }
       },
       "JP225": {
-        "standard": { "profit_threshold": 250.0, "trailing_distance": 250.0 },
-        "scalp":    { "profit_threshold": 125.0, "trailing_distance": 125.0 },
-        "swing":    { "profit_threshold": 1250.0, "trailing_distance": 1250.0 }
+        "standard": {
+          "profit_threshold": 250.0,
+          "trailing_distance": 250.0
+        },
+        "scalp": {
+          "profit_threshold": 125.0,
+          "trailing_distance": 125.0
+        },
+        "swing": {
+          "profit_threshold": 1250.0,
+          "trailing_distance": 1250.0
+        }
       },
       "BTCUSDT": {
-        "standard": { "profit_threshold": 500.0, "trailing_distance": 500.0 },
-        "scalp":    { "profit_threshold": 300.0, "trailing_distance": 300.0 },
-        "swing":    { "profit_threshold": 2500.0, "trailing_distance": 2500.0 }
+        "standard": {
+          "profit_threshold": 500.0,
+          "trailing_distance": 500.0
+        },
+        "scalp": {
+          "profit_threshold": 300.0,
+          "trailing_distance": 300.0
+        },
+        "swing": {
+          "profit_threshold": 2500.0,
+          "trailing_distance": 2500.0
+        }
       },
       "ETHUSDT": {
-        "standard": { "profit_threshold": 25.0, "trailing_distance": 25.0 },
-        "scalp":    { "profit_threshold": 15.0, "trailing_distance": 15.0 },
-        "swing":    { "profit_threshold": 125.0, "trailing_distance": 125.0 }
+        "standard": {
+          "profit_threshold": 25.0,
+          "trailing_distance": 25.0
+        },
+        "scalp": {
+          "profit_threshold": 15.0,
+          "trailing_distance": 15.0
+        },
+        "swing": {
+          "profit_threshold": 125.0,
+          "trailing_distance": 125.0
+        }
       },
       "USOILSPOT": {
-        "toll": { "profit_threshold": 0.4, "trailing_distance": 0.4 }
+        "toll": {
+          "profit_threshold": 0.4,
+          "trailing_distance": 0.4
+        }
       },
-      "WMT.NAS":  { "standard": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "scalp": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "swing": { "profit_threshold": 5.0,   "trailing_distance": 5.0   } },
-      "AAPL.NAS": { "standard": { "profit_threshold": 2.5,  "trailing_distance": 2.5  }, "scalp": { "profit_threshold": 1.25, "trailing_distance": 1.25 }, "swing": { "profit_threshold": 12.5,  "trailing_distance": 12.5  } },
-      "AMD.NAS":  { "standard": { "profit_threshold": 5.0,  "trailing_distance": 5.0  }, "scalp": { "profit_threshold": 2.5,  "trailing_distance": 2.5  }, "swing": { "profit_threshold": 25.0,  "trailing_distance": 25.0  } },
-      "AMZN.NAS": { "standard": { "profit_threshold": 2.0,  "trailing_distance": 2.0  }, "scalp": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "swing": { "profit_threshold": 10.0,  "trailing_distance": 10.0  } },
-      "AVGO.NAS": { "standard": { "profit_threshold": 5.0,  "trailing_distance": 5.0  }, "scalp": { "profit_threshold": 2.5,  "trailing_distance": 2.5  }, "swing": { "profit_threshold": 25.0,  "trailing_distance": 25.0  } },
-      "BIDU.NAS": { "standard": { "profit_threshold": 1.5,  "trailing_distance": 1.5  }, "scalp": { "profit_threshold": 0.75, "trailing_distance": 0.75 }, "swing": { "profit_threshold": 7.5,   "trailing_distance": 7.5   } },
-      "CLSK.NAS": { "standard": { "profit_threshold": 0.35, "trailing_distance": 0.35 }, "scalp": { "profit_threshold": 0.25, "trailing_distance": 0.25 }, "swing": { "profit_threshold": 1.75,  "trailing_distance": 1.75  } },
-      "COIN.NAS": { "standard": { "profit_threshold": 3.0,  "trailing_distance": 3.0  }, "scalp": { "profit_threshold": 1.5,  "trailing_distance": 1.5  }, "swing": { "profit_threshold": 15.0,  "trailing_distance": 15.0  } },
-      "CSCO.NAS": { "standard": { "profit_threshold": 0.75, "trailing_distance": 0.75 }, "scalp": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "swing": { "profit_threshold": 3.75,  "trailing_distance": 3.75  } },
-      "GILD.NAS": { "standard": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "scalp": { "profit_threshold": 0.25, "trailing_distance": 0.25 }, "swing": { "profit_threshold": 2.5,   "trailing_distance": 2.5   } },
-      "GOOG.NAS": { "standard": { "profit_threshold": 2.5,  "trailing_distance": 2.5  }, "scalp": { "profit_threshold": 1.5,  "trailing_distance": 1.5  }, "swing": { "profit_threshold": 12.5,  "trailing_distance": 12.5  } },
-      "INTC.NAS": { "standard": { "profit_threshold": 1.5,  "trailing_distance": 1.5  }, "scalp": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "swing": { "profit_threshold": 7.5,   "trailing_distance": 7.5   } },
-      "MARA.NAS": { "standard": { "profit_threshold": 0.3,  "trailing_distance": 0.3  }, "scalp": { "profit_threshold": 0.15, "trailing_distance": 0.15 }, "swing": { "profit_threshold": 1.5,   "trailing_distance": 1.5   } },
-      "MRNA.NAS": { "standard": { "profit_threshold": 0.75, "trailing_distance": 0.75 }, "scalp": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "swing": { "profit_threshold": 3.75,  "trailing_distance": 3.75  } },
-      "MSFT.NAS": { "standard": { "profit_threshold": 5.0,  "trailing_distance": 5.0  }, "scalp": { "profit_threshold": 2.5,  "trailing_distance": 2.5  }, "swing": { "profit_threshold": 25.0,  "trailing_distance": 25.0  } },
-      "MU.NAS":   { "standard": { "profit_threshold": 20.0, "trailing_distance": 20.0 }, "scalp": { "profit_threshold": 10.0, "trailing_distance": 10.0 }, "swing": { "profit_threshold": 100.0, "trailing_distance": 100.0 } },
-      "NFLX.NAS": { "standard": { "profit_threshold": 0.35, "trailing_distance": 0.35 }, "scalp": { "profit_threshold": 0.2,  "trailing_distance": 0.2  }, "swing": { "profit_threshold": 1.75,  "trailing_distance": 1.75  } },
-      "NVDA.NAS": { "standard": { "profit_threshold": 1.75, "trailing_distance": 1.75 }, "scalp": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "swing": { "profit_threshold": 8.75,  "trailing_distance": 8.75  } },
-      "PDD.NAS":  { "standard": { "profit_threshold": 0.75, "trailing_distance": 0.75 }, "scalp": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "swing": { "profit_threshold": 3.75,  "trailing_distance": 3.75  } },
-      "PLTR.NAS": { "standard": { "profit_threshold": 2.0,  "trailing_distance": 2.0  }, "scalp": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "swing": { "profit_threshold": 10.0,  "trailing_distance": 10.0  } },
-      "PTON.NAS": { "standard": { "profit_threshold": 0.15, "trailing_distance": 0.15 }, "scalp": { "profit_threshold": 0.1,  "trailing_distance": 0.1  }, "swing": { "profit_threshold": 0.75,  "trailing_distance": 0.75  } },
-      "PYPL.NAS": { "standard": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "scalp": { "profit_threshold": 0.25, "trailing_distance": 0.25 }, "swing": { "profit_threshold": 2.5,   "trailing_distance": 2.5   } },
-      "QCOM.NAS": { "standard": { "profit_threshold": 6.0,  "trailing_distance": 6.0  }, "scalp": { "profit_threshold": 3.0,  "trailing_distance": 3.0  }, "swing": { "profit_threshold": 30.0,  "trailing_distance": 30.0  } },
-      "QQQ.NAS":  { "standard": { "profit_threshold": 2.0,  "trailing_distance": 2.0  }, "scalp": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "swing": { "profit_threshold": 10.0,  "trailing_distance": 10.0  } },
-      "RIVN.NAS": { "standard": { "profit_threshold": 0.4,  "trailing_distance": 0.4  }, "scalp": { "profit_threshold": 0.2,  "trailing_distance": 0.2  }, "swing": { "profit_threshold": 2.0,   "trailing_distance": 2.0   } },
-      "RKLB.NAS": { "standard": { "profit_threshold": 3.0,  "trailing_distance": 3.0  }, "scalp": { "profit_threshold": 1.5,  "trailing_distance": 1.5  }, "swing": { "profit_threshold": 15.0,  "trailing_distance": 15.0  } },
-      "SBUX.NAS": { "standard": { "profit_threshold": 0.5,  "trailing_distance": 0.5  }, "scalp": { "profit_threshold": 0.25, "trailing_distance": 0.25 }, "swing": { "profit_threshold": 2.5,   "trailing_distance": 2.5   } },
-      "SOFI.NAS": { "standard": { "profit_threshold": 0.25, "trailing_distance": 0.25 }, "scalp": { "profit_threshold": 0.15, "trailing_distance": 0.15 }, "swing": { "profit_threshold": 1.25,  "trailing_distance": 1.25  } },
-      "TSLA.NAS": { "standard": { "profit_threshold": 4.0,  "trailing_distance": 4.0  }, "scalp": { "profit_threshold": 2.0,  "trailing_distance": 2.0  }, "swing": { "profit_threshold": 20.0,  "trailing_distance": 20.0  } },
-      "UAL.NAS":  { "standard": { "profit_threshold": 1.5,  "trailing_distance": 1.5  }, "scalp": { "profit_threshold": 1.0,  "trailing_distance": 1.0  }, "swing": { "profit_threshold": 7.5,   "trailing_distance": 7.5   } }
+      "WMT.NAS": {
+        "standard": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "scalp": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "swing": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0
+        }
+      },
+      "AAPL.NAS": {
+        "standard": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        },
+        "scalp": {
+          "profit_threshold": 1.25,
+          "trailing_distance": 1.25
+        },
+        "swing": {
+          "profit_threshold": 12.5,
+          "trailing_distance": 12.5
+        }
+      },
+      "AMD.NAS": {
+        "standard": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0
+        },
+        "scalp": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        },
+        "swing": {
+          "profit_threshold": 25.0,
+          "trailing_distance": 25.0
+        }
+      },
+      "AMZN.NAS": {
+        "standard": {
+          "profit_threshold": 2.0,
+          "trailing_distance": 2.0
+        },
+        "scalp": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "swing": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
+      },
+      "AVGO.NAS": {
+        "standard": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0
+        },
+        "scalp": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        },
+        "swing": {
+          "profit_threshold": 25.0,
+          "trailing_distance": 25.0
+        }
+      },
+      "BIDU.NAS": {
+        "standard": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "scalp": {
+          "profit_threshold": 0.75,
+          "trailing_distance": 0.75
+        },
+        "swing": {
+          "profit_threshold": 7.5,
+          "trailing_distance": 7.5
+        }
+      },
+      "CLSK.NAS": {
+        "standard": {
+          "profit_threshold": 0.35,
+          "trailing_distance": 0.35
+        },
+        "scalp": {
+          "profit_threshold": 0.25,
+          "trailing_distance": 0.25
+        },
+        "swing": {
+          "profit_threshold": 1.75,
+          "trailing_distance": 1.75
+        }
+      },
+      "COIN.NAS": {
+        "standard": {
+          "profit_threshold": 3.0,
+          "trailing_distance": 3.0
+        },
+        "scalp": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "swing": {
+          "profit_threshold": 15.0,
+          "trailing_distance": 15.0
+        }
+      },
+      "CSCO.NAS": {
+        "standard": {
+          "profit_threshold": 0.75,
+          "trailing_distance": 0.75
+        },
+        "scalp": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "swing": {
+          "profit_threshold": 3.75,
+          "trailing_distance": 3.75
+        }
+      },
+      "GILD.NAS": {
+        "standard": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "scalp": {
+          "profit_threshold": 0.25,
+          "trailing_distance": 0.25
+        },
+        "swing": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        }
+      },
+      "GOOG.NAS": {
+        "standard": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        },
+        "scalp": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "swing": {
+          "profit_threshold": 12.5,
+          "trailing_distance": 12.5
+        }
+      },
+      "INTC.NAS": {
+        "standard": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "scalp": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "swing": {
+          "profit_threshold": 7.5,
+          "trailing_distance": 7.5
+        }
+      },
+      "MARA.NAS": {
+        "standard": {
+          "profit_threshold": 0.3,
+          "trailing_distance": 0.3
+        },
+        "scalp": {
+          "profit_threshold": 0.15,
+          "trailing_distance": 0.15
+        },
+        "swing": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        }
+      },
+      "MRNA.NAS": {
+        "standard": {
+          "profit_threshold": 0.75,
+          "trailing_distance": 0.75
+        },
+        "scalp": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "swing": {
+          "profit_threshold": 3.75,
+          "trailing_distance": 3.75
+        }
+      },
+      "MSFT.NAS": {
+        "standard": {
+          "profit_threshold": 5.0,
+          "trailing_distance": 5.0
+        },
+        "scalp": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        },
+        "swing": {
+          "profit_threshold": 25.0,
+          "trailing_distance": 25.0
+        }
+      },
+      "MU.NAS": {
+        "standard": {
+          "profit_threshold": 20.0,
+          "trailing_distance": 20.0
+        },
+        "scalp": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        },
+        "swing": {
+          "profit_threshold": 100.0,
+          "trailing_distance": 100.0
+        }
+      },
+      "NFLX.NAS": {
+        "standard": {
+          "profit_threshold": 0.35,
+          "trailing_distance": 0.35
+        },
+        "scalp": {
+          "profit_threshold": 0.2,
+          "trailing_distance": 0.2
+        },
+        "swing": {
+          "profit_threshold": 1.75,
+          "trailing_distance": 1.75
+        }
+      },
+      "NVDA.NAS": {
+        "standard": {
+          "profit_threshold": 1.75,
+          "trailing_distance": 1.75
+        },
+        "scalp": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "swing": {
+          "profit_threshold": 8.75,
+          "trailing_distance": 8.75
+        }
+      },
+      "PDD.NAS": {
+        "standard": {
+          "profit_threshold": 0.75,
+          "trailing_distance": 0.75
+        },
+        "scalp": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "swing": {
+          "profit_threshold": 3.75,
+          "trailing_distance": 3.75
+        }
+      },
+      "PLTR.NAS": {
+        "standard": {
+          "profit_threshold": 2.0,
+          "trailing_distance": 2.0
+        },
+        "scalp": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "swing": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
+      },
+      "PTON.NAS": {
+        "standard": {
+          "profit_threshold": 0.15,
+          "trailing_distance": 0.15
+        },
+        "scalp": {
+          "profit_threshold": 0.1,
+          "trailing_distance": 0.1
+        },
+        "swing": {
+          "profit_threshold": 0.75,
+          "trailing_distance": 0.75
+        }
+      },
+      "PYPL.NAS": {
+        "standard": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "scalp": {
+          "profit_threshold": 0.25,
+          "trailing_distance": 0.25
+        },
+        "swing": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        }
+      },
+      "QCOM.NAS": {
+        "standard": {
+          "profit_threshold": 6.0,
+          "trailing_distance": 6.0
+        },
+        "scalp": {
+          "profit_threshold": 3.0,
+          "trailing_distance": 3.0
+        },
+        "swing": {
+          "profit_threshold": 30.0,
+          "trailing_distance": 30.0
+        }
+      },
+      "QQQ.NAS": {
+        "standard": {
+          "profit_threshold": 2.0,
+          "trailing_distance": 2.0
+        },
+        "scalp": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "swing": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
+      },
+      "RIVN.NAS": {
+        "standard": {
+          "profit_threshold": 0.4,
+          "trailing_distance": 0.4
+        },
+        "scalp": {
+          "profit_threshold": 0.2,
+          "trailing_distance": 0.2
+        },
+        "swing": {
+          "profit_threshold": 2.0,
+          "trailing_distance": 2.0
+        }
+      },
+      "RKLB.NAS": {
+        "standard": {
+          "profit_threshold": 3.0,
+          "trailing_distance": 3.0
+        },
+        "scalp": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "swing": {
+          "profit_threshold": 15.0,
+          "trailing_distance": 15.0
+        }
+      },
+      "SBUX.NAS": {
+        "standard": {
+          "profit_threshold": 0.5,
+          "trailing_distance": 0.5
+        },
+        "scalp": {
+          "profit_threshold": 0.25,
+          "trailing_distance": 0.25
+        },
+        "swing": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        }
+      },
+      "SOFI.NAS": {
+        "standard": {
+          "profit_threshold": 0.25,
+          "trailing_distance": 0.25
+        },
+        "scalp": {
+          "profit_threshold": 0.15,
+          "trailing_distance": 0.15
+        },
+        "swing": {
+          "profit_threshold": 1.25,
+          "trailing_distance": 1.25
+        }
+      },
+      "TSLA.NAS": {
+        "standard": {
+          "profit_threshold": 4.0,
+          "trailing_distance": 4.0
+        },
+        "scalp": {
+          "profit_threshold": 2.0,
+          "trailing_distance": 2.0
+        },
+        "swing": {
+          "profit_threshold": 20.0,
+          "trailing_distance": 20.0
+        }
+      },
+      "UAL.NAS": {
+        "standard": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "scalp": {
+          "profit_threshold": 1.0,
+          "trailing_distance": 1.0
+        },
+        "swing": {
+          "profit_threshold": 7.5,
+          "trailing_distance": 7.5
+        }
+      }
     }
   }
 }

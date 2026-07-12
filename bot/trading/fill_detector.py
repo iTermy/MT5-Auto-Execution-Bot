@@ -16,6 +16,7 @@ class FillEvent:
     mt5_ticket: int  # original order ticket stored in SQLite
     position_ticket: int  # actual MT5 position ticket (may differ in hedging mode)
     filled_at: str  # ISO UTC timestamp
+    fill_price: float | None = None  # actual entry fill (position price_open)
 
 
 @dataclass
@@ -52,6 +53,7 @@ class FillDetector:
                     mt5_ticket=ticket,
                     position_ticket=pos.ticket,
                     filled_at=filled_at,
+                    fill_price=pos.price_open,
                 )
             )
 

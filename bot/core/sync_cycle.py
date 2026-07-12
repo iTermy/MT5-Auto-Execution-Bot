@@ -123,6 +123,8 @@ class SyncCycle:
         # limit_ids skipped from re-placement because they already filled on our end
         # (logged once per lifetime — flags a DB desync without spamming each cycle)
         self._logged_already_filled: set[int] = set()
+        # signal_ids skipped by the limit-count gate (logged once per lifetime)
+        self._logged_limit_skips: set[int] = set()
         # C8: SL sync consecutive failure tracking
         self._sl_fail_count: dict[int, int] = {}  # ticket -> consecutive fail count
         self._sl_fail_target: dict[int, float] = {}  # ticket -> last failed target sl
@@ -524,6 +526,29 @@ class SyncCycle:
                     for lid in new_limit_ids
                     if supabase_by_limit[lid]["signal_id"] not in unmanaged_sids
                 }
+
+                # Limit-count gate: signals with too many limits have negative
+                # expectancy (win size compresses as the level count grows), so they
+                # are skipped at placement. Existing pendings/fills are untouched.
+                skip_at = config.lot_sizing.skip_limits_at
+                if skip_at > 0:
+                    too_many = {
+                        lid
+                        for lid in new_limit_ids
+                        if (supabase_by_limit[lid].get("total_limits") or 0) >= skip_at
+                    }
+                    for lid in too_many:
+                        sid = supabase_by_limit[lid]["signal_id"]
+                        if sid not in self._logged_limit_skips:
+                            self._logged_limit_skips.add(sid)
+                            logger.info(
+                                "Skipping signal=%d (%s): %d limits >= skip_limits_at=%d",
+                                sid,
+                                supabase_by_limit[lid]["instrument"],
+                                supabase_by_limit[lid].get("total_limits") or 0,
+                                skip_at,
+                            )
+                    new_limit_ids -= too_many
 
                 # Never re-place a limit that has already filled on our end. A limit can
                 # fill on our broker while the TM still shows it pending (sub-pip mismatch,
@@ -1077,7 +1102,7 @@ class SyncCycle:
         fills = self._fill_detector.detect_fills(mt5_orders, mt5_positions, current_pending)
         for fill in fills:
             await sqlite.mark_filled_and_set_position_ticket(
-                fill.mt5_ticket, fill.position_ticket, fill.filled_at
+                fill.mt5_ticket, fill.position_ticket, fill.filled_at, fill.fill_price
             )
             result.filled += 1
             logger.info("Fill: order=%d pos=%d", fill.mt5_ticket, fill.position_ticket)

@@ -35,6 +35,55 @@ def _clamp(lot: float, info: SymbolInfo) -> float:
     return min(max(lot, info.volume_min), info.volume_max)
 
 
+def resolve_lot_exception(
+    config: Settings, mt5_symbol: str, signal_type: str, channel_id: int | None
+) -> LotExceptionConfig | None:
+    # Most-specific match wins, weighting channel > symbol > signal_type. A rule
+    # is a candidate only if every dimension it specifies matches the trade; ties
+    # (true duplicates) resolve to the last-defined entry.
+    chan = None if channel_id is None else str(channel_id)
+    best: LotExceptionConfig | None = None
+    best_score = -1
+    for ex in config.lot_sizing.exceptions:
+        sym_w = not ex.symbol or ex.symbol.lower() == "all"
+        chan_w = not ex.channel or ex.channel.lower() == "all"
+        type_w = ex.signal_type == "all"
+        if not sym_w and ex.symbol != mt5_symbol:
+            continue
+        if not chan_w and ex.channel != chan:
+            continue
+        if not type_w and ex.signal_type != signal_type:
+            continue
+        score = (0 if chan_w else 4) + (0 if sym_w else 2) + (0 if type_w else 1)
+        if score >= best_score:
+            best, best_score = ex, score
+    return best
+
+
+def _per_symbol(value, mt5_symbol: str, fallback: float) -> float:
+    if isinstance(value, dict):
+        return value.get(mt5_symbol) or value.get("default") or fallback
+    return float(value)
+
+
+def resolve_lot_mode(
+    config: Settings, mt5_symbol: str, signal_type: str, channel_id: int | None
+) -> dict:
+    """Resolved lot mode/value for this trade, for the tp_outcomes config snapshot.
+    Mirrors LotCalculator precedence (exception over global mode) without MT5 access."""
+    exception = resolve_lot_exception(config, mt5_symbol, signal_type, channel_id)
+    if exception is not None:
+        return {"mode": exception.mode, "value": exception.value, "source": "exception"}
+    mode = config.lot_sizing.mode
+    if mode == "fixed":
+        value = _per_symbol(config.lot_sizing.fixed_lot, mt5_symbol, 0.01)
+    elif mode == "total_lot":
+        value = _per_symbol(config.lot_sizing.total_lot, mt5_symbol, 0.1)
+    else:
+        value = _per_symbol(config.lot_sizing.risk_percent, mt5_symbol, 1.0)
+    return {"mode": mode, "value": value, "source": "global"}
+
+
 class LotCalculator:
     def __init__(self, mt5_client: MT5Client, config: Settings) -> None:
         self._client = mt5_client
@@ -61,26 +110,7 @@ class LotCalculator:
     def _resolve_exception(
         self, mt5_symbol: str, signal_type: str, channel_id: int | None
     ) -> LotExceptionConfig | None:
-        # Most-specific match wins, weighting channel > symbol > signal_type. A rule
-        # is a candidate only if every dimension it specifies matches the trade; ties
-        # (true duplicates) resolve to the last-defined entry.
-        chan = None if channel_id is None else str(channel_id)
-        best: LotExceptionConfig | None = None
-        best_score = -1
-        for ex in self._config.lot_sizing.exceptions:
-            sym_w = not ex.symbol or ex.symbol.lower() == "all"
-            chan_w = not ex.channel or ex.channel.lower() == "all"
-            type_w = ex.signal_type == "all"
-            if not sym_w and ex.symbol != mt5_symbol:
-                continue
-            if not chan_w and ex.channel != chan:
-                continue
-            if not type_w and ex.signal_type != signal_type:
-                continue
-            score = (0 if chan_w else 4) + (0 if sym_w else 2) + (0 if type_w else 1)
-            if score >= best_score:
-                best, best_score = ex, score
-        return best
+        return resolve_lot_exception(self._config, mt5_symbol, signal_type, channel_id)
 
     def calculate(
         self,

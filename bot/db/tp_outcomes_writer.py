@@ -56,6 +56,11 @@ class TPOutcomesWriter:
                     outcome.seconds_to_trigger,
                     outcome.hold_seconds,
                     outcome.exit_reason,
+                    outcome.symbol_normalized,
+                    outcome.account_equity,
+                    outcome.account_balance,
+                    outcome.entry_slippage_points,
+                    outcome.exit_slippage_points,
                 )
             logger.info(
                 "TP outcome written signal=%d stage=%s pnl=%.2f",

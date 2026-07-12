@@ -2,7 +2,8 @@
 .env
 config.json
 orders.db*
-bot.log*
+*.log
+*.log.*
 
 # Python build artefacts
 __pycache__/

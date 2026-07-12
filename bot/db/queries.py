@@ -451,41 +451,13 @@ SELECT
 FROM signal_pnl
 """
 
-# Supabase — UPSERT one row per user (keyed on license_key). Pulls user_id
-# from the licenses table; if the license_key is unknown the INSERT inserts
-# zero rows (and there's nothing to update either). Schemas are qualified
-# explicitly because Supabase ships an `auth.users` table that otherwise
-# wins via search_path in some pooler sessions.
+# Supabase — upsert one row per user (keyed on license_key) via a
+# SECURITY DEFINER function. The bot's database role has no direct access
+# to public.users or public.licenses, so license keys of other users are
+# unreadable even with the bot's credentials; the function resolves the
+# license id server-side and no-ops on an unknown key.
 UPSERT_USER_SNAPSHOT = """
-INSERT INTO public.users (
-    license_id, license_key, mt5_account,
-    balance, equity, currency, leverage,
-    open_positions_count, total_realized_pnl,
-    total_trades, wins, losses, win_rate,
-    bot_version, last_update_at
-)
-SELECT
-    l.id, $1, $2,
-    $3, $4, $5, $6,
-    $7, $8,
-    $9, $10, $11, $12,
-    $13, now()
-FROM public.licenses l
-WHERE l.license_key = $1
-ON CONFLICT (license_key) DO UPDATE SET
-    mt5_account = EXCLUDED.mt5_account,
-    balance = EXCLUDED.balance,
-    equity = EXCLUDED.equity,
-    currency = EXCLUDED.currency,
-    leverage = EXCLUDED.leverage,
-    open_positions_count = EXCLUDED.open_positions_count,
-    total_realized_pnl = EXCLUDED.total_realized_pnl,
-    total_trades = EXCLUDED.total_trades,
-    wins = EXCLUDED.wins,
-    losses = EXCLUDED.losses,
-    win_rate = EXCLUDED.win_rate,
-    bot_version = EXCLUDED.bot_version,
-    last_update_at = EXCLUDED.last_update_at
+SELECT public.upsert_user_snapshot($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 """
 
 # SQLite — aggregate counts of a signal's limits (filled / pending / cancelled / closed)

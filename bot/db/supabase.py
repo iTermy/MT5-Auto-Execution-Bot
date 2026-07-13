@@ -38,6 +38,10 @@ class SupabaseDB:
         self._dsn = dsn
         self._pool: asyncpg.Pool | None = None
 
+    @property
+    def is_connected(self) -> bool:
+        return self._pool is not None
+
     async def create_pool(self) -> None:
         last_error: Exception | None = None
         for attempt in range(1, _POOL_RETRY_ATTEMPTS + 1):

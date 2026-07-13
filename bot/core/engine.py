@@ -151,6 +151,21 @@ class Engine:
         return self._running
 
     @property
+    def sqlite(self) -> SQLiteDB:
+        return self._sqlite
+
+    @property
+    def config(self) -> Settings:
+        return self._config
+
+    async def check_updates_now(self) -> None:
+        """Run an on-demand update check and push the result to the UI."""
+        if self._update_checker is None:
+            return
+        await self._update_checker.check()
+        await self._broadcast_status()
+
+    @property
     def trading_active(self) -> bool:
         return self._trading_active
 
@@ -637,7 +652,7 @@ class Engine:
         prerequisites are missing."""
         if not self._config.license_key:
             return
-        if self._supabase._pool is None:
+        if not self._supabase.is_connected:
             return
         now = time.monotonic()
         if now - self._last_user_snapshot < _USER_SNAPSHOT_INTERVAL:
@@ -711,7 +726,7 @@ class Engine:
             "license_message": getattr(self._license, "message", ""),
             "mt5_connected": mt5_connected,
             "mt5_error": None if mt5_connected else self._mt5_conn.last_error,
-            "supabase_connected": self._supabase._pool is not None,
+            "supabase_connected": self._supabase.is_connected,
             "supabase_error": self._supabase_error,
             "pending_count": pending_count,
             "open_count": open_count,

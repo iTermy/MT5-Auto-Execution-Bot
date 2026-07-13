@@ -145,10 +145,7 @@ async def update_install(request: Request) -> dict:
 
 @router.post("/api/update/check")
 async def update_check(request: Request) -> dict:
-    engine = request.app.state.engine
-    if engine._update_checker is not None:
-        await engine._update_checker.check()
-        await engine._broadcast_status()
+    await request.app.state.engine.check_updates_now()
     return {"ok": True}
 
 
@@ -178,7 +175,7 @@ async def set_signal_action(request: Request, body: SignalActionBody) -> dict:
     re-place takes effect on the next sync cycle — MT5 is never touched here."""
     if body.action not in ("skip", "manual", "none"):
         raise HTTPException(400, "action must be 'skip', 'manual', or 'none'")
-    sqlite = request.app.state.engine._sqlite
+    sqlite = request.app.state.engine.sqlite
     if body.action == "none":
         await sqlite.clear_signal_action(body.signal_id)
     else:
@@ -194,7 +191,7 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
         to_date = "2099-12-31T23:59:59"
 
     engine = request.app.state.engine
-    rows = await engine._sqlite.get_order_history(from_date, to_date)
+    rows = await engine.sqlite.get_order_history(from_date, to_date)
 
     trades = []
     total_pnl = 0.0
@@ -254,7 +251,7 @@ async def clear_history(request: Request) -> dict:
     """Reset the account to new — wipe all closed/cancelled trade history so every
     history- and dashboard-stat goes to zero. Live positions and pending orders are
     untouched (only terminal rows are removed)."""
-    deleted = await request.app.state.engine._sqlite.clear_history()
+    deleted = await request.app.state.engine.sqlite.clear_history()
     return {"ok": True, "deleted": deleted}
 
 
@@ -280,10 +277,10 @@ async def approximate_lot_sizes(request: Request, mode: str = "fixed") -> dict:
     if not acct or not acct.get("balance"):
         raise HTTPException(409, "Account balance unavailable — connect MT5 and let a sync run")
     recs = compute_recommendations(
-        engine._config,
+        engine.config,
         float(acct["balance"]),
         engine.lot_specs,
-        engine._config.lot_sizing.max_lot_per_order,
+        engine.config.lot_sizing.max_lot_per_order,
         mode,
     )
     return {

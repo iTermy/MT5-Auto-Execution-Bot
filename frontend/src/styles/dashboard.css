@@ -1,0 +1,158 @@
+/* ── Proximity meter ── */
+.prox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.prox-track {
+  position: relative;
+  height: 6px;
+  border-radius: 20px;
+  background: var(--surface-3);
+  overflow: hidden;
+  flex: 1;
+  min-width: 60px;
+}
+.prox-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 20px;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent-2));
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.prox small {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+/* ── Closest-signals cards ── */
+.fill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 12px;
+}
+.fill-card {
+  padding: 14px 15px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.fill-card:hover {
+  border-color: var(--accent-tint2);
+  transform: translateY(-1px);
+}
+.fill-card.hot {
+  border-color: var(--accent-tint2);
+  background: linear-gradient(180deg, var(--accent-tint), var(--surface-2));
+}
+.fill-card .top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+.fill-card .sym {
+  font-size: 15px;
+}
+.fill-card .meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin-top: 10px;
+}
+.fill-card .meta .mono {
+  color: var(--text-2);
+}
+
+.fill-kv {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fill-kv .r {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.fill-kv .r .k {
+  color: var(--text-3);
+}
+.fill-kv .r .val {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* ── Closest-signals per-card action menu ── */
+.signal-menu {
+  position: relative;
+  margin-left: 6px;
+  display: flex;
+  align-items: center;
+}
+.signal-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 6px;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.signal-menu-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.signal-menu-drop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 170px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.signal-menu-drop button {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.signal-menu-drop button:hover {
+  background: var(--surface-2);
+}
+.tag.skipped {
+  background: var(--neg-tint);
+  color: var(--neg);
+}
+.tag.manual {
+  background: rgba(224, 162, 60, 0.14);
+  color: var(--warn);
+}
+

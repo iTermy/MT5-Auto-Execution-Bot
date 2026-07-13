@@ -1,0 +1,58 @@
+/* ── Unsaved-changes save bar + toast ── */
+.savebar {
+  position: fixed;
+  left: calc(50% + var(--rail) / 2);
+  transform: translateX(-50%);
+  bottom: 56px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 12px 11px 20px;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  animation: saveUp 0.26s cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.savebar .msg {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.savebar .msg b {
+  color: var(--text);
+  font-weight: 600;
+}
+.savebar .acts {
+  display: flex;
+  gap: 8px;
+}
+@keyframes saveUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.toast {
+  position: fixed;
+  left: calc(50% + var(--rail) / 2);
+  transform: translateX(-50%);
+  bottom: 56px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 18px;
+  border-radius: 12px;
+  background: var(--pos);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  animation: saveUp 0.26s cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+

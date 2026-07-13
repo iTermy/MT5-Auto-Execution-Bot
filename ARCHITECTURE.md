@@ -269,12 +269,48 @@ Scalp strategy — every second matters. 1s polling when any pending orders or p
 ## Signal Tracking
 Multiple signals can exist for same instrument. signal_id encoded in MT5 order comment: `"s{signal_id}"` (e.g. `"s12345"`). Primary mapping is SQLite `order_mappings.signal_id`. Comment is reconciliation fallback.
 
-## Supabase Schema (Read-Only)
-**signals**: id, instrument, direction(long/short), stop_loss, status(active/hit/profit/breakeven/stop_loss/cancelled), type(standard/scalp/swing/toll/pa/1-1), expiry_time, channel_id
+## Supabase Contract (TM bot ↔ this bot)
+
+The TM (signal) bot owns and writes the shared database; this bot is a read-mostly
+consumer. The exe embeds the `execution_bot_ro` role, whose grants are deliberately
+least-privilege:
+
+- **SELECT** on `signals`, `limits`, `live_prices`, `feed_health`, `bot_mode_status`
+- **INSERT** on `tp_outcomes` (append-only analytics)
+- **EXECUTE** on `public.upsert_user_snapshot(...)` — a `SECURITY DEFINER` function
+  that resolves `license_id` from `licenses` and upserts the per-account `users`
+  snapshot server-side. The role has **no direct access** to `licenses` or `users`,
+  so an exe holder can never read other users' license keys or account snapshots.
+
+### Tables read
+**signals**: id, instrument, direction(long/short), stop_loss,
+status(active/hit/profit/breakeven/stop_loss/cancelled),
+type(standard/scalp/swing/toll/pa/1-1/risky), closed_reason, total_limits, channel_id
 **limits**: id, signal_id(FK), price_level, sequence_number, status(pending/hit/cancelled)
-**live_prices**: symbol(PK), bid, ask, feed(oanda/binance), updated_at
-**licenses**: queried by the Edge Function for validation, and SELECTed by the bot only as a subquery in the `users` UPSERT to resolve `license_id`
-**users**: per-license snapshot (balance / equity / cumulative P&L / wins / losses / win_rate). UPSERT-only from the bot, every 5 min. Schema in CLAUDE.md.
+**live_prices**: symbol(PK), bid, ask, feed(icmarkets/oanda/binance/exness), updated_at
+**feed_health**: feed(PK), status(idle/healthy/down) — there is no `degraded` status
+**bot_mode_status**: singleton row — news_mode / vol_guard are comma-separated
+currency tokens (e.g. `EUR, GOLD`) or `ALL`, and NULL when inactive
+
+### Vocabularies this bot depends on
+- `signals.closed_reason`: `automatic`, `manual`, `expiry`, `near_miss`, `news:<CAT>`,
+  `spread_hour`, `late_market`, `risky_window`, `real_sl`. Only `expiry` marks a
+  rolled-over hit signal (position stays open on weekdays); every other cancel reason
+  force-closes.
+
+### Invariants guaranteed by the TM bot
+- `limits.id` is stable across signal edits — an unchanged price level keeps its row
+  (an edited level gets a fresh IDENTITY id, which the (signal_id, price) re-placement
+  guard covers).
+- `live_prices.updated_at` advances at least every **30 s** while the feed is ticking
+  (heartbeat), and ages honestly when a feed dies — this bot's
+  `feed_max_staleness_seconds` (120 s) dark-feed gate and offset anchoring rely on it.
+- Cancel paths update `limits` before the signal row transitions, so a pending-limit
+  query never sees a half-cancelled signal.
+- A TM-marked `hit` limit stays in the active fetch while its signal is live, so the
+  local pending order is held for sub-pip fills instead of being stale-cancelled.
+- The `profit` branch of `FETCH_SIGNAL_SETS` is scoped to the signal ids this bot
+  still holds fills for, keeping the query bounded.
 
 ## SQLite Schema (orders.db)
 ```sql
@@ -283,20 +319,29 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     limit_id                BIGINT NOT NULL UNIQUE,
     signal_id               BIGINT NOT NULL,
     mt5_ticket              BIGINT NOT NULL UNIQUE,
-    order_type              TEXT NOT NULL,        -- buy_limit/sell_limit/buy_stop/sell_stop
+    order_type              TEXT NOT NULL,        -- buy_limit/sell_limit/buy_stop/sell_stop/remainder
     lot_size                REAL,
     placed_at               TEXT NOT NULL,        -- ISO timestamp
     filled_at               TEXT,
     cancelled_at            TEXT,
-    status                  TEXT NOT NULL DEFAULT 'pending',  -- pending/filled/cancelled/spread_cancelled/error
+    status                  TEXT NOT NULL DEFAULT 'pending',  -- pending/claimed/filled/closed/cancelled/spread_cancelled/error
     feed_price_at_placement REAL,
     mt5_price_at_placement  REAL,
     offset_at_placement     REAL,
     last_offset_check       TEXT,
     db_stop_loss            REAL,
     last_known_mt5_sl       REAL,
-    signal_type             TEXT NOT NULL DEFAULT 'standard',  -- standard|scalp|swing|toll|pa|1-1
-    is_trailing             INTEGER NOT NULL DEFAULT 0
+    signal_type             TEXT NOT NULL DEFAULT 'standard',  -- standard|scalp|swing|toll|pa|1-1|risky
+    is_trailing             INTEGER NOT NULL DEFAULT 0,
+    sl_stripped             INTEGER NOT NULL DEFAULT 0,  -- spread-hour SL strip flag
+    symbol                  TEXT,
+    realized_pnl            REAL,
+    channel_id              INTEGER,
+    sequence_number         INTEGER,
+    mfe_price               REAL NOT NULL DEFAULT 0,     -- excursion analytics
+    mae_price               REAL NOT NULL DEFAULT 0,
+    fill_price              REAL,
+    exit_slippage_points    REAL
 );
 ```
 

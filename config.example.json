@@ -15,7 +15,7 @@
         "value": 5.0
       }
     ],
-    "skip_limits_at": 6
+    "skip_limits_at": 0
   },
   "polling": {
     "supabase_interval_seconds": 30,

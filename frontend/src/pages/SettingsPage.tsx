@@ -73,7 +73,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const [fixedLotDefault, setFixedLotDefault] = useState('0.01')
   const [totalLotDefault, setTotalLotDefault] = useState('0.1')
   const [maxLot, setMaxLot] = useState('5.0')
-  const [skipLimitsAt, setSkipLimitsAt] = useState('6')
+  const [skipLimitsAt, setSkipLimitsAt] = useState('0')
   const [lotExceptions, setLotExceptions] = useState<LotExceptionRow[]>([])
   const [approxLoading, setApproxLoading] = useState(false)
   const [approxMsg, setApproxMsg] = useState<{ kind: 'success' | 'error'; text: string } | null>(
@@ -156,7 +156,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
   const initFromConfig = useCallback((cfg: Config) => {
     setLotMode(cfg.lot_sizing.mode)
     setMaxLot(String(cfg.lot_sizing.max_lot_per_order))
-    setSkipLimitsAt(String(cfg.lot_sizing.skip_limits_at ?? 6))
+    setSkipLimitsAt(String(cfg.lot_sizing.skip_limits_at ?? 0))
     setLicenseKey(cfg.license_key)
     setMt5TerminalPath(cfg.mt5_terminal_path ?? '')
 
@@ -825,7 +825,7 @@ export function SettingsPage({ config, status, connected, onConfigSaved }: Props
           fixed_lot: parseFloat(fixedLotDefault) || 0.01,
           total_lot: parseFloat(totalLotDefault) || 0.1,
           max_lot_per_order: parseFloat(maxLot) || 5.0,
-          skip_limits_at: skipLimitsAt === '' ? 6 : Math.max(0, parseInt(skipLimitsAt, 10) || 0),
+          skip_limits_at: skipLimitsAt === '' ? 0 : Math.max(0, parseInt(skipLimitsAt, 10) || 0),
           exceptions: buildLotExceptions(),
         },
         tp_config: buildTpConfig(),

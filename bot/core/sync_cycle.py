@@ -3,7 +3,7 @@ import logging
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -64,6 +64,57 @@ _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
 _ROLLOVER_CANCEL_REASONS = frozenset({"expiry"})
 _SL_FAIL_MAX = 5
 _FORCE_EXIT_MAX_ATTEMPTS = 5
+
+
+@dataclass
+class _CycleContext:
+    """Per-cycle snapshot shared by the placement and maintenance phases.
+
+    Built once per run() after the Supabase fetch succeeds; every extracted
+    phase reads the same snapshot instead of re-deriving it.
+    """
+
+    config: Settings
+    scheduler: MarketScheduler
+    now: datetime  # wall clock for gate decisions
+    cache_now: float  # monotonic clock for egress-guard cache ages
+    unmanaged_sids: set[int]  # user 'skip' + 'manual' signals — never touched
+    filled_sids: set[int]  # signals we hold a filled position on
+    supabase_rows: list  # active pending limits (exclusions applied)
+    hit_limit_ids: set[int]  # TM-marked 'hit' limits on live signals
+    profit_held_limit_ids: set[int]  # pending limits spared on profit-marked signals
+    supabase_by_limit: dict[int, dict]
+    supabase_limit_ids: set[int]
+    sqlite_limit_ids: set[int]
+    sqlite_pending: list  # local pending orders, shrunk as phases cancel
+    news_symbols: frozenset[str]
+    risky_disabled: bool
+    risky_sl_by_signal: dict[int, float]
+    tp_fired_signals: set[int]
+    offset_needed: set[str] = field(default_factory=set)
+    live_prices: dict = field(default_factory=dict)
+    # Tickets already cancelled by a maintenance loop this cycle, so a later
+    # loop over the same pending snapshot doesn't re-cancel a gone order.
+    repriced_tickets: set[int] = field(default_factory=set)
+
+    def instr_of(self, row) -> str:
+        lid = row["limit_id"]
+        if lid in self.supabase_by_limit:
+            return self.supabase_by_limit[lid]["instrument"]
+        return db_symbol_from_mt5(row["symbol"] or "", self.config)
+
+    def is_blocked(self, instr: str, signal_type: str = "standard") -> bool:
+        if signal_type == "risky" and self.risky_disabled:
+            return True
+        if _gate_exempt(instr, self.config):
+            return False
+        if instrument_under_news(instr, self.news_symbols):
+            return True
+        is_stock = detect_asset_class(instr) == AssetClass.STOCKS
+        return self.scheduler.should_cancel_pending(self.now, stock=is_stock)
+
+    def row_blocked(self, row) -> bool:
+        return self.is_blocked(self.instr_of(row), row["signal_type"])
 
 
 def _persist_stock_no_suffix(db_symbol: str, config: Settings) -> None:
@@ -268,30 +319,8 @@ class SyncCycle:
         sqlite_active = await sqlite.get_all_active()
         filled_sids = {r["signal_id"] for r in sqlite_active if r["status"] == "filled"}
 
-        # Egress guard: pull the active-signal set only when the cache has lapsed;
-        # reuse the last snapshot otherwise so the 1s fill/TP loop doesn't re-fetch
-        # the whole set every cycle. A change in filled_sids also invalidates the cache
-        # so a freshly-filled 'profit' signal's remaining limits are spared immediately
-        # rather than waiting out the interval. On a fetch failure we skip the placement
-        # phase (run fill detection only), exactly as before.
         cache_now = time.monotonic()
-        signal_sets = self._signal_sets_cache
-        if (
-            signal_sets is None
-            or filled_sids != self._signal_sets_cache_sids
-            or (cache_now - self._signal_sets_cache_at) >= config.polling.signal_fetch_interval_seconds
-        ):
-            try:
-                signal_sets = await supabase.fetch_signal_sets(list(filled_sids))
-                self._signal_sets_cache = signal_sets
-                self._signal_sets_cache_at = cache_now
-                self._signal_sets_cache_sids = filled_sids
-            except Exception:
-                logger.error(
-                    "Supabase fetch failed — skipping placement phase, running fill detection only",
-                    exc_info=True,
-                )
-                signal_sets = None
+        signal_sets = await self._fetch_signal_sets_cached(supabase, filled_sids, config, cache_now)
 
         supabase_rows = None
         hit_limit_ids: set[int] = set()
@@ -334,32 +363,9 @@ class SyncCycle:
             # shut; everything else uses the standard daily_start.
             now = datetime.now(UTC)
 
-            # news_mode is per-symbol: a comma-separated list of currency/asset tokens
-            # (or 'ALL'), NULL when there's no news. The volatility guard (vol_guard)
-            # shares the same token format and gating semantics — when the user enables
-            # it, its tokens are folded into the same set so they cancel/close trades
-            # identically. Fetched regardless of placement_active so force-exits still
+            # news_mode is fetched regardless of placement_active so force-exits still
             # fire while placement is paused.
-            # Egress guard: mode gates track news/vol windows (minute-scale), so they're
-            # cached and refreshed on mode_gate_interval_seconds rather than every cycle.
-            # A fetch failure reuses the last-known gates so gating survives a brief blip.
-            news_symbols: frozenset[str] = frozenset()
-            gates = self._gates_cache
-            if gates is None or (
-                (cache_now - self._gates_cache_at) >= config.polling.mode_gate_interval_seconds
-            ):
-                try:
-                    gates = await supabase.fetch_mode_gates()
-                    self._gates_cache = gates
-                    self._gates_cache_at = cache_now
-                except Exception:
-                    logger.error("Failed to fetch bot mode gates", exc_info=True)
-                    gates = self._gates_cache
-            if gates is not None:
-                news_mode_raw, vol_guard_raw = gates
-                news_symbols = parse_news_symbols(news_mode_raw)
-                if config.volatility_guard:
-                    news_symbols |= parse_news_symbols(vol_guard_raw)
+            news_symbols = await self._fetch_mode_gates_cached(supabase, config, cache_now)
 
             # 'risky' signals are disabled entirely inside their UTC windows (no
             # crypto/24h exemption — the gate is signal-type based, not instrument based).
@@ -367,776 +373,101 @@ class SyncCycle:
             # Custom shared SL per risky signal (empty when no custom SL configured).
             risky_sl_by_signal = self._risky_sl_map(supabase_rows, config)
 
-            def _instr_of(row) -> str:
-                lid = row["limit_id"]
-                if lid in supabase_by_limit:
-                    return supabase_by_limit[lid]["instrument"]
-                return db_symbol_from_mt5(row["symbol"] or "", config)
-
-            def _is_blocked(instr: str, signal_type: str = "standard") -> bool:
-                if signal_type == "risky" and risky_disabled:
-                    return True
-                if _gate_exempt(instr, config):
-                    return False
-                if instrument_under_news(instr, news_symbols):
-                    return True
-                is_stock = detect_asset_class(instr) == AssetClass.STOCKS
-                return scheduler.should_cancel_pending(now, stock=is_stock)
-
-            if placement_active:
-                blocked = 0
-                for row in sqlite_pending:
-                    if not _is_blocked(_instr_of(row), row["signal_type"]):
-                        continue
-                    ok = await self._canceller.cancel_order(
-                        row["mt5_ticket"], mt5_client, sqlite, spread=True
-                    )
-                    result.cancelled += ok
-                    result.errors += not ok
-                    blocked += 1
-                if blocked:
-                    logger.info("Spread/news/risky gate cancelled %d pending order(s)", blocked)
-
-                # Drop blocked rows from the pre-gate snapshot so downstream loops
-                # (stale-pending, SL change, offset drift) skip the just-cancelled orders.
-                # sqlite_limit_ids is intentionally NOT refreshed: the cancelled limits
-                # should still be treated as 'known' (not as new placement candidates).
-                sqlite_pending = [
-                    r for r in sqlite_pending if not _is_blocked(_instr_of(r), r["signal_type"])
-                ]
-
-            # Feed prices for every offset symbol in the active signal set — used for
-            # placement, drift checks, SL sync, and the dashboard's "Closest Signals"
-            # view. Egress guard: refetch only when the interval lapses OR a newly-
-            # appeared offset symbol isn't cached yet (so a brand-new signal is priced
-            # immediately, no added latency). A fetch failure reuses the last snapshot.
-            offset_needed: set[str] = {
-                r["instrument"] for r in supabase_rows if needs_offset(r["instrument"], config)
-            }
-            live_prices: dict = {}
-            if offset_needed:
-                # "missing" is measured against the last requested set, not the returned
-                # rows: an offset symbol the feed never publishes has no row but was still
-                # asked for, so it must not force a refetch every cycle.
-                missing = offset_needed - self._live_prices_requested
-                if missing or (
-                    (cache_now - self._live_prices_cache_at)
-                    >= config.polling.live_price_interval_seconds
-                ):
-                    try:
-                        self._live_prices_cache = await supabase.fetch_live_prices(
-                            list(offset_needed)
-                        )
-                        self._live_prices_cache_at = cache_now
-                        self._live_prices_requested = set(offset_needed)
-                    except Exception:
-                        logger.error("Live prices fetch failed", exc_info=True)
-                live_prices = self._live_prices_cache
-
             # Signals our own TP engine has already fired on. Once we TP a signal we
             # tear down its remaining limits and must never re-enter them, even while
             # Supabase still shows the signal active (the TM/DB can lag, or the user may
             # run a tighter TP than the channel). Durable, so a restart can't re-place.
             tp_fired_signals = await sqlite.get_tp_fired_signals()
 
+            ctx = _CycleContext(
+                config=config,
+                scheduler=scheduler,
+                now=now,
+                cache_now=cache_now,
+                unmanaged_sids=unmanaged_sids,
+                filled_sids=filled_sids,
+                supabase_rows=supabase_rows,
+                hit_limit_ids=hit_limit_ids,
+                profit_held_limit_ids=profit_held_limit_ids,
+                supabase_by_limit=supabase_by_limit,
+                supabase_limit_ids=supabase_limit_ids,
+                sqlite_limit_ids=sqlite_limit_ids,
+                sqlite_pending=sqlite_pending,
+                news_symbols=news_symbols,
+                risky_disabled=risky_disabled,
+                risky_sl_by_signal=risky_sl_by_signal,
+                tp_fired_signals=tp_fired_signals,
+            )
+
             if placement_active:
-                # Tickets already cancelled by a maintenance loop this cycle (SL change,
-                # offset drift, proximity drift) — so a later loop over the same pending
-                # snapshot doesn't fire a second cancel at an already-gone order.
-                repriced_tickets: set[int] = set()
+                await self._cancel_gate_blocked_pending(ctx, sqlite, mt5_client, result)
 
-                # Safety net: cancel any still-pending order on a TP-fired signal. The TP
-                # engine cancels these the moment it fires; this re-cancels if that order
-                # send failed, so a TP'd signal can never leave a live entry behind.
-                if tp_fired_signals:
-                    for row in sqlite_pending:
-                        if row["signal_id"] not in tp_fired_signals:
-                            continue
-                        ok = await self._canceller.cancel_order(
-                            row["mt5_ticket"], mt5_client, sqlite, spread=False
-                        )
-                        result.cancelled += ok
-                        result.errors += not ok
-                    sqlite_pending = [
-                        r for r in sqlite_pending if r["signal_id"] not in tp_fired_signals
-                    ]
+            # Feed prices for every offset symbol in the active signal set — used for
+            # placement, drift checks, SL sync, and the dashboard's "Closest Signals" view.
+            ctx.offset_needed = {
+                r["instrument"] for r in supabase_rows if needs_offset(r["instrument"], config)
+            }
+            ctx.live_prices = await self._fetch_live_prices_cached(
+                supabase, ctx.offset_needed, config, cache_now
+            )
+            live_prices = ctx.live_prices
 
-                # Cancel stale pending (limit gone from Supabase). A limit the TM
-                # marked 'hit' on a still-live signal is spared: hold the order so a
-                # sub-pip price mismatch still fills. Genuine cancels/closes drop the
-                # signal out of hit_limit_ids, so those orders are still cancelled.
-                # Pending limits on a 'profit'-marked signal we still hold a position
-                # for are likewise spared, so the remaining entries keep filling until
-                # our own TP engine closes the trade (profit_held_limit_ids).
-                for row in sqlite_pending:
-                    lid = row["limit_id"]
-                    if (
-                        lid in supabase_limit_ids
-                        or lid in hit_limit_ids
-                        or lid in profit_held_limit_ids
-                    ):
-                        continue
-                    ok = await self._canceller.cancel_order(
-                        row["mt5_ticket"], mt5_client, sqlite, spread=False
-                    )
-                    result.cancelled += ok
-                    result.errors += not ok
+            if placement_active:
+                await self._cancel_tp_fired_pending(ctx, sqlite, mt5_client, result)
+                await self._cancel_stale_pending(ctx, sqlite, mt5_client, result)
+                await self._cancel_sl_changed_pending(ctx, sqlite, mt5_client, result)
 
-                # Cancel pending orders whose signal SL changed (re-places next cycle).
-                # For a risky signal with a custom SL the reference is the recomputed
-                # deepest-limit SL, not the DB stop-loss (which we deliberately override).
-                for row in sqlite_pending:
-                    lid = row["limit_id"]
-                    if lid not in supabase_by_limit:
-                        continue
-                    stored_sl = row["db_stop_loss"]
-                    if stored_sl is None:
-                        continue
-                    risky_sl = risky_sl_by_signal.get(row["signal_id"])
-                    current_sl = (
-                        risky_sl
-                        if risky_sl is not None
-                        else float(supabase_by_limit[lid]["stop_loss"])
-                    )
-                    mt5_sym = map_symbol(supabase_by_limit[lid]["instrument"], config)
-                    sym = mt5_client.symbol_info(mt5_sym)
-                    if sym is None:
-                        continue
-                    pip_sz = sym.point * (10 if sym.digits in (3, 5) else 1)
-                    if pip_sz > 0 and abs(current_sl - stored_sl) >= pip_sz:
-                        logger.info(
-                            "SL change on pending: ticket=%d sl %.5f -> %.5f — cancelling for re-placement",
-                            row["mt5_ticket"],
-                            stored_sl,
-                            current_sl,
-                        )
-                        ok = await self._canceller.cancel_order(
-                            row["mt5_ticket"], mt5_client, sqlite, spread=False
-                        )
-                        result.cancelled += ok
-                        result.errors += not ok
-                        repriced_tickets.add(row["mt5_ticket"])
-
-                new_limit_ids = supabase_limit_ids - sqlite_limit_ids
-
-                # User-skipped and manually-handled signals never place — drop their
-                # limits before any placement work.
-                new_limit_ids = {
-                    lid
-                    for lid in new_limit_ids
-                    if supabase_by_limit[lid]["signal_id"] not in unmanaged_sids
-                }
-
-                # Limit-count gate: signals with too many limits have negative
-                # expectancy (win size compresses as the level count grows), so they
-                # are skipped at placement. Existing pendings/fills are untouched.
-                skip_at = config.lot_sizing.skip_limits_at
-                if skip_at > 0:
-                    too_many = {
-                        lid
-                        for lid in new_limit_ids
-                        if (supabase_by_limit[lid].get("total_limits") or 0) >= skip_at
-                    }
-                    for lid in too_many:
-                        sid = supabase_by_limit[lid]["signal_id"]
-                        if sid not in self._logged_limit_skips:
-                            self._logged_limit_skips.add(sid)
-                            logger.info(
-                                "Skipping signal=%d (%s): %d limits >= skip_limits_at=%d",
-                                sid,
-                                supabase_by_limit[lid]["instrument"],
-                                supabase_by_limit[lid].get("total_limits") or 0,
-                                skip_at,
-                            )
-                    new_limit_ids -= too_many
-
-                # Never re-place a limit that has already filled on our end. A limit can
-                # fill on our broker while the TM still shows it pending (sub-pip mismatch,
-                # or the TM bot was down); once our position TPs/closes its SQLite row goes
-                # to 'closed', drops out of get_all_active(), and would otherwise reappear
-                # here as a "new" limit — re-entering the exact same level on a loop. The
-                # 'closed' row is the durable, restart-safe marker that the limit hit.
-                already_filled = new_limit_ids & await sqlite.get_filled_limit_ids()
-                if already_filled:
-                    new_limit_ids -= already_filled
-                    for lid in already_filled:
-                        if lid in self._logged_already_filled:
-                            continue
-                        self._logged_already_filled.add(lid)
-                        row = supabase_by_limit[lid]
-                        logger.warning(
-                            "Skipping re-placement of limit_id=%d signal_id=%d (%s) — already "
-                            "filled on our end but still active in DB (TM/DB out of sync)",
-                            lid,
-                            row["signal_id"],
-                            row["instrument"],
-                        )
-
-                # Same guard, by (signal_id, price_level): a TM message edit rebuilds the
-                # signal's limit rows with fresh IDENTITY ids, so a level we already filled
-                # reappears under a new limit_id and slips past the limit_id check above.
-                # Never re-enter a (signal_id, price) we've already filled/closed.
-                filled_prices = await sqlite.get_filled_signal_prices()
-                if filled_prices:
-                    refilled = {
-                        lid
-                        for lid in new_limit_ids
-                        if any(
-                            math.isclose(
-                                float(supabase_by_limit[lid]["price_level"]), p, rel_tol=1e-9
-                            )
-                            for p in filled_prices.get(supabase_by_limit[lid]["signal_id"], ())
-                        )
-                    }
-                    new_limit_ids -= refilled
-                    for lid in refilled:
-                        if lid in self._logged_already_filled:
-                            continue
-                        self._logged_already_filled.add(lid)
-                        row = supabase_by_limit[lid]
-                        logger.warning(
-                            "Skipping re-placement of limit_id=%d signal_id=%d (%s) — a limit at "
-                            "price %.5f already filled on our end (TM regenerated limit_id on edit)",
-                            lid,
-                            row["signal_id"],
-                            row["instrument"],
-                            float(row["price_level"]),
-                        )
-
-                # Never re-place a limit on a signal our own TP engine has fired on.
-                # The local cancel + this guard together mean a TP'd signal's siblings
-                # stay down regardless of how long the TM/DB takes to mark it profit.
-                tp_blocked = {
-                    lid
-                    for lid in new_limit_ids
-                    if supabase_by_limit[lid]["signal_id"] in tp_fired_signals
-                }
-                new_limit_ids -= tp_blocked
-                for lid in tp_blocked:
-                    if lid in self._logged_already_filled:
-                        continue
-                    self._logged_already_filled.add(lid)
-                    row = supabase_by_limit[lid]
-                    logger.warning(
-                        "Skipping re-placement of limit_id=%d signal_id=%d (%s) — our TP "
-                        "engine already fired on this signal; not re-entering",
-                        lid,
-                        row["signal_id"],
-                        row["instrument"],
-                    )
-
-                # Drop blocked symbols (spread hour / weekend / news mode) from the
-                # pre-check phase — otherwise tick/proximity/live-price-staleness checks
-                # fire (and spam WARN logs) for symbols the placement loop would skip.
-                new_limit_ids = {
-                    lid
-                    for lid in new_limit_ids
-                    if not _is_blocked(
-                        supabase_by_limit[lid]["instrument"],
-                        supabase_by_limit[lid]["signal_type"],
-                    )
-                }
-
-                # Egress guard: feed health flips only on feed degradation, so it's cached
-                # and refreshed on feed_health_interval_seconds rather than every cycle.
-                stale_feeds: set[str] = set()
-                if not self._feed_health_failed:
-                    if (
-                        cache_now - self._feed_health_cache_at
-                    ) >= config.polling.feed_health_interval_seconds:
-                        try:
-                            feed_health = await supabase.fetch_feed_health()
-                            self._stale_feeds_cache = {
-                                feed
-                                for feed, status in feed_health.items()
-                                if status == "down"
-                            }
-                            self._feed_health_cache_at = cache_now
-                            if self._stale_feeds_cache:
-                                logger.warning("Stale feeds detected: %s", self._stale_feeds_cache)
-                        except Exception:
-                            logger.warning(
-                                "feed_health unavailable — skipping feed staleness checks"
-                            )
-                            self._feed_health_failed = True
-                    stale_feeds = self._stale_feeds_cache
-
-                # Group all Supabase rows by signal for lot calculation
-                by_signal: dict[int, list] = defaultdict(list)
-                for row in supabase_rows:
-                    by_signal[row["signal_id"]].append(row)
-
-                lot_calc = LotCalculator(mt5_client, config)
+                new_limit_ids = await self._select_new_limits(ctx, sqlite)
+                stale_feeds = await self._fetch_stale_feeds_cached(supabase, config, cache_now)
 
                 if new_limit_ids:
-                    # --- Pre-check phase ---
-
-                    # Build unique mt5_symbol -> db_symbol map
-                    unique_syms: dict[str, str] = {}
-                    for lid in new_limit_ids:
-                        db_sym = supabase_by_limit[lid]["instrument"]
-                        unique_syms[map_symbol(db_sym, config)] = db_sym
-
-                    # Resolve availability against the broker's symbol catalogue, then
-                    # fetch the tick. Symbols the broker doesn't carry (e.g. GCQ26) are
-                    # skipped cleanly and logged once for their lifetime — no retry churn.
-                    # Catalogued-but-hidden symbols are selected into MarketWatch first.
-                    # Symbols whose tick failed recently are cooldown-suppressed (no MT5
-                    # call, no log); on first failure / after cooldown we warn once.
-                    sym_ticks: dict = {}
-                    sym_infos: dict = {}
-                    newly_unavailable: set[str] = set()
-                    broker_symbols = mt5_client.symbols_get()
-                    now_mono = time.monotonic()
-                    for mt5_sym in list(unique_syms):
-                        if now_mono < self._unavailable_until.get(mt5_sym, 0.0):
-                            sym_ticks[mt5_sym] = None
-                            sym_infos[mt5_sym] = None
-                            continue
-
-                        # Catalogue check (skipped if symbols_get is unavailable this cycle).
-                        if broker_symbols and mt5_sym not in broker_symbols:
-                            base_sym = (
-                                mt5_sym[: -len(config.stock_suffix)]
-                                if config.stock_suffix and mt5_sym.endswith(config.stock_suffix)
-                                else None
-                            )
-                            if base_sym and base_sym in broker_symbols:
-                                # Broker lists the bare stock symbol, not the suffixed one.
-                                db_sym = unique_syms[mt5_sym]
-                                logger.info(
-                                    "Stock suffix fallback: %s not in catalogue, using %s",
-                                    mt5_sym,
-                                    base_sym,
-                                )
-                                _persist_stock_no_suffix(db_sym, config)
-                                unique_syms[base_sym] = db_sym
-                                del unique_syms[mt5_sym]
-                                mt5_sym = base_sym
-                            else:
-                                # Instrument simply isn't offered by this broker — skip.
-                                sym_ticks[mt5_sym] = None
-                                sym_infos[mt5_sym] = None
-                                if mt5_sym not in self._logged_unmapped:
-                                    logger.info(
-                                        "Symbol %s not offered by this broker — skipping "
-                                        "(map it under Settings if it exists by another name)",
-                                        mt5_sym,
-                                    )
-                                    self._logged_unmapped.add(mt5_sym)
-                                continue
-
-                        # Catalogued (or catalogue unknown) — ensure it's in MarketWatch.
-                        mt5_client.symbol_select(mt5_sym)
-                        tick = mt5_client.symbol_info_tick(mt5_sym)
-
-                        sym_ticks[mt5_sym] = tick
-                        sym_infos[mt5_sym] = (
-                            mt5_client.symbol_info(mt5_sym) if tick is not None else None
-                        )
-                        if tick is None:
-                            self._unavailable_until[mt5_sym] = now_mono + _UNAVAILABLE_COOLDOWN
-                            newly_unavailable.add(mt5_sym)
-                        else:
-                            self._unavailable_until.pop(mt5_sym, None)
-
-                    # Log and count errors only for symbols newly detected as unavailable.
-                    # Cooldown-suppressed symbols are skipped silently this cycle.
-                    unavailable_mt5: set[str] = set()
-                    for mt5_sym in unique_syms:
-                        if sym_ticks[mt5_sym] is None:
-                            unavailable_mt5.add(mt5_sym)
-                            if mt5_sym in newly_unavailable:
-                                count = sum(
-                                    1
-                                    for lid in new_limit_ids
-                                    if map_symbol(supabase_by_limit[lid]["instrument"], config)
-                                    == mt5_sym
-                                )
-                                logger.warning(
-                                    "Symbol not in terminal: %s — skipping %d limit(s) (retrying in %.0fs)",
-                                    mt5_sym,
-                                    count,
-                                    _UNAVAILABLE_COOLDOWN,
-                                )
-                                result.errors += count
-
-                    # Pre-check dead feeds per instrument (log once, not once per limit).
-                    # An old updated_at is normal for an idle feed; only a feed that
-                    # has gone fully dark (beyond the dead-feed bound) is skipped — the
-                    # offset itself is anchored to updated_at, not to "now".
-                    stale_instruments: set[str] = set()
-                    now_utc = datetime.now(UTC)
-                    for instrument in offset_needed:
-                        live_row = live_prices.get(instrument)
-                        if live_row is None:
-                            continue
-                        age = (now_utc - live_row["updated_at"]).total_seconds()
-                        if age > config.feed_max_staleness_seconds:
-                            count = sum(
-                                1
-                                for lid in new_limit_ids
-                                if supabase_by_limit[lid]["instrument"] == instrument
-                            )
-                            if count:
-                                if instrument not in self._logged_dark_feeds:
-                                    logger.warning(
-                                        "Live price dark for %s (%.0fs old) — skipping %d limit(s)",
-                                        instrument,
-                                        age,
-                                        count,
-                                    )
-                                    self._logged_dark_feeds.add(instrument)
-                                result.errors += count
-                            stale_instruments.add(instrument)
-                        else:
-                            self._logged_dark_feeds.discard(instrument)
-                    # Drop feeds no longer in the active set so a re-listed signal warns
-                    # afresh and the set stays bounded.
-                    self._logged_dark_feeds &= offset_needed
-
-                    # Group new limits by signal; apply proximity filter per signal
+                    sym_ticks, sym_infos, unavailable_mt5 = self._resolve_symbols(
+                        ctx, mt5_client, new_limit_ids, result
+                    )
+                    stale_instruments = self._stale_offset_instruments(ctx, new_limit_ids, result)
                     new_by_signal: dict[int, list[int]] = defaultdict(list)
                     for lid in new_limit_ids:
                         new_by_signal[supabase_by_limit[lid]["signal_id"]].append(lid)
+                    approved_signals = self._approve_signals(
+                        ctx,
+                        new_by_signal,
+                        stale_feeds,
+                        unavailable_mt5,
+                        stale_instruments,
+                        sym_ticks,
+                        sym_infos,
+                        result,
+                    )
+                    signal_lots = await self._compute_signal_lots(
+                        ctx, sqlite, mt5_client, approved_signals, new_by_signal
+                    )
+                    await self._place_approved(
+                        ctx,
+                        new_limit_ids,
+                        approved_signals,
+                        signal_lots,
+                        supabase,
+                        sqlite,
+                        mt5_client,
+                        result,
+                    )
 
-                    approved_signals: set[int] = set()
-                    rejection_reason: dict[int, str] = {}
-                    for sig_id, lids in new_by_signal.items():
-                        row0 = supabase_by_limit[lids[0]]
-                        db_sym = row0["instrument"]
-                        mt5_sym = map_symbol(db_sym, config)
-                        if mt5_sym in unavailable_mt5:
-                            rejection_reason[sig_id] = "symbol not in terminal"
-                            continue  # errors already counted by pre-check
-                        if needs_offset(db_sym, config) and db_sym in stale_instruments:
-                            rejection_reason[sig_id] = "live price stale"
-                            continue  # errors already counted by pre-check
-                        feed = _feed_for_symbol(db_sym, config)
-                        if feed in stale_feeds:
-                            rejection_reason[sig_id] = "feed_stale"
-                            result.skipped += len(lids)
-                            logger.info(
-                                "Signal %d (%s): feed=%s is stale — skipping %d limit(s)",
-                                sig_id,
-                                db_sym,
-                                feed,
-                                len(lids),
-                            )
-                            continue
-                        tick = sym_ticks.get(mt5_sym)
-                        info = sym_infos.get(mt5_sym)
-                        if tick is None or info is None:
-                            rejection_reason[sig_id] = "symbol not in terminal"
-                            result.errors += len(lids)
-                            logger.warning(
-                                "Signal %d (%s): tick/info unavailable — skipping %d limit(s)",
-                                sig_id,
-                                db_sym,
-                                len(lids),
-                            )
-                            continue
-                        # Proximity is a feed-frame question: the limit prices are feed
-                        # prices, so compare against the feed mid for offset symbols. Using
-                        # the broker mid here would be off by the whole offset.
-                        if needs_offset(db_sym, config):
-                            live_row = live_prices.get(db_sym)
-                            if live_row is None:
-                                rejection_reason[sig_id] = "no live price"
-                                result.errors += len(lids)
-                                logger.warning(
-                                    "Signal %d (%s): no live price for proximity — skipping %d limit(s)",
-                                    sig_id,
-                                    db_sym,
-                                    len(lids),
-                                )
-                                continue
-                            mid = (float(live_row["bid"]) + float(live_row["ask"])) / 2
-                        else:
-                            mid = (tick.bid + tick.ask) / 2
-                        new_prices = [float(supabase_by_limit[lid]["price_level"]) for lid in lids]
-                        if _within_proximity(
-                            new_prices,
-                            mid,
-                            detect_asset_class(db_sym),
-                            info,
-                            config.proximity,
-                            db_sym,
-                        ):
-                            approved_signals.add(sig_id)
-                            self._logged_proximity.discard(sig_id)
-                        else:
-                            rejection_reason[sig_id] = "outside proximity"
-                            result.skipped += len(lids)
-                            if sig_id not in self._logged_proximity:
-                                logger.info(
-                                    "Signal %d (%s): all limits outside proximity — skipping %d order(s)",
-                                    sig_id,
-                                    db_sym,
-                                    len(lids),
-                                )
-                                self._logged_proximity.add(sig_id)
-
-                    # Compute lot once per approved signal (not once per limit). If the
-                    # signal already has filled siblings, reuse their placement lot rather
-                    # than recomputing: the Supabase fetch drops hit limits (l.status='hit'),
-                    # so recomputation would divide the size across only the still-pending
-                    # survivors and oversize the re-placed limits.
-                    filled_lots = await sqlite.get_signal_filled_lots()
-                    signal_lots: dict[int, float] = {}
-                    for sig_id in approved_signals:
-                        prior_lot = filled_lots.get(sig_id)
-                        if prior_lot is not None:
-                            signal_lots[sig_id] = prior_lot
-                            logger.info(
-                                "Signal %d: reusing filled-sibling lot=%.2f for %d re-placed limit(s)",
-                                sig_id,
-                                prior_lot,
-                                len(new_by_signal[sig_id]),
-                            )
-                            continue
-                        lids = new_by_signal[sig_id]
-                        row0 = supabase_by_limit[lids[0]]
-                        all_prices = [float(r["price_level"]) for r in by_signal[sig_id]]
-                        mt5_sym = map_symbol(row0["instrument"], config)
-                        risky_sl = risky_sl_by_signal.get(sig_id)
-                        sl_for_lot = risky_sl if risky_sl is not None else float(row0["stop_loss"])
-                        signal_lots[sig_id] = lot_calc.calculate(
-                            sl_for_lot,
-                            all_prices,
-                            mt5_sym,
-                            row0["signal_type"] or "standard",
-                            channel_id=row0["channel_id"],
-                        )
-
-                    # --- Placement phase: approved signals only ---
-                    for lid in new_limit_ids:
-                        row = supabase_by_limit[lid]
-                        sig_id = row["signal_id"]
-                        if sig_id not in approved_signals:
-                            continue
-
-                        db_sym = row["instrument"]
-                        if _is_blocked(db_sym, row["signal_type"]):
-                            continue
-                        mt5_sym = map_symbol(db_sym, config)
-                        lot = signal_lots[sig_id]
-
-                        offset: float | None = None
-                        if needs_offset(db_sym, config):
-                            live_row = live_prices.get(db_sym)
-                            if live_row is None:
-                                logger.warning(
-                                    "No live price for %s, skipping limit=%d", db_sym, lid
-                                )
-                                result.errors += 1
-                                continue
-                            offset = self._offset_calc.get_offset(
-                                mt5_sym,
-                                live_row,
-                                mt5_client,
-                                config.feed_max_staleness_seconds,
-                                config.offset_recompute_interval_seconds,
-                            )
-                            if offset is None:
-                                result.errors += 1
-                                continue
-
-                        risky_sl = risky_sl_by_signal.get(sig_id)
-                        db_sl = risky_sl if risky_sl is not None else float(row["stop_loss"])
-
-                        outcome = await self._placer.place_order(
-                            signal_id=sig_id,
-                            limit_id=lid,
-                            direction=row["direction"],
-                            db_stop_loss=db_sl,
-                            db_price=float(row["price_level"]),
-                            signal_type=row["signal_type"] or "standard",
-                            mt5_symbol=mt5_sym,
-                            lot=lot,
-                            offset=offset,
-                            mt5_client=mt5_client,
-                            sqlite=sqlite,
-                            supabase=supabase,
-                            channel_id=row["channel_id"],
-                            sequence_number=row["sequence_number"],
-                        )
-                        if outcome == "placed":
-                            result.placed += 1
-                        elif outcome == "skipped":
-                            result.skipped += 1
-                        else:
-                            result.errors += 1
-
-                # Offset drift check: cancel drifted pending orders so they re-place next cycle.
-                # Skipped entirely for signals whose other limits have already hit — re-placing
-                # the survivors at a fresh offset leaves the already-filled (or TM-marked-hit)
-                # limits at the old offset, producing inconsistent entries across the same signal.
-                # "Hit" here means either: bot has a local fill, OR Supabase signal_status is 'hit'
-                # (the TM has marked at least one limit hit, even if MT5 hasn't filled yet).
-                now_drift = datetime.now(UTC)
-                drift_interval = config.offset_drift_check_interval_seconds
-                signals_with_fills = await sqlite.get_signals_with_fills()
-                signals_hit_in_db = {
+                # Signals whose ladder is mid-trade must not be disturbed by drift
+                # re-placement: bot has a local fill, OR Supabase signal_status is
+                # 'hit' (the TM has marked at least one limit hit, even if MT5
+                # hasn't filled yet).
+                blocked_from_drift = await sqlite.get_signals_with_fills() | {
                     r["signal_id"] for r in supabase_rows if r.get("signal_status") == "hit"
                 }
-                signals_blocked_from_drift = signals_with_fills | signals_hit_in_db
-                for row in sqlite_pending:
-                    if row["mt5_ticket"] in repriced_tickets:
-                        continue
-                    if row["offset_at_placement"] is None:
-                        continue
-                    if row["limit_id"] not in supabase_by_limit:
-                        continue
-                    if row["signal_id"] in signals_blocked_from_drift:
-                        continue
-                    last_check = row["last_offset_check"]
-                    if last_check:
-                        try:
-                            prev = datetime.fromisoformat(last_check)
-                            if (now_drift - prev).total_seconds() < drift_interval:
-                                continue
-                        except ValueError:
-                            pass
-                    instrument = supabase_by_limit[row["limit_id"]]["instrument"]
-                    mt5_symbol = map_symbol(instrument, config)
-                    live_row = live_prices.get(instrument)
-                    if live_row is None:
-                        continue
-                    current_offset = self._offset_calc.get_offset(
-                        mt5_symbol,
-                        live_row,
-                        mt5_client,
-                        config.feed_max_staleness_seconds,
-                        config.offset_recompute_interval_seconds,
-                    )
-                    if current_offset is None:
-                        continue
-                    await sqlite.update_last_offset_check(row["mt5_ticket"], now_drift.isoformat())
-                    threshold = offset_drift_threshold(
-                        detect_asset_class(instrument), config.offset_drift, instrument
-                    )
-                    if self._offset_calc.check_drift(
-                        current_offset, float(row["offset_at_placement"]), threshold
-                    ):
-                        logger.info(
-                            "Offset drift: %s ticket=%d, cancelling for re-placement",
-                            instrument,
-                            row["mt5_ticket"],
-                        )
-                        ok = await self._canceller.cancel_order(
-                            row["mt5_ticket"], mt5_client, sqlite, spread=False
-                        )
-                        result.cancelled += ok
-                        result.errors += not ok
-                        repriced_tickets.add(row["mt5_ticket"])
-
-                # Proximity drift: cancel active pendings that have walked outside their
-                # proximity threshold. Proximity is otherwise only a placement gate, so a
-                # limit placed while near price — or before the threshold was tightened —
-                # would sit forever as the market moves away. Cancelled here it re-enters
-                # the placement proximity check next cycle, re-placing only if price
-                # returns. Signals with fills (or DB-hit) are spared, exactly as offset
-                # drift does: their ladder is mid-trade and must not be disturbed.
-                #
-                # Evaluated per signal as one unit — same min-distance rule placement uses
-                # (_within_proximity over all the signal's limit prices). A ladder is either
-                # in proximity (keep every limit) or out (cancel every limit) together. A
-                # per-limit check here would fight placement: placement arms the whole ladder
-                # whenever its closest limit is near, so cancelling only the farther limits
-                # leaves the closest pending, then the closest drifting out re-arms the whole
-                # ladder next cycle — an endless place-7/cancel-6 churn.
-                drift_by_signal: dict[int, list] = defaultdict(list)
-                for row in sqlite_pending:
-                    if row["mt5_ticket"] in repriced_tickets:
-                        continue
-                    if row["limit_id"] not in supabase_by_limit:
-                        continue
-                    if row["signal_id"] in signals_blocked_from_drift:
-                        continue
-                    drift_by_signal[row["signal_id"]].append(row)
-
-                for sig_rows in drift_by_signal.values():
-                    db_sym = supabase_by_limit[sig_rows[0]["limit_id"]]["instrument"]
-                    mt5_sym = map_symbol(db_sym, config)
-                    info = mt5_client.symbol_info(mt5_sym)
-                    if info is None:
-                        continue
-                    if needs_offset(db_sym, config):
-                        live_row = live_prices.get(db_sym)
-                        if live_row is None:
-                            continue
-                        mid = (float(live_row["bid"]) + float(live_row["ask"])) / 2
-                    else:
-                        tick = mt5_client.symbol_info_tick(mt5_sym)
-                        if tick is None:
-                            continue
-                        mid = (tick.bid + tick.ask) / 2
-                    prices = [
-                        float(supabase_by_limit[r["limit_id"]]["price_level"]) for r in sig_rows
-                    ]
-                    if _within_proximity(
-                        prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym
-                    ):
-                        continue
-                    logger.info(
-                        "Proximity drift: %s signal=%d (mid %.5f) — cancelling %d limit(s)",
-                        db_sym,
-                        sig_rows[0]["signal_id"],
-                        mid,
-                        len(sig_rows),
-                    )
-                    for row in sig_rows:
-                        ok = await self._canceller.cancel_order(
-                            row["mt5_ticket"], mt5_client, sqlite, spread=False
-                        )
-                        result.cancelled += ok
-                        result.errors += not ok
-                        repriced_tickets.add(row["mt5_ticket"])
+                await self._check_offset_drift(ctx, blocked_from_drift, sqlite, mt5_client, result)
+                await self._check_proximity_drift(
+                    ctx, blocked_from_drift, sqlite, mt5_client, result
+                )
 
         # Always detect fills (runs even when placement_active=False or Supabase down)
         mt5_orders = mt5_client.orders_get()
         mt5_positions = mt5_client.positions_get()
-
-        current_pending = await sqlite.get_pending_orders()
-        fills = self._fill_detector.detect_fills(mt5_orders, mt5_positions, current_pending)
-        for fill in fills:
-            await sqlite.mark_filled_and_set_position_ticket(
-                fill.mt5_ticket, fill.position_ticket, fill.filled_at, fill.fill_price
-            )
-            result.filled += 1
-            logger.info("Fill: order=%d pos=%d", fill.mt5_ticket, fill.position_ticket)
-
-        now_iso = datetime.now(UTC).isoformat()
-        pos_by_ticket = {p.ticket: p for p in mt5_positions}
-        new_tickets = await self._fill_detector.detect_partial_close_tickets(
-            mt5_client, sqlite, mt5_positions
-        )
-        for evt in new_tickets:
-            closed_pnl = mt5_client.get_position_realized_pnl(evt.original_ticket)
-            await sqlite.mark_closed(evt.original_ticket, closed_pnl)
-            remainder_pos = pos_by_ticket.get(evt.new_ticket)
-            await sqlite.insert_order(
-                limit_id=-evt.new_ticket,
-                signal_id=evt.signal_id,
-                mt5_ticket=evt.new_ticket,
-                order_type="remainder",
-                lot_size=0.0,
-                placed_at=now_iso,
-                db_stop_loss=0.0,
-                signal_type=evt.signal_type,
-                symbol=remainder_pos.symbol if remainder_pos else None,
-            )
-            await sqlite.mark_filled(evt.new_ticket, now_iso)
-            await sqlite.set_trailing(evt.new_ticket)
-            result.new_trailing += 1
-            logger.info(
-                "Partial close remainder: new_ticket=%d signal=%d (original=%d closed pnl=%s)",
-                evt.new_ticket,
-                evt.signal_id,
-                evt.original_ticket,
-                f"{closed_pnl:.2f}" if closed_pnl is not None else "?",
-            )
+        await self._process_fills(sqlite, mt5_client, mt5_orders, mt5_positions, result)
 
         # Skip: pull every order/position on a user-skipped signal (cancel pending,
         # close fills). Runs even on a Supabase outage — it's driven by local state.
@@ -1198,6 +529,882 @@ class SyncCycle:
             self.last_sqlite_pending_limit_ids = {r["limit_id"] for r in sqlite_pending_now}
 
         return result
+
+    async def _process_fills(
+        self,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        mt5_orders: list,
+        mt5_positions: list,
+        result: SyncResult,
+    ) -> None:
+        """Detect fills and partial-close remainders, updating local order state.
+
+        A partial close replaces the MT5 position ticket; the remainder is
+        re-tracked as a synthetic 'remainder' order with trailing enabled.
+        """
+        current_pending = await sqlite.get_pending_orders()
+        fills = self._fill_detector.detect_fills(mt5_orders, mt5_positions, current_pending)
+        for fill in fills:
+            await sqlite.mark_filled_and_set_position_ticket(
+                fill.mt5_ticket, fill.position_ticket, fill.filled_at, fill.fill_price
+            )
+            result.filled += 1
+            logger.info("Fill: order=%d pos=%d", fill.mt5_ticket, fill.position_ticket)
+
+        now_iso = datetime.now(UTC).isoformat()
+        pos_by_ticket = {p.ticket: p for p in mt5_positions}
+        new_tickets = await self._fill_detector.detect_partial_close_tickets(
+            mt5_client, sqlite, mt5_positions
+        )
+        for evt in new_tickets:
+            closed_pnl = mt5_client.get_position_realized_pnl(evt.original_ticket)
+            await sqlite.mark_closed(evt.original_ticket, closed_pnl)
+            remainder_pos = pos_by_ticket.get(evt.new_ticket)
+            await sqlite.insert_order(
+                limit_id=-evt.new_ticket,
+                signal_id=evt.signal_id,
+                mt5_ticket=evt.new_ticket,
+                order_type="remainder",
+                lot_size=0.0,
+                placed_at=now_iso,
+                db_stop_loss=0.0,
+                signal_type=evt.signal_type,
+                symbol=remainder_pos.symbol if remainder_pos else None,
+            )
+            await sqlite.mark_filled(evt.new_ticket, now_iso)
+            await sqlite.set_trailing(evt.new_ticket)
+            result.new_trailing += 1
+            logger.info(
+                "Partial close remainder: new_ticket=%d signal=%d (original=%d closed pnl=%s)",
+                evt.new_ticket,
+                evt.signal_id,
+                evt.original_ticket,
+                f"{closed_pnl:.2f}" if closed_pnl is not None else "?",
+            )
+
+    async def _select_new_limits(self, ctx: _CycleContext, sqlite: SQLiteDB) -> set[int]:
+        """Limits present in Supabase but not yet tracked locally, after every
+        placement guard: user skip/manual, the limit-count gate, already-filled
+        (by limit_id and by (signal_id, price)), TP-fired signals, and the
+        spread-hour / news / risky gates."""
+        new_limit_ids = ctx.supabase_limit_ids - ctx.sqlite_limit_ids
+        by_limit = ctx.supabase_by_limit
+
+        # User-skipped and manually-handled signals never place — drop their
+        # limits before any placement work.
+        new_limit_ids = {
+            lid for lid in new_limit_ids if by_limit[lid]["signal_id"] not in ctx.unmanaged_sids
+        }
+
+        # Limit-count gate: signals with too many limits have negative
+        # expectancy (win size compresses as the level count grows), so they
+        # are skipped at placement. Existing pendings/fills are untouched.
+        skip_at = ctx.config.lot_sizing.skip_limits_at
+        if skip_at > 0:
+            too_many = {
+                lid
+                for lid in new_limit_ids
+                if (by_limit[lid].get("total_limits") or 0) >= skip_at
+            }
+            for lid in too_many:
+                sid = by_limit[lid]["signal_id"]
+                if sid not in self._logged_limit_skips:
+                    self._logged_limit_skips.add(sid)
+                    logger.info(
+                        "Skipping signal=%d (%s): %d limits >= skip_limits_at=%d",
+                        sid,
+                        by_limit[lid]["instrument"],
+                        by_limit[lid].get("total_limits") or 0,
+                        skip_at,
+                    )
+            new_limit_ids -= too_many
+
+        # Never re-place a limit that has already filled on our end. A limit can
+        # fill on our broker while the TM still shows it pending (sub-pip mismatch,
+        # or the TM bot was down); once our position TPs/closes its SQLite row goes
+        # to 'closed', drops out of get_all_active(), and would otherwise reappear
+        # here as a "new" limit — re-entering the exact same level on a loop. The
+        # 'closed' row is the durable, restart-safe marker that the limit hit.
+        already_filled = new_limit_ids & await sqlite.get_filled_limit_ids()
+        new_limit_ids -= already_filled
+        for lid in already_filled:
+            if lid in self._logged_already_filled:
+                continue
+            self._logged_already_filled.add(lid)
+            row = by_limit[lid]
+            logger.warning(
+                "Skipping re-placement of limit_id=%d signal_id=%d (%s) — already "
+                "filled on our end but still active in DB (TM/DB out of sync)",
+                lid,
+                row["signal_id"],
+                row["instrument"],
+            )
+
+        # Same guard, by (signal_id, price_level): a TM message edit rebuilds the
+        # signal's limit rows with fresh IDENTITY ids, so a level we already filled
+        # reappears under a new limit_id and slips past the limit_id check above.
+        # Never re-enter a (signal_id, price) we've already filled/closed.
+        filled_prices = await sqlite.get_filled_signal_prices()
+        if filled_prices:
+            refilled = {
+                lid
+                for lid in new_limit_ids
+                if any(
+                    math.isclose(float(by_limit[lid]["price_level"]), p, rel_tol=1e-9)
+                    for p in filled_prices.get(by_limit[lid]["signal_id"], ())
+                )
+            }
+            new_limit_ids -= refilled
+            for lid in refilled:
+                if lid in self._logged_already_filled:
+                    continue
+                self._logged_already_filled.add(lid)
+                row = by_limit[lid]
+                logger.warning(
+                    "Skipping re-placement of limit_id=%d signal_id=%d (%s) — a limit at "
+                    "price %.5f already filled on our end (TM regenerated limit_id on edit)",
+                    lid,
+                    row["signal_id"],
+                    row["instrument"],
+                    float(row["price_level"]),
+                )
+
+        # Never re-place a limit on a signal our own TP engine has fired on.
+        # The local cancel + this guard together mean a TP'd signal's siblings
+        # stay down regardless of how long the TM/DB takes to mark it profit.
+        tp_blocked = {
+            lid for lid in new_limit_ids if by_limit[lid]["signal_id"] in ctx.tp_fired_signals
+        }
+        new_limit_ids -= tp_blocked
+        for lid in tp_blocked:
+            if lid in self._logged_already_filled:
+                continue
+            self._logged_already_filled.add(lid)
+            row = by_limit[lid]
+            logger.warning(
+                "Skipping re-placement of limit_id=%d signal_id=%d (%s) — our TP "
+                "engine already fired on this signal; not re-entering",
+                lid,
+                row["signal_id"],
+                row["instrument"],
+            )
+
+        # Drop blocked symbols (spread hour / weekend / news mode) from the
+        # pre-check phase — otherwise tick/proximity/live-price-staleness checks
+        # fire (and spam WARN logs) for symbols the placement loop would skip.
+        return {
+            lid
+            for lid in new_limit_ids
+            if not ctx.is_blocked(by_limit[lid]["instrument"], by_limit[lid]["signal_type"])
+        }
+
+    def _resolve_symbols(
+        self,
+        ctx: _CycleContext,
+        mt5_client: MT5Client,
+        new_limit_ids: set[int],
+        result: SyncResult,
+    ) -> tuple[dict, dict, set[str]]:
+        """Resolve each new limit's MT5 symbol against the broker's catalogue and
+        fetch its tick/info.
+
+        Symbols the broker doesn't carry (e.g. GCQ26) are skipped cleanly and
+        logged once for their lifetime — no retry churn. Catalogued-but-hidden
+        symbols are selected into MarketWatch first. Symbols whose tick failed
+        recently are cooldown-suppressed (no MT5 call, no log); on first failure /
+        after cooldown we warn once. Returns (sym_ticks, sym_infos,
+        unavailable_mt5) keyed by MT5 symbol.
+        """
+        config = ctx.config
+        unique_syms: dict[str, str] = {}
+        for lid in new_limit_ids:
+            db_sym = ctx.supabase_by_limit[lid]["instrument"]
+            unique_syms[map_symbol(db_sym, config)] = db_sym
+
+        sym_ticks: dict = {}
+        sym_infos: dict = {}
+        newly_unavailable: set[str] = set()
+        broker_symbols = mt5_client.symbols_get()
+        now_mono = time.monotonic()
+        for mt5_sym in list(unique_syms):
+            if now_mono < self._unavailable_until.get(mt5_sym, 0.0):
+                sym_ticks[mt5_sym] = None
+                sym_infos[mt5_sym] = None
+                continue
+
+            # Catalogue check (skipped if symbols_get is unavailable this cycle).
+            if broker_symbols and mt5_sym not in broker_symbols:
+                base_sym = (
+                    mt5_sym[: -len(config.stock_suffix)]
+                    if config.stock_suffix and mt5_sym.endswith(config.stock_suffix)
+                    else None
+                )
+                if base_sym and base_sym in broker_symbols:
+                    # Broker lists the bare stock symbol, not the suffixed one.
+                    db_sym = unique_syms[mt5_sym]
+                    logger.info(
+                        "Stock suffix fallback: %s not in catalogue, using %s",
+                        mt5_sym,
+                        base_sym,
+                    )
+                    _persist_stock_no_suffix(db_sym, config)
+                    unique_syms[base_sym] = db_sym
+                    del unique_syms[mt5_sym]
+                    mt5_sym = base_sym
+                else:
+                    # Instrument simply isn't offered by this broker — skip.
+                    sym_ticks[mt5_sym] = None
+                    sym_infos[mt5_sym] = None
+                    if mt5_sym not in self._logged_unmapped:
+                        logger.info(
+                            "Symbol %s not offered by this broker — skipping "
+                            "(map it under Settings if it exists by another name)",
+                            mt5_sym,
+                        )
+                        self._logged_unmapped.add(mt5_sym)
+                    continue
+
+            # Catalogued (or catalogue unknown) — ensure it's in MarketWatch.
+            mt5_client.symbol_select(mt5_sym)
+            tick = mt5_client.symbol_info_tick(mt5_sym)
+
+            sym_ticks[mt5_sym] = tick
+            sym_infos[mt5_sym] = mt5_client.symbol_info(mt5_sym) if tick is not None else None
+            if tick is None:
+                self._unavailable_until[mt5_sym] = now_mono + _UNAVAILABLE_COOLDOWN
+                newly_unavailable.add(mt5_sym)
+            else:
+                self._unavailable_until.pop(mt5_sym, None)
+
+        # Log and count errors only for symbols newly detected as unavailable.
+        # Cooldown-suppressed symbols are skipped silently this cycle.
+        unavailable_mt5: set[str] = set()
+        for mt5_sym in unique_syms:
+            if sym_ticks[mt5_sym] is None:
+                unavailable_mt5.add(mt5_sym)
+                if mt5_sym in newly_unavailable:
+                    count = sum(
+                        1
+                        for lid in new_limit_ids
+                        if map_symbol(ctx.supabase_by_limit[lid]["instrument"], config) == mt5_sym
+                    )
+                    logger.warning(
+                        "Symbol not in terminal: %s — skipping %d limit(s) (retrying in %.0fs)",
+                        mt5_sym,
+                        count,
+                        _UNAVAILABLE_COOLDOWN,
+                    )
+                    result.errors += count
+
+        return sym_ticks, sym_infos, unavailable_mt5
+
+    def _stale_offset_instruments(
+        self, ctx: _CycleContext, new_limit_ids: set[int], result: SyncResult
+    ) -> set[str]:
+        """Offset instruments whose feed has gone fully dark (log once per episode).
+
+        An old updated_at is normal for an idle feed; only a feed beyond the
+        dead-feed bound is skipped — the offset itself is anchored to updated_at,
+        not to "now".
+        """
+        stale_instruments: set[str] = set()
+        now_utc = datetime.now(UTC)
+        for instrument in ctx.offset_needed:
+            live_row = ctx.live_prices.get(instrument)
+            if live_row is None:
+                continue
+            age = (now_utc - live_row["updated_at"]).total_seconds()
+            if age > ctx.config.feed_max_staleness_seconds:
+                count = sum(
+                    1
+                    for lid in new_limit_ids
+                    if ctx.supabase_by_limit[lid]["instrument"] == instrument
+                )
+                if count:
+                    if instrument not in self._logged_dark_feeds:
+                        logger.warning(
+                            "Live price dark for %s (%.0fs old) — skipping %d limit(s)",
+                            instrument,
+                            age,
+                            count,
+                        )
+                        self._logged_dark_feeds.add(instrument)
+                    result.errors += count
+                stale_instruments.add(instrument)
+            else:
+                self._logged_dark_feeds.discard(instrument)
+        # Drop feeds no longer in the active set so a re-listed signal warns
+        # afresh and the set stays bounded.
+        self._logged_dark_feeds &= ctx.offset_needed
+        return stale_instruments
+
+    def _approve_signals(
+        self,
+        ctx: _CycleContext,
+        new_by_signal: dict[int, list[int]],
+        stale_feeds: set[str],
+        unavailable_mt5: set[str],
+        stale_instruments: set[str],
+        sym_ticks: dict,
+        sym_infos: dict,
+        result: SyncResult,
+    ) -> set[int]:
+        """Approve signals whose ladder passes availability, feed-health, and
+        proximity checks. Approval is per signal, not per limit — a ladder is
+        placed or skipped as one unit."""
+        config = ctx.config
+        approved_signals: set[int] = set()
+        for sig_id, lids in new_by_signal.items():
+            row0 = ctx.supabase_by_limit[lids[0]]
+            db_sym = row0["instrument"]
+            mt5_sym = map_symbol(db_sym, config)
+            if mt5_sym in unavailable_mt5:
+                continue  # errors already counted by _resolve_symbols
+            if needs_offset(db_sym, config) and db_sym in stale_instruments:
+                continue  # errors already counted by _stale_offset_instruments
+            feed = _feed_for_symbol(db_sym, config)
+            if feed in stale_feeds:
+                result.skipped += len(lids)
+                logger.info(
+                    "Signal %d (%s): feed=%s is stale — skipping %d limit(s)",
+                    sig_id,
+                    db_sym,
+                    feed,
+                    len(lids),
+                )
+                continue
+            tick = sym_ticks.get(mt5_sym)
+            info = sym_infos.get(mt5_sym)
+            if tick is None or info is None:
+                result.errors += len(lids)
+                logger.warning(
+                    "Signal %d (%s): tick/info unavailable — skipping %d limit(s)",
+                    sig_id,
+                    db_sym,
+                    len(lids),
+                )
+                continue
+            # Proximity is a feed-frame question: the limit prices are feed
+            # prices, so compare against the feed mid for offset symbols. Using
+            # the broker mid here would be off by the whole offset.
+            if needs_offset(db_sym, config):
+                live_row = ctx.live_prices.get(db_sym)
+                if live_row is None:
+                    result.errors += len(lids)
+                    logger.warning(
+                        "Signal %d (%s): no live price for proximity — skipping %d limit(s)",
+                        sig_id,
+                        db_sym,
+                        len(lids),
+                    )
+                    continue
+                mid = (float(live_row["bid"]) + float(live_row["ask"])) / 2
+            else:
+                mid = (tick.bid + tick.ask) / 2
+            new_prices = [float(ctx.supabase_by_limit[lid]["price_level"]) for lid in lids]
+            if _within_proximity(
+                new_prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym
+            ):
+                approved_signals.add(sig_id)
+                self._logged_proximity.discard(sig_id)
+            else:
+                result.skipped += len(lids)
+                if sig_id not in self._logged_proximity:
+                    logger.info(
+                        "Signal %d (%s): all limits outside proximity — skipping %d order(s)",
+                        sig_id,
+                        db_sym,
+                        len(lids),
+                    )
+                    self._logged_proximity.add(sig_id)
+        return approved_signals
+
+    async def _compute_signal_lots(
+        self,
+        ctx: _CycleContext,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        approved_signals: set[int],
+        new_by_signal: dict[int, list[int]],
+    ) -> dict[int, float]:
+        """Compute lot once per approved signal (not once per limit).
+
+        If the signal already has filled siblings, reuse their placement lot
+        rather than recomputing: the Supabase fetch drops hit limits
+        (l.status='hit'), so recomputation would divide the size across only the
+        still-pending survivors and oversize the re-placed limits.
+        """
+        by_signal: dict[int, list] = defaultdict(list)
+        for row in ctx.supabase_rows:
+            by_signal[row["signal_id"]].append(row)
+        lot_calc = LotCalculator(mt5_client, ctx.config)
+
+        filled_lots = await sqlite.get_signal_filled_lots()
+        signal_lots: dict[int, float] = {}
+        for sig_id in approved_signals:
+            prior_lot = filled_lots.get(sig_id)
+            if prior_lot is not None:
+                signal_lots[sig_id] = prior_lot
+                logger.info(
+                    "Signal %d: reusing filled-sibling lot=%.2f for %d re-placed limit(s)",
+                    sig_id,
+                    prior_lot,
+                    len(new_by_signal[sig_id]),
+                )
+                continue
+            lids = new_by_signal[sig_id]
+            row0 = ctx.supabase_by_limit[lids[0]]
+            all_prices = [float(r["price_level"]) for r in by_signal[sig_id]]
+            mt5_sym = map_symbol(row0["instrument"], ctx.config)
+            risky_sl = ctx.risky_sl_by_signal.get(sig_id)
+            sl_for_lot = risky_sl if risky_sl is not None else float(row0["stop_loss"])
+            signal_lots[sig_id] = lot_calc.calculate(
+                sl_for_lot,
+                all_prices,
+                mt5_sym,
+                row0["signal_type"] or "standard",
+                channel_id=row0["channel_id"],
+            )
+        return signal_lots
+
+    async def _place_approved(
+        self,
+        ctx: _CycleContext,
+        new_limit_ids: set[int],
+        approved_signals: set[int],
+        signal_lots: dict[int, float],
+        supabase: SupabaseDB,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        result: SyncResult,
+    ) -> None:
+        """Place every new limit belonging to an approved signal."""
+        config = ctx.config
+        for lid in new_limit_ids:
+            row = ctx.supabase_by_limit[lid]
+            sig_id = row["signal_id"]
+            if sig_id not in approved_signals:
+                continue
+
+            db_sym = row["instrument"]
+            if ctx.is_blocked(db_sym, row["signal_type"]):
+                continue
+            mt5_sym = map_symbol(db_sym, config)
+            lot = signal_lots[sig_id]
+
+            offset: float | None = None
+            if needs_offset(db_sym, config):
+                live_row = ctx.live_prices.get(db_sym)
+                if live_row is None:
+                    logger.warning("No live price for %s, skipping limit=%d", db_sym, lid)
+                    result.errors += 1
+                    continue
+                offset = self._offset_calc.get_offset(
+                    mt5_sym,
+                    live_row,
+                    mt5_client,
+                    config.feed_max_staleness_seconds,
+                    config.offset_recompute_interval_seconds,
+                )
+                if offset is None:
+                    result.errors += 1
+                    continue
+
+            risky_sl = ctx.risky_sl_by_signal.get(sig_id)
+            db_sl = risky_sl if risky_sl is not None else float(row["stop_loss"])
+
+            outcome = await self._placer.place_order(
+                signal_id=sig_id,
+                limit_id=lid,
+                direction=row["direction"],
+                db_stop_loss=db_sl,
+                db_price=float(row["price_level"]),
+                signal_type=row["signal_type"] or "standard",
+                mt5_symbol=mt5_sym,
+                lot=lot,
+                offset=offset,
+                mt5_client=mt5_client,
+                sqlite=sqlite,
+                supabase=supabase,
+                channel_id=row["channel_id"],
+                sequence_number=row["sequence_number"],
+            )
+            if outcome == "placed":
+                result.placed += 1
+            elif outcome == "skipped":
+                result.skipped += 1
+            else:
+                result.errors += 1
+
+    async def _check_offset_drift(
+        self,
+        ctx: _CycleContext,
+        blocked_from_drift: set[int],
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        result: SyncResult,
+    ) -> None:
+        """Cancel pending orders whose broker-vs-feed offset has drifted so they
+        re-place next cycle at a fresh offset.
+
+        Skipped entirely for signals whose other limits have already hit —
+        re-placing the survivors at a fresh offset leaves the already-filled (or
+        TM-marked-hit) limits at the old offset, producing inconsistent entries
+        across the same signal.
+        """
+        config = ctx.config
+        now_drift = datetime.now(UTC)
+        drift_interval = config.offset_drift_check_interval_seconds
+        for row in ctx.sqlite_pending:
+            if row["mt5_ticket"] in ctx.repriced_tickets:
+                continue
+            if row["offset_at_placement"] is None:
+                continue
+            if row["limit_id"] not in ctx.supabase_by_limit:
+                continue
+            if row["signal_id"] in blocked_from_drift:
+                continue
+            last_check = row["last_offset_check"]
+            if last_check:
+                try:
+                    prev = datetime.fromisoformat(last_check)
+                    if (now_drift - prev).total_seconds() < drift_interval:
+                        continue
+                except ValueError:
+                    pass
+            instrument = ctx.supabase_by_limit[row["limit_id"]]["instrument"]
+            mt5_symbol = map_symbol(instrument, config)
+            live_row = ctx.live_prices.get(instrument)
+            if live_row is None:
+                continue
+            current_offset = self._offset_calc.get_offset(
+                mt5_symbol,
+                live_row,
+                mt5_client,
+                config.feed_max_staleness_seconds,
+                config.offset_recompute_interval_seconds,
+            )
+            if current_offset is None:
+                continue
+            await sqlite.update_last_offset_check(row["mt5_ticket"], now_drift.isoformat())
+            threshold = offset_drift_threshold(
+                detect_asset_class(instrument), config.offset_drift, instrument
+            )
+            if self._offset_calc.check_drift(
+                current_offset, float(row["offset_at_placement"]), threshold
+            ):
+                logger.info(
+                    "Offset drift: %s ticket=%d, cancelling for re-placement",
+                    instrument,
+                    row["mt5_ticket"],
+                )
+                ok = await self._canceller.cancel_order(
+                    row["mt5_ticket"], mt5_client, sqlite, spread=False
+                )
+                result.cancelled += ok
+                result.errors += not ok
+                ctx.repriced_tickets.add(row["mt5_ticket"])
+
+    async def _check_proximity_drift(
+        self,
+        ctx: _CycleContext,
+        blocked_from_drift: set[int],
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        result: SyncResult,
+    ) -> None:
+        """Cancel active pendings that have walked outside their proximity threshold.
+
+        Proximity is otherwise only a placement gate, so a limit placed while near
+        price — or before the threshold was tightened — would sit forever as the
+        market moves away. Cancelled here it re-enters the placement proximity
+        check next cycle, re-placing only if price returns. Signals with fills (or
+        DB-hit) are spared, exactly as offset drift does: their ladder is mid-trade
+        and must not be disturbed.
+
+        Evaluated per signal as one unit — same min-distance rule placement uses
+        (_within_proximity over all the signal's limit prices). A ladder is either
+        in proximity (keep every limit) or out (cancel every limit) together. A
+        per-limit check here would fight placement: placement arms the whole ladder
+        whenever its closest limit is near, so cancelling only the farther limits
+        leaves the closest pending, then the closest drifting out re-arms the whole
+        ladder next cycle — an endless place-7/cancel-6 churn.
+        """
+        config = ctx.config
+        drift_by_signal: dict[int, list] = defaultdict(list)
+        for row in ctx.sqlite_pending:
+            if row["mt5_ticket"] in ctx.repriced_tickets:
+                continue
+            if row["limit_id"] not in ctx.supabase_by_limit:
+                continue
+            if row["signal_id"] in blocked_from_drift:
+                continue
+            drift_by_signal[row["signal_id"]].append(row)
+
+        for sig_rows in drift_by_signal.values():
+            db_sym = ctx.supabase_by_limit[sig_rows[0]["limit_id"]]["instrument"]
+            mt5_sym = map_symbol(db_sym, config)
+            info = mt5_client.symbol_info(mt5_sym)
+            if info is None:
+                continue
+            if needs_offset(db_sym, config):
+                live_row = ctx.live_prices.get(db_sym)
+                if live_row is None:
+                    continue
+                mid = (float(live_row["bid"]) + float(live_row["ask"])) / 2
+            else:
+                tick = mt5_client.symbol_info_tick(mt5_sym)
+                if tick is None:
+                    continue
+                mid = (tick.bid + tick.ask) / 2
+            prices = [float(ctx.supabase_by_limit[r["limit_id"]]["price_level"]) for r in sig_rows]
+            if _within_proximity(
+                prices, mid, detect_asset_class(db_sym), info, config.proximity, db_sym
+            ):
+                continue
+            logger.info(
+                "Proximity drift: %s signal=%d (mid %.5f) — cancelling %d limit(s)",
+                db_sym,
+                sig_rows[0]["signal_id"],
+                mid,
+                len(sig_rows),
+            )
+            for row in sig_rows:
+                ok = await self._canceller.cancel_order(
+                    row["mt5_ticket"], mt5_client, sqlite, spread=False
+                )
+                result.cancelled += ok
+                result.errors += not ok
+                ctx.repriced_tickets.add(row["mt5_ticket"])
+
+    async def _fetch_signal_sets_cached(
+        self, supabase: SupabaseDB, filled_sids: set[int], config: Settings, cache_now: float
+    ) -> tuple[list, set[int], dict[int, int]] | None:
+        """Active-signal fetch behind an egress-guard cache.
+
+        Pull the active-signal set only when the cache has lapsed; reuse the last
+        snapshot otherwise so the 1s fill/TP loop doesn't re-fetch the whole set
+        every cycle. A change in filled_sids also invalidates the cache so a
+        freshly-filled 'profit' signal's remaining limits are spared immediately
+        rather than waiting out the interval. On a fetch failure returns None —
+        the caller skips the placement phase and runs fill detection only.
+        """
+        signal_sets = self._signal_sets_cache
+        if (
+            signal_sets is not None
+            and filled_sids == self._signal_sets_cache_sids
+            and (cache_now - self._signal_sets_cache_at)
+            < config.polling.signal_fetch_interval_seconds
+        ):
+            return signal_sets
+        try:
+            signal_sets = await supabase.fetch_signal_sets(list(filled_sids))
+        except Exception:
+            logger.error(
+                "Supabase fetch failed — skipping placement phase, running fill detection only",
+                exc_info=True,
+            )
+            return None
+        self._signal_sets_cache = signal_sets
+        self._signal_sets_cache_at = cache_now
+        self._signal_sets_cache_sids = filled_sids
+        return signal_sets
+
+    async def _fetch_mode_gates_cached(
+        self, supabase: SupabaseDB, config: Settings, cache_now: float
+    ) -> frozenset[str]:
+        """News/volatility gate tokens behind an egress-guard cache.
+
+        news_mode is per-symbol: a comma-separated list of currency/asset tokens
+        (or 'ALL'), NULL when there's no news. The volatility guard (vol_guard)
+        shares the same token format and gating semantics — when the user enables
+        it, its tokens are folded into the same set so they cancel/close trades
+        identically. Mode gates track news/vol windows (minute-scale), so they're
+        cached and refreshed on mode_gate_interval_seconds rather than every cycle.
+        A fetch failure reuses the last-known gates so gating survives a brief blip.
+        """
+        gates = self._gates_cache
+        if gates is None or (
+            (cache_now - self._gates_cache_at) >= config.polling.mode_gate_interval_seconds
+        ):
+            try:
+                gates = await supabase.fetch_mode_gates()
+                self._gates_cache = gates
+                self._gates_cache_at = cache_now
+            except Exception:
+                logger.error("Failed to fetch bot mode gates", exc_info=True)
+                gates = self._gates_cache
+        if gates is None:
+            return frozenset()
+        news_mode_raw, vol_guard_raw = gates
+        news_symbols = parse_news_symbols(news_mode_raw)
+        if config.volatility_guard:
+            news_symbols |= parse_news_symbols(vol_guard_raw)
+        return news_symbols
+
+    async def _fetch_live_prices_cached(
+        self, supabase: SupabaseDB, offset_needed: set[str], config: Settings, cache_now: float
+    ) -> dict:
+        """Feed prices for the offset symbols, behind an egress-guard cache.
+
+        Refetch only when the interval lapses OR a newly-appeared offset symbol
+        isn't cached yet (so a brand-new signal is priced immediately, no added
+        latency). "Missing" is measured against the last requested set, not the
+        returned rows: an offset symbol the feed never publishes has no row but
+        was still asked for, so it must not force a refetch every cycle. A fetch
+        failure reuses the last snapshot.
+        """
+        if not offset_needed:
+            return {}
+        missing = offset_needed - self._live_prices_requested
+        if missing or (
+            (cache_now - self._live_prices_cache_at) >= config.polling.live_price_interval_seconds
+        ):
+            try:
+                self._live_prices_cache = await supabase.fetch_live_prices(list(offset_needed))
+                self._live_prices_cache_at = cache_now
+                self._live_prices_requested = set(offset_needed)
+            except Exception:
+                logger.error("Live prices fetch failed", exc_info=True)
+        return self._live_prices_cache
+
+    async def _fetch_stale_feeds_cached(
+        self, supabase: SupabaseDB, config: Settings, cache_now: float
+    ) -> set[str]:
+        """TM feeds currently marked down, behind an egress-guard cache.
+
+        Feed health flips only on feed degradation, so it's cached and refreshed
+        on feed_health_interval_seconds rather than every cycle. After the first
+        fetch failure the check is disabled for the process lifetime.
+        """
+        if self._feed_health_failed:
+            return set()
+        if (cache_now - self._feed_health_cache_at) >= config.polling.feed_health_interval_seconds:
+            try:
+                feed_health = await supabase.fetch_feed_health()
+                self._stale_feeds_cache = {
+                    feed for feed, status in feed_health.items() if status == "down"
+                }
+                self._feed_health_cache_at = cache_now
+                if self._stale_feeds_cache:
+                    logger.warning("Stale feeds detected: %s", self._stale_feeds_cache)
+            except Exception:
+                logger.warning("feed_health unavailable — skipping feed staleness checks")
+                self._feed_health_failed = True
+                return set()
+        return self._stale_feeds_cache
+
+    async def _cancel_tp_fired_pending(
+        self, ctx: _CycleContext, sqlite: SQLiteDB, mt5_client: MT5Client, result: SyncResult
+    ) -> None:
+        """Cancel any still-pending order on a TP-fired signal.
+
+        Safety net: the TP engine cancels these the moment it fires; this
+        re-cancels if that order send failed, so a TP'd signal can never leave a
+        live entry behind.
+        """
+        if not ctx.tp_fired_signals:
+            return
+        for row in ctx.sqlite_pending:
+            if row["signal_id"] not in ctx.tp_fired_signals:
+                continue
+            ok = await self._canceller.cancel_order(
+                row["mt5_ticket"], mt5_client, sqlite, spread=False
+            )
+            result.cancelled += ok
+            result.errors += not ok
+        ctx.sqlite_pending = [
+            r for r in ctx.sqlite_pending if r["signal_id"] not in ctx.tp_fired_signals
+        ]
+
+    async def _cancel_stale_pending(
+        self, ctx: _CycleContext, sqlite: SQLiteDB, mt5_client: MT5Client, result: SyncResult
+    ) -> None:
+        """Cancel pending orders whose limit is gone from Supabase.
+
+        A limit the TM marked 'hit' on a still-live signal is spared: hold the
+        order so a sub-pip price mismatch still fills. Genuine cancels/closes drop
+        the signal out of hit_limit_ids, so those orders are still cancelled.
+        Pending limits on a 'profit'-marked signal we still hold a position for
+        are likewise spared, so the remaining entries keep filling until our own
+        TP engine closes the trade (profit_held_limit_ids).
+        """
+        for row in ctx.sqlite_pending:
+            lid = row["limit_id"]
+            if (
+                lid in ctx.supabase_limit_ids
+                or lid in ctx.hit_limit_ids
+                or lid in ctx.profit_held_limit_ids
+            ):
+                continue
+            ok = await self._canceller.cancel_order(
+                row["mt5_ticket"], mt5_client, sqlite, spread=False
+            )
+            result.cancelled += ok
+            result.errors += not ok
+
+    async def _cancel_sl_changed_pending(
+        self, ctx: _CycleContext, sqlite: SQLiteDB, mt5_client: MT5Client, result: SyncResult
+    ) -> None:
+        """Cancel pending orders whose signal SL changed (re-places next cycle).
+
+        For a risky signal with a custom SL the reference is the recomputed
+        deepest-limit SL, not the DB stop-loss (which we deliberately override).
+        """
+        for row in ctx.sqlite_pending:
+            lid = row["limit_id"]
+            if lid not in ctx.supabase_by_limit:
+                continue
+            stored_sl = row["db_stop_loss"]
+            if stored_sl is None:
+                continue
+            risky_sl = ctx.risky_sl_by_signal.get(row["signal_id"])
+            current_sl = (
+                risky_sl if risky_sl is not None else float(ctx.supabase_by_limit[lid]["stop_loss"])
+            )
+            mt5_sym = map_symbol(ctx.supabase_by_limit[lid]["instrument"], ctx.config)
+            sym = mt5_client.symbol_info(mt5_sym)
+            if sym is None:
+                continue
+            pip_sz = sym.point * (10 if sym.digits in (3, 5) else 1)
+            if pip_sz > 0 and abs(current_sl - stored_sl) >= pip_sz:
+                logger.info(
+                    "SL change on pending: ticket=%d sl %.5f -> %.5f — cancelling for re-placement",
+                    row["mt5_ticket"],
+                    stored_sl,
+                    current_sl,
+                )
+                ok = await self._canceller.cancel_order(
+                    row["mt5_ticket"], mt5_client, sqlite, spread=False
+                )
+                result.cancelled += ok
+                result.errors += not ok
+                ctx.repriced_tickets.add(row["mt5_ticket"])
+
+    async def _cancel_gate_blocked_pending(
+        self, ctx: _CycleContext, sqlite: SQLiteDB, mt5_client: MT5Client, result: SyncResult
+    ) -> None:
+        """Cancel pending orders blocked by the spread-hour / news / risky gates.
+
+        Blocked rows are dropped from ctx.sqlite_pending so downstream loops
+        (stale-pending, SL change, offset drift) skip the just-cancelled orders.
+        ctx.sqlite_limit_ids is intentionally NOT refreshed: the cancelled limits
+        should still be treated as 'known' (not as new placement candidates).
+        """
+        kept: list = []
+        blocked_rows: list = []
+        for row in ctx.sqlite_pending:
+            (blocked_rows if ctx.row_blocked(row) else kept).append(row)
+        for row in blocked_rows:
+            ok = await self._canceller.cancel_order(
+                row["mt5_ticket"], mt5_client, sqlite, spread=True
+            )
+            result.cancelled += ok
+            result.errors += not ok
+        if blocked_rows:
+            logger.info("Spread/news/risky gate cancelled %d pending order(s)", len(blocked_rows))
+            ctx.sqlite_pending = kept
 
     async def _sync_filled_sls(
         self,

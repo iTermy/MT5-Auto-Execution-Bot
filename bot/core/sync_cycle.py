@@ -1248,9 +1248,10 @@ class SyncCycle:
 
         news_mode is per-symbol: a comma-separated list of currency/asset tokens
         (or 'ALL'), NULL when there's no news. The volatility guard (vol_guard)
-        shares the same token format and gating semantics — when the user enables
-        it, its tokens are folded into the same set so they cancel/close trades
-        identically. Mode gates track news/vol windows (minute-scale), so they're
+        shares the same token format and gating semantics but is per-pair — its
+        tokens are full pairs (e.g. 'EURUSD', substring-matching only that symbol)
+        plus 'ALL' for gold. When the user enables it, its tokens are folded into
+        the same set so they cancel/close trades identically. Mode gates track news/vol windows (minute-scale), so they're
         cached and refreshed on mode_gate_interval_seconds rather than every cycle.
         A fetch failure reuses the last-known gates so gating survives a brief blip.
         """

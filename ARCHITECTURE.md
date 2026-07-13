@@ -236,7 +236,7 @@ proper (4:55–6:00 PM, `sl_strip_start`). Cancelled orders marked `spread_cance
 While a symbol is under news the bot (a) cancels its pending orders (same path as the spread gate) and (b) force-closes any filled positions on that symbol (`SyncCycle._check_news_exits`), mirroring the manual-cancel / breakeven force-exit.
 
 ## Volatility Guard (opt-in)
-`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated currency codes / named assets, or `ALL`, NULL when calm). It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in a single `bot_mode_status` row fetch (`SupabaseDB.fetch_mode_gates`) and unions its tokens into the same gate set, so volatility tokens cancel pending orders and force-close filled positions through the exact same path, parsing, and crypto/24h exemptions as news. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
+`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated tokens, or `ALL`, NULL when calm), but per-pair: it writes the full forex pair (e.g. `EURUSD`, matching only that symbol) and `ALL` for gold. It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in a single `bot_mode_status` row fetch (`SupabaseDB.fetch_mode_gates`) and unions its tokens into the same gate set, so volatility tokens cancel pending orders and force-close filled positions through the exact same path, parsing, and crypto/24h exemptions as news. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
 
 ## Polling Strategy
 | State | MT5 calls/min | Supabase queries/min |
@@ -289,8 +289,9 @@ type(standard/scalp/swing/toll/pa/1-1/risky), closed_reason, total_limits, chann
 **limits**: id, signal_id(FK), price_level, sequence_number, status(pending/hit/cancelled)
 **live_prices**: symbol(PK), bid, ask, feed(icmarkets/oanda/binance/exness), updated_at
 **feed_health**: feed(PK), status(idle/healthy/down) — there is no `degraded` status
-**bot_mode_status**: singleton row — news_mode / vol_guard are comma-separated
-currency tokens (e.g. `EUR, GOLD`) or `ALL`, and NULL when inactive
+**bot_mode_status**: singleton row — comma-separated tokens or `ALL`, NULL when
+inactive. news_mode uses currency/asset tokens (e.g. `EUR, GOLD`); vol_guard uses
+full pairs (e.g. `EURUSD`) plus `ALL` for gold
 
 ### Vocabularies this bot depends on
 - `signals.closed_reason`: `automatic`, `manual`, `expiry`, `near_miss`, `news:<CAT>`,

@@ -64,7 +64,7 @@ export function MiscSection({
           <span className="faint" style={{ fontSize: 12.5, maxWidth: 560 }}>
             React to sharp market moves like news mode: when the signal service flags volatility
             market-wide, all affected trades are cancelled and any open positions closed; when it
-            flags specific currencies, only signals involving those currencies are gated. Crypto
+            flags a specific pair, only signals on that pair are gated. Crypto
             and 24-hour instruments are exempt.
           </span>
         </span>

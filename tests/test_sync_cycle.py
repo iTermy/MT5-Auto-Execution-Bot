@@ -1084,7 +1084,8 @@ async def test_vol_guard_gates_like_news_when_enabled(sqlite_db, mock_mt5, sampl
     mock_mt5.positions_get.return_value = [make_position(ticket=8301, symbol="EURUSD")]
     mock_mt5.close_position.return_value = make_order_result(ticket=8301)
 
-    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="USD")
+    # vol_guard tokens are per-pair (the volatility monitor writes the full pair).
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="EURUSD")
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -1108,6 +1109,23 @@ async def test_vol_guard_ignored_when_disabled(sqlite_db, mock_mt5, sample_confi
 
     mock_mt5.close_position.assert_not_called()
     assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8401}
+
+
+async def test_vol_guard_is_per_pair(sqlite_db, mock_mt5, sample_config) -> None:
+    # A per-pair token gates only that pair — USDJPY rides out EURUSD volatility
+    # even though both share USD.
+    sample_config.volatility_guard = True
+    await _insert_filled(sqlite_db, mt5_ticket=8501, signal_id=1, symbol="USDJPY")
+    mock_mt5.positions_get.return_value = [make_position(ticket=8501, symbol="USDJPY")]
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="EURUSD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8501}
 
 
 # ---------------------------------------------------------------------------

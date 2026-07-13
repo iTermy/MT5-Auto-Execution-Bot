@@ -94,7 +94,7 @@ class OrderPlacer:
         comment = f"s{signal_id}_l{limit_id}"[:32]
         placed_at = datetime.now(UTC).isoformat()
 
-        # C2: pre-write claim so a crash between order_send and SQLite commit is recoverable
+        # Pre-write claim so a crash between order_send and SQLite commit is recoverable
         await sqlite.insert_claimed_order(
             limit_id=limit_id,
             signal_id=signal_id,
@@ -111,7 +111,7 @@ class OrderPlacer:
             sequence_number=sequence_number,
         )
 
-        # C3: pre-send status recheck — abort if signal was cancelled since this cycle began
+        # Pre-send status recheck — abort if signal was cancelled since this cycle began
         status = await supabase.fetch_signal_status(signal_id)
         if status not in _ACTIVE_SIGNAL_STATUSES:
             logger.warning(
@@ -158,7 +158,7 @@ class OrderPlacer:
 
         await sqlite.promote_claimed_to_pending(limit_id, result.ticket)
 
-        # H8: Verify broker accepted the exact SL/price (silent broker adjustments surface here)
+        # Verify broker accepted the exact SL/price (silent broker adjustments surface here)
         placed = mt5_client.order_get_by_ticket(result.ticket)
         if placed is not None:
             if abs(placed.sl - adj_sl) > info.point:

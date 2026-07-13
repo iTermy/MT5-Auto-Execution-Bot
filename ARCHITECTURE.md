@@ -318,8 +318,6 @@ CREATE TABLE IF NOT EXISTS order_mappings (
     "license_heartbeat_seconds": 900
   },
 
-  "magic_number": 20250001,
-
   "symbol_map": {
     "SPX500USD": "US500",
     "NAS100USD": "USTEC",

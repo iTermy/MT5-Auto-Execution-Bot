@@ -108,7 +108,7 @@ class Reconciler:
         mt5_orders: list | None = None,
     ) -> int:
         """
-        Orphan sweep (C2): re-link claimed rows whose order_send completed but
+        Orphan sweep: re-link claimed rows whose order_send completed but
         the SQLite commit was lost, and cancel truly untracked orders.
         Also cleans stale claimed rows that have no corresponding MT5 order.
         """
@@ -149,7 +149,7 @@ class Reconciler:
                 sig_id, lim_id = parsed
                 claimed = await sqlite.get_claimed_by_signal_limit(sig_id, lim_id)
                 if claimed:
-                    # C2 crash-recovery: promote the claim to pending with the real ticket
+                    # Crash-recovery: promote the claim to pending with the real ticket
                     await sqlite.promote_claimed_to_pending(lim_id, order.ticket)
                     logger.info(
                         "Orphan re-linked: ticket=%d signal=%d limit=%d",

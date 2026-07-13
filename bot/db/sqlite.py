@@ -192,7 +192,7 @@ class SQLiteDB:
         filled_at: str,
         fill_price: float | None = None,
     ) -> None:
-        """Atomically mark filled and update the ticket in one transaction (H7)."""
+        """Atomically mark filled and update the ticket in one transaction."""
         await self._db.execute(MARK_FILLED, (filled_at, fill_price, order_ticket))
         if position_ticket != order_ticket:
             await self._db.execute(UPDATE_TICKET, (position_ticket, order_ticket))

@@ -59,8 +59,8 @@ _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
 # 'expiry' is the only cancel reason that keeps a weekday non-crypto position open:
 # the TM rolls a hit signal's expiry forward rather than truly closing it, so those
 # cancels are gated to the weekend/crypto window. Every other cancel reason
-# (near_miss, manual, news:*, spread_hour, late_market) means the signal was voided
-# or falsely triggered, so we force-close on any day and asset class.
+# (near_miss, manual, news:*, spread_hour, late_market, risky_window) means the signal
+# was voided or falsely triggered, so we force-close on any day and asset class.
 _ROLLOVER_CANCEL_REASONS = frozenset({"expiry"})
 _SL_FAIL_MAX = 5
 _FORCE_EXIT_MAX_ATTEMPTS = 5
@@ -125,10 +125,10 @@ class SyncCycle:
         self._logged_already_filled: set[int] = set()
         # signal_ids skipped by the limit-count gate (logged once per lifetime)
         self._logged_limit_skips: set[int] = set()
-        # C8: SL sync consecutive failure tracking
+        # SL sync consecutive failure tracking
         self._sl_fail_count: dict[int, int] = {}  # ticket -> consecutive fail count
         self._sl_fail_target: dict[int, float] = {}  # ticket -> last failed target sl
-        # M13: force-exit consecutive failure tracking
+        # Force-exit consecutive failure tracking
         self._force_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
         # News force-exit consecutive failure tracking (separate from status force-exit)
         self._news_exit_fail_count: dict[int, int] = {}  # mt5_ticket -> consecutive fail count
@@ -649,7 +649,7 @@ class SyncCycle:
                             self._stale_feeds_cache = {
                                 feed
                                 for feed, status in feed_health.items()
-                                if status in ("degraded", "down")
+                                if status == "down"
                             }
                             self._feed_health_cache_at = cache_now
                             if self._stale_feeds_cache:
@@ -1142,7 +1142,7 @@ class SyncCycle:
         # close fills). Runs even on a Supabase outage — it's driven by local state.
         await self._apply_skips(skipped_sids, sqlite, mt5_client, mt5_positions, mt5_orders, result)
 
-        # M2: mark positions closed if they disappeared from MT5 externally
+        # Mark positions closed if they disappeared from MT5 externally
         await self._check_external_closes(sqlite, mt5_client, mt5_positions)
 
         # Disable-auto-TP: the user owns every exit, so once a signal's filled
@@ -1531,8 +1531,8 @@ class SyncCycle:
             # 'breakeven' and manual 'profit' statuses close unconditionally.
             # Cancellations force-close every position regardless of day or asset class
             # unless the reason is 'expiry' (a rolled-over hit signal). near_miss, manual,
-            # news:*, spread_hour and late_market all mean the signal was voided or falsely
-            # triggered, so our fill must go. The remaining pending limits drop out of the
+            # news:*, spread_hour, late_market and risky_window all mean the signal was voided
+            # or falsely triggered, so our fill must go. The remaining pending limits drop out of the
             # active fetch and are cancelled by the stale-pending sweep.
             gate_reason = current
             if current == "cancelled" and closed_reason in _ROLLOVER_CANCEL_REASONS:
@@ -1575,7 +1575,7 @@ class SyncCycle:
                 for row in signal_rows:
                     self._force_exit_fail_count.pop(row["mt5_ticket"], None)
 
-            # 5.1: Stop trailing before force-exit so the TP loop does not ratchet SL
+            # Stop trailing before force-exit so the TP loop does not ratchet SL
             for row in signal_rows:
                 await sqlite.set_trailing(row["mt5_ticket"], 0)
 
@@ -1939,7 +1939,7 @@ class SyncCycle:
     async def _check_external_closes(
         self, sqlite: SQLiteDB, mt5_client: MT5Client, mt5_positions: list
     ) -> None:
-        """M2: detect positions no longer in MT5 and mark them closed."""
+        """Detect positions no longer in MT5 and mark them closed."""
         filled = await sqlite.get_filled_positions()
         if not filled:
             return

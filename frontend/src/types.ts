@@ -136,7 +136,6 @@ export interface Config {
   mt5_terminal_path: string
   lot_sizing: LotSizingConfig
   polling: PollingConfig
-  magic_number: number
   symbol_map: Record<string, string>
   stock_suffix: string
   symbol_suffixes: SymbolSuffixRule[]

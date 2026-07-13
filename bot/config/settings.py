@@ -393,7 +393,6 @@ class Settings(BaseModel):
     instance_id: int = 1
     lot_sizing: LotSizingConfig = LotSizingConfig()
     polling: PollingConfig = PollingConfig()
-    magic_number: int = 20250001
     symbol_map: dict[str, str] = dict(_DEFAULT_SYMBOL_MAP)
     stock_suffix: str = "-24"
     # Per-asset-class broker suffix rules. Each rule appends `suffix` to every MT5

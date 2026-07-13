@@ -22,7 +22,6 @@
     "tp_active_interval_seconds": 1,
     "license_heartbeat_seconds": 900
   },
-  "magic_number": 20260001,
   "symbol_map": {
     "SPX500USD": "US500",
     "NAS100USD": "USTEC",

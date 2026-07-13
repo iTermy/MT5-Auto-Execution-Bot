@@ -449,7 +449,7 @@ class Engine:
             logger.error("API server crashed", exc_info=True)
 
     async def _reconcile_loop(self) -> None:
-        """C2: orphan sweep every 60s. M1: full reconcile every 2h."""
+        """Orphan sweep every 60s; full reconcile every 2h."""
         ORPHAN_INTERVAL = 60.0
         FULL_RECONCILE_INTERVAL = 2 * 3600.0
         last_full = time.monotonic()

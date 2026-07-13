@@ -4,18 +4,13 @@ import math
 from bot.config.settings import LotExceptionConfig, Settings
 from bot.mt5.client import MT5Client
 from bot.mt5.types import SymbolInfo
+from bot.trading.symbol_mapper import pip_size
 
 logger = logging.getLogger(__name__)
 
 
-def _pip_size(info: SymbolInfo) -> float:
-    # 5-digit and 3-digit instruments: 1 pip = 10 points (e.g. EURUSD, USDJPY)
-    # All others: 1 pip = 1 point (metals, indices, crypto)
-    return info.point * (10 if info.digits in (3, 5) else 1)
-
-
 def _pip_value_per_lot(info: SymbolInfo) -> float:
-    pip_sz = _pip_size(info)
+    pip_sz = pip_size(info)
     return info.trade_tick_value * (pip_sz / info.trade_tick_size)
 
 
@@ -157,7 +152,7 @@ class LotCalculator:
             logger.error("account_info unavailable, using volume_min for %s", mt5_symbol)
             return _clamp(info.volume_min, info)
 
-        pip_sz = _pip_size(info)
+        pip_sz = pip_size(info)
         pip_val = _pip_value_per_lot(info)
 
         if pip_sz <= 0 or pip_val <= 0:

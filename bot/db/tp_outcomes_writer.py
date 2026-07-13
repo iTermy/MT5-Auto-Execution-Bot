@@ -1,7 +1,7 @@
 import json
 import logging
 
-from bot.db.queries import INSERT_TP_OUTCOME
+from bot.db.queries import _TP_OUTCOME_COLUMNS, INSERT_TP_OUTCOME
 from bot.db.supabase import SupabaseDB
 from bot.tp.outcome import TPOutcome
 
@@ -14,54 +14,13 @@ class TPOutcomesWriter:
 
     async def record(self, outcome: TPOutcome) -> None:
         notes_json = json.dumps(outcome.notes) if outcome.notes is not None else None
+        params = [
+            notes_json if col == "notes" else getattr(outcome, col)
+            for col in _TP_OUTCOME_COLUMNS
+        ]
         try:
             async with self._supabase._pool.acquire() as conn:
-                await conn.execute(
-                    INSERT_TP_OUTCOME,
-                    outcome.signal_id,
-                    outcome.mt5_account,
-                    outcome.channel_id,
-                    outcome.signal_type,
-                    outcome.asset_class,
-                    outcome.symbol,
-                    outcome.direction,
-                    outcome.total_limits,
-                    outcome.limits_filled,
-                    outcome.limits_pending,
-                    outcome.limits_cancelled,
-                    outcome.avg_entry_price,
-                    outcome.tp_trigger_price,
-                    outcome.stop_loss,
-                    outcome.threshold_value,
-                    outcome.threshold_unit,
-                    outcome.move_at_trigger,
-                    outcome.realized_pnl,
-                    outcome.others_pnl,
-                    outcome.total_volume,
-                    outcome.partial_close_pct,
-                    outcome.trailing_started,
-                    outcome.risk_per_limit,
-                    outcome.r_multiple,
-                    outcome.risk_percent_cfg,
-                    outcome.bot_version,
-                    outcome.tp_strategy,
-                    notes_json,
-                    outcome.stage,
-                    outcome.mfe_price,
-                    outcome.mfe_r,
-                    outcome.mae_price,
-                    outcome.mae_r,
-                    outcome.level_sequence,
-                    outcome.total_levels,
-                    outcome.seconds_to_trigger,
-                    outcome.hold_seconds,
-                    outcome.exit_reason,
-                    outcome.symbol_normalized,
-                    outcome.account_equity,
-                    outcome.account_balance,
-                    outcome.entry_slippage_points,
-                    outcome.exit_slippage_points,
-                )
+                await conn.execute(INSERT_TP_OUTCOME, *params)
             logger.info(
                 "TP outcome written signal=%d stage=%s pnl=%.2f",
                 outcome.signal_id,

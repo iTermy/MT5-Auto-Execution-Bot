@@ -669,27 +669,21 @@ class Engine:
         )
         self._last_user_snapshot = now
 
-    async def _active_interval(self) -> float:
+    async def _loop_interval(self, active_seconds: float) -> float:
+        """Sleep for the sync/TP loops: fast while orders are active, slow when
+        idle, and throttled during spread hour when nothing needs 1s reactivity."""
+        has_active = bool(await self._sqlite.get_all_active())
         if self._scheduler.is_spread_hour():
-            active = await self._sqlite.get_all_active()
-            if active:
-                return 30.0
-            return 60.0
-        active = await self._sqlite.get_all_active()
-        if active:
-            return float(self._config.polling.tp_active_interval_seconds)
+            return 30.0 if has_active else 60.0
+        if has_active:
+            return active_seconds
         return float(self._config.polling.supabase_interval_seconds)
 
+    async def _active_interval(self) -> float:
+        return await self._loop_interval(float(self._config.polling.tp_active_interval_seconds))
+
     async def _tp_interval(self) -> float:
-        if self._scheduler.is_spread_hour():
-            active = await self._sqlite.get_all_active()
-            if active:
-                return 30.0
-            return 60.0
-        active = await self._sqlite.get_all_active()
-        if active:
-            return float(self._config.polling.tp_trailing_interval_seconds)
-        return float(self._config.polling.supabase_interval_seconds)
+        return await self._loop_interval(float(self._config.polling.tp_trailing_interval_seconds))
 
     async def _broadcast_status(self) -> None:
         active = await self._sqlite.get_all_active()

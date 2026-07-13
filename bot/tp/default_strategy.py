@@ -10,6 +10,7 @@ from bot.tp.asset_config import AssetClassConfig
 from bot.tp.outcome import TriggerSnapshot
 from bot.tp.strategy import TPResult
 from bot.tp.trailing import TrailingStopManager
+from bot.trading.symbol_mapper import pip_size
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +20,6 @@ def _price_movement(position: PositionInfo, bid: float, ask: float) -> float:
     if position.type == 0:  # long
         return bid - position.price_open
     return position.price_open - ask
-
-
-def _pip_size(point: float, digits: int) -> float:
-    return point * (10 if digits in (3, 5) else 1)
 
 
 async def _record_exit_slippage(res, pos: PositionInfo, mt5_client: MT5Client, sqlite: SQLiteDB) -> None:
@@ -63,7 +60,7 @@ class DefaultTPStrategy:
             sym = mt5_client.symbol_info(newest.symbol)
             if sym is None:
                 return False
-            pip_sz = _pip_size(sym.point, sym.digits)
+            pip_sz = pip_size(sym)
             if pip_sz <= 0:
                 return False
             move = move / pip_sz
@@ -115,7 +112,7 @@ class DefaultTPStrategy:
             if asset_config.threshold_unit == "pips":
                 sym_pre = mt5_client.symbol_info(newest.symbol)
                 if sym_pre is not None:
-                    pip_sz_pre = _pip_size(sym_pre.point, sym_pre.digits)
+                    pip_sz_pre = pip_size(sym_pre)
                     if pip_sz_pre > 0:
                         move = move / pip_sz_pre
             move_at_trigger = move

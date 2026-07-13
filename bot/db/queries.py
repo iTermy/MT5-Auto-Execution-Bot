@@ -178,10 +178,6 @@ GET_ORDER_BY_TICKET = """
 SELECT * FROM order_mappings WHERE mt5_ticket = ?
 """
 
-GET_FILLED_SIGNAL_IDS = """
-SELECT DISTINCT signal_id FROM order_mappings WHERE status = 'filled'
-"""
-
 # Limits that have filled on our end at least once — currently open ('filled') or
 # already closed after TP / SL / force-exit ('closed'). Once a limit has filled it
 # must never be re-placed, even if the upstream signal/limit is still marked active
@@ -400,38 +396,29 @@ SELECT id, status, closed_reason FROM signals WHERE id = ANY($1)
 """
 
 # Supabase — append a TP outcome record (write-only)
-INSERT_TP_OUTCOME = """
-INSERT INTO tp_outcomes (
-    signal_id, mt5_account, channel_id, signal_type, asset_class,
-    symbol, direction,
-    total_limits, limits_filled, limits_pending, limits_cancelled,
-    avg_entry_price, tp_trigger_price, stop_loss,
-    threshold_value, threshold_unit,
-    move_at_trigger, realized_pnl, others_pnl, total_volume,
-    partial_close_pct, trailing_started,
-    risk_per_limit, r_multiple, risk_percent_cfg,
-    bot_version, tp_strategy, notes,
-    stage, mfe_price, mfe_r, mae_price, mae_r,
-    level_sequence, total_levels, seconds_to_trigger, hold_seconds, exit_reason,
-    symbol_normalized, account_equity, account_balance,
-    entry_slippage_points, exit_slippage_points
+# Column order is the parameter order TPOutcomesWriter binds in — the writer
+# builds its params from this tuple, so adding a column here is the only edit
+# needed on the query side.
+_TP_OUTCOME_COLUMNS = (
+    "signal_id", "mt5_account", "channel_id", "signal_type", "asset_class",
+    "symbol", "direction",
+    "total_limits", "limits_filled", "limits_pending", "limits_cancelled",
+    "avg_entry_price", "tp_trigger_price", "stop_loss",
+    "threshold_value", "threshold_unit",
+    "move_at_trigger", "realized_pnl", "others_pnl", "total_volume",
+    "partial_close_pct", "trailing_started",
+    "risk_per_limit", "r_multiple", "risk_percent_cfg",
+    "bot_version", "tp_strategy", "notes",
+    "stage", "mfe_price", "mfe_r", "mae_price", "mae_r",
+    "level_sequence", "total_levels", "seconds_to_trigger", "hold_seconds", "exit_reason",
+    "symbol_normalized", "account_equity", "account_balance",
+    "entry_slippage_points", "exit_slippage_points",
 )
-VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7,
-    $8, $9, $10, $11,
-    $12, $13, $14,
-    $15, $16,
-    $17, $18, $19, $20,
-    $21, $22,
-    $23, $24, $25,
-    $26, $27, $28,
-    $29, $30, $31, $32, $33,
-    $34, $35, $36, $37, $38,
-    $39, $40, $41,
-    $42, $43
+
+INSERT_TP_OUTCOME = (
+    f"INSERT INTO tp_outcomes ({', '.join(_TP_OUTCOME_COLUMNS)}) "
+    f"VALUES ({', '.join(f'${i}' for i in range(1, len(_TP_OUTCOME_COLUMNS) + 1))})"
 )
-"""
 
 # SQLite — aggregated lifetime stats across all closed signals.
 # Treats one signal_id as one trade (matches the History view); pnl is the

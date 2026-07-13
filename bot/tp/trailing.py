@@ -6,6 +6,7 @@ from bot.db.sqlite import SQLiteDB
 from bot.mt5.client import MT5Client
 from bot.mt5.types import PositionInfo, TickInfo
 from bot.tp.asset_config import AssetClassConfig
+from bot.trading.symbol_mapper import pip_size
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class TrailingStopManager:
             return False
 
         if asset_config.threshold_unit == "pips":
-            pip_sz = sym.point * (10 if sym.digits in (3, 5) else 1)
+            pip_sz = pip_size(sym)
             trail_dist = asset_config.trailing_distance * pip_sz
         else:
             trail_dist = asset_config.trailing_distance

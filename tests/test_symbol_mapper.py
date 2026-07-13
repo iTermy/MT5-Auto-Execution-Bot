@@ -10,6 +10,7 @@ from bot.trading.symbol_mapper import (
     map_symbol,
     offset_drift_threshold,
     parse_news_symbols,
+    pip_size,
     proximity_threshold,
 )
 from tests.conftest import make_settings
@@ -313,3 +314,35 @@ def test_db_symbol_from_mt5_no_suffix_for_unscoped_class() -> None:
     cfg = make_settings(symbol_suffixes=[{"suffix": "m", "asset_classes": ["forex"]}])
     assert db_symbol_from_mt5("US500", cfg) == "SPX500USD"
     assert db_symbol_from_mt5("EURUSDm", cfg) == "EURUSD"
+
+
+def _sym_info(digits: int, point: float):
+    from bot.mt5.types import SymbolInfo
+
+    return SymbolInfo(
+        name="X",
+        digits=digits,
+        point=point,
+        volume_min=0.01,
+        volume_max=100.0,
+        volume_step=0.01,
+        trade_tick_value=1.0,
+        trade_tick_size=point,
+        trade_contract_size=100000.0,
+    )
+
+
+def test_pip_size_five_digit_forex() -> None:
+    assert pip_size(_sym_info(5, 0.00001)) == pytest.approx(0.0001)
+
+
+def test_pip_size_three_digit_jpy() -> None:
+    assert pip_size(_sym_info(3, 0.001)) == pytest.approx(0.01)
+
+
+def test_pip_size_two_digit_metals() -> None:
+    assert pip_size(_sym_info(2, 0.01)) == pytest.approx(0.01)
+
+
+def test_pip_size_whole_point_indices() -> None:
+    assert pip_size(_sym_info(1, 0.1)) == pytest.approx(0.1)

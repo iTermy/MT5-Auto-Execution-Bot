@@ -53,6 +53,12 @@ def instrument_under_news(db_symbol: str, news_symbols: frozenset[str]) -> bool:
     )
 
 
+def pip_size(info: SymbolInfo) -> float:
+    """Pip size in price units. 5- and 3-digit instruments count 1 pip = 10
+    points (e.g. EURUSD, USDJPY); everything else 1 pip = 1 point."""
+    return info.point * (10 if info.digits in (3, 5) else 1)
+
+
 def detect_asset_class(db_symbol: str) -> AssetClass:
     s = db_symbol.upper()
 
@@ -123,7 +129,7 @@ def proximity_threshold(
         return None  # unrecognized index → no filter
 
     if asset_class in (AssetClass.FOREX, AssetClass.FOREX_JPY):
-        pip_sz = info.point * (10 if info.digits in (3, 5) else 1)
+        pip_sz = pip_size(info)
         if pip_sz <= 0:
             return None
         pips = prox.forex_pips if asset_class == AssetClass.FOREX else prox.forex_jpy_pips

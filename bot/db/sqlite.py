@@ -20,7 +20,6 @@ from bot.db.queries import (
     GET_CLAIMED_ORDERS,
     GET_FILLED_LIMIT_IDS,
     GET_FILLED_POSITIONS,
-    GET_FILLED_SIGNAL_IDS,
     GET_FILLED_SIGNAL_PRICES,
     GET_ORDER_BY_TICKET,
     GET_ORDER_HISTORY,
@@ -376,11 +375,6 @@ class SQLiteDB:
     async def get_pending_by_signal(self, signal_id: int) -> list[aiosqlite.Row]:
         async with self._db.execute(GET_PENDING_BY_SIGNAL, (signal_id,)) as cursor:
             return await cursor.fetchall()
-
-    async def get_filled_signal_ids(self) -> set[int]:
-        async with self._db.execute(GET_FILLED_SIGNAL_IDS) as cursor:
-            rows = await cursor.fetchall()
-        return {row["signal_id"] for row in rows}
 
     async def get_filled_limit_ids(self) -> set[int]:
         async with self._db.execute(GET_FILLED_LIMIT_IDS) as cursor:

@@ -1680,6 +1680,72 @@ class SyncCycle:
                     self._status_cache = {}
         return self._status_cache
 
+    async def _close_position_tracked(
+        self,
+        pos,
+        row: dict,
+        sqlite: SQLiteDB,
+        mt5_client: MT5Client,
+        *,
+        comment: str,
+        label: str,
+        fail_counts: dict[int, int] | None,
+    ) -> str:
+        """Stop trailing and market-close one tracked position.
+
+        Shared by every force-exit sweep (status, news, risky window, profit
+        weekend, user skip). Trailing is stopped first so the TP loop can't
+        ratchet the SL mid-close. On success the realized P&L is recorded
+        (falling back to the live position profit) and the SQLite row is marked
+        closed. Consecutive failures are counted per ticket in fail_counts and
+        capped at _FORCE_EXIT_MAX_ATTEMPTS; pass fail_counts=None to retry
+        forever (user-skip semantics). Returns "closed", "failed", or "capped".
+        """
+        ticket = row["mt5_ticket"]
+        if fail_counts is not None and fail_counts.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
+            return "capped"
+
+        await sqlite.set_trailing(ticket, 0)
+        res = mt5_client.close_position(
+            ticket=pos.ticket,
+            symbol=pos.symbol,
+            volume=pos.volume,
+            position_type=pos.type,
+            comment=comment,
+        )
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            realized_pnl = mt5_client.get_position_realized_pnl(ticket)
+            if realized_pnl is None:
+                realized_pnl = pos.profit
+            await sqlite.mark_closed(ticket, realized_pnl)
+            if fail_counts is not None:
+                fail_counts.pop(ticket, None)
+            logger.info(
+                "%s: closed ticket=%d signal=%d symbol=%s pnl=%.2f",
+                label,
+                ticket,
+                row["signal_id"],
+                pos.symbol,
+                realized_pnl,
+            )
+            return "closed"
+
+        retcode = res.retcode if res else "None"
+        logger.error("%s close failed ticket=%d retcode=%s", label, ticket, retcode)
+        if fail_counts is not None:
+            new_count = fail_counts.get(ticket, 0) + 1
+            fail_counts[ticket] = new_count
+            if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
+                logger.error(
+                    "%s abandoned: ticket=%d signal=%d after %d attempts — "
+                    "manual intervention required",
+                    label,
+                    ticket,
+                    row["signal_id"],
+                    new_count,
+                )
+        return "failed"
+
     async def _check_forced_exits(
         self,
         supabase: SupabaseDB,
@@ -1782,47 +1848,21 @@ class SyncCycle:
                 for row in signal_rows:
                     self._force_exit_fail_count.pop(row["mt5_ticket"], None)
 
-            # Stop trailing before force-exit so the TP loop does not ratchet SL
-            for row in signal_rows:
-                await sqlite.set_trailing(row["mt5_ticket"], 0)
-
             all_handled = True
             for row in signal_rows:
-                ticket = row["mt5_ticket"]
-                pos = pos_by_ticket.get(ticket)
+                pos = pos_by_ticket.get(row["mt5_ticket"])
                 if pos is None:
                     continue
-
-                fail_count = self._force_exit_fail_count.get(ticket, 0)
-                if fail_count >= _FORCE_EXIT_MAX_ATTEMPTS:
-                    continue  # given up; treated as handled
-
-                res = mt5_client.close_position(
-                    ticket=pos.ticket,
-                    symbol=pos.symbol,
-                    volume=pos.volume,
-                    position_type=pos.type,
+                outcome = await self._close_position_tracked(
+                    pos,
+                    row,
+                    sqlite,
+                    mt5_client,
                     comment=f"force_{current}",
+                    label="Forced exit",
+                    fail_counts=self._force_exit_fail_count,
                 )
-                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                    realized_pnl = mt5_client.get_position_realized_pnl(ticket)
-                    if realized_pnl is None:
-                        realized_pnl = pos.profit
-                    await sqlite.mark_closed(ticket, realized_pnl)
-                    self._force_exit_fail_count.pop(ticket, None)
-                    logger.info("Forced exit closed ticket=%d signal=%d", ticket, signal_id)
-                else:
-                    retcode = res.retcode if res else "None"
-                    logger.error("Forced exit close failed ticket=%d retcode=%s", ticket, retcode)
-                    new_count = self._force_exit_fail_count.get(ticket, 0) + 1
-                    self._force_exit_fail_count[ticket] = new_count
-                    if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
-                        logger.error(
-                            "Forced exit abandoned: ticket=%d signal=%d after %d attempts — manual intervention required",
-                            ticket,
-                            signal_id,
-                            new_count,
-                        )
+                if outcome == "failed":
                     all_handled = False
 
             if all_handled:
@@ -1857,52 +1897,21 @@ class SyncCycle:
         for row in filled:
             if row["signal_id"] in unmanaged_sids:
                 continue
-            ticket = row["mt5_ticket"]
-            pos = pos_by_ticket.get(ticket)
+            pos = pos_by_ticket.get(row["mt5_ticket"])
             if pos is None:
                 continue
-
             instr = db_symbol_from_mt5(row["symbol"] or "", config)
             if _gate_exempt(instr, config) or not instrument_under_news(instr, news_symbols):
                 continue
-
-            if self._news_exit_fail_count.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
-                continue
-
-            await sqlite.set_trailing(ticket, 0)
-            res = mt5_client.close_position(
-                ticket=pos.ticket,
-                symbol=pos.symbol,
-                volume=pos.volume,
-                position_type=pos.type,
+            await self._close_position_tracked(
+                pos,
+                row,
+                sqlite,
+                mt5_client,
                 comment="force_news",
+                label="News exit",
+                fail_counts=self._news_exit_fail_count,
             )
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
-                if realized_pnl is None:
-                    realized_pnl = pos.profit
-                await sqlite.mark_closed(ticket, realized_pnl)
-                self._news_exit_fail_count.pop(ticket, None)
-                logger.warning(
-                    "News exit closed ticket=%d signal=%d symbol=%s news=%s",
-                    ticket,
-                    row["signal_id"],
-                    instr,
-                    ",".join(sorted(news_symbols)),
-                )
-            else:
-                retcode = res.retcode if res else "None"
-                logger.error("News exit close failed ticket=%d retcode=%s", ticket, retcode)
-                new_count = self._news_exit_fail_count.get(ticket, 0) + 1
-                self._news_exit_fail_count[ticket] = new_count
-                if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
-                    logger.error(
-                        "News exit abandoned: ticket=%d signal=%d after %d attempts — "
-                        "manual intervention required",
-                        ticket,
-                        row["signal_id"],
-                        new_count,
-                    )
 
     async def _check_risky_window_exits(
         self,
@@ -1929,47 +1938,18 @@ class SyncCycle:
                 continue
             if (row["signal_type"] or "") != "risky":
                 continue
-            ticket = row["mt5_ticket"]
-            pos = pos_by_ticket.get(ticket)
+            pos = pos_by_ticket.get(row["mt5_ticket"])
             if pos is None:
                 continue
-
-            if self._risky_exit_fail_count.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
-                continue
-
-            await sqlite.set_trailing(ticket, 0)
-            res = mt5_client.close_position(
-                ticket=pos.ticket,
-                symbol=pos.symbol,
-                volume=pos.volume,
-                position_type=pos.type,
+            await self._close_position_tracked(
+                pos,
+                row,
+                sqlite,
+                mt5_client,
                 comment="force_risky_window",
+                label="Risky-window exit",
+                fail_counts=self._risky_exit_fail_count,
             )
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
-                if realized_pnl is None:
-                    realized_pnl = pos.profit
-                await sqlite.mark_closed(ticket, realized_pnl)
-                self._risky_exit_fail_count.pop(ticket, None)
-                logger.warning(
-                    "Risky-window exit closed ticket=%d signal=%d symbol=%s",
-                    ticket,
-                    row["signal_id"],
-                    pos.symbol,
-                )
-            else:
-                retcode = res.retcode if res else "None"
-                logger.error("Risky-window exit close failed ticket=%d retcode=%s", ticket, retcode)
-                new_count = self._risky_exit_fail_count.get(ticket, 0) + 1
-                self._risky_exit_fail_count[ticket] = new_count
-                if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
-                    logger.error(
-                        "Risky-window exit abandoned: ticket=%d signal=%d after %d attempts — "
-                        "manual intervention required",
-                        ticket,
-                        row["signal_id"],
-                        new_count,
-                    )
 
     async def _check_profit_weekend_exits(
         self,
@@ -2001,58 +1981,24 @@ class SyncCycle:
         for row in await sqlite.get_filled_positions():
             if row["signal_id"] in unmanaged_sids:
                 continue
-            ticket = row["mt5_ticket"]
-            pos = pos_by_ticket.get(ticket)
+            pos = pos_by_ticket.get(row["mt5_ticket"])
             if pos is None:
                 continue
-
             entry = status_map.get(row["signal_id"])
             if entry is None or entry["status"] != "profit":
                 continue
-
             instr = db_symbol_from_mt5(row["symbol"] or "", config)
             if detect_asset_class(instr) == AssetClass.CRYPTO:
                 continue
-
-            if self._profit_weekend_fail_count.get(ticket, 0) >= _FORCE_EXIT_MAX_ATTEMPTS:
-                continue
-
-            await sqlite.set_trailing(ticket, 0)
-            res = mt5_client.close_position(
-                ticket=pos.ticket,
-                symbol=pos.symbol,
-                volume=pos.volume,
-                position_type=pos.type,
+            await self._close_position_tracked(
+                pos,
+                row,
+                sqlite,
+                mt5_client,
                 comment="force_profit_weekend",
+                label="Profit-weekend exit",
+                fail_counts=self._profit_weekend_fail_count,
             )
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
-                if realized_pnl is None:
-                    realized_pnl = pos.profit
-                await sqlite.mark_closed(ticket, realized_pnl)
-                self._profit_weekend_fail_count.pop(ticket, None)
-                logger.warning(
-                    "Profit-weekend exit closed ticket=%d signal=%d symbol=%s pnl=%.2f",
-                    ticket,
-                    row["signal_id"],
-                    instr,
-                    realized_pnl,
-                )
-            else:
-                retcode = res.retcode if res else "None"
-                logger.error(
-                    "Profit-weekend exit close failed ticket=%d retcode=%s", ticket, retcode
-                )
-                new_count = self._profit_weekend_fail_count.get(ticket, 0) + 1
-                self._profit_weekend_fail_count[ticket] = new_count
-                if new_count == _FORCE_EXIT_MAX_ATTEMPTS:
-                    logger.error(
-                        "Profit-weekend exit abandoned: ticket=%d signal=%d after %d attempts — "
-                        "manual intervention required",
-                        ticket,
-                        row["signal_id"],
-                        new_count,
-                    )
 
     async def _apply_skips(
         self,
@@ -2087,27 +2033,14 @@ class SyncCycle:
         for row in await sqlite.get_filled_positions():
             if row["signal_id"] not in skipped_sids:
                 continue
-            ticket = row["mt5_ticket"]
-            pos = pos_by_ticket.get(ticket)
+            pos = pos_by_ticket.get(row["mt5_ticket"])
             if pos is None:
                 continue
-            await sqlite.set_trailing(ticket, 0)
-            res = mt5_client.close_position(
-                ticket=pos.ticket,
-                symbol=pos.symbol,
-                volume=pos.volume,
-                position_type=pos.type,
-                comment="skip",
+            # fail_counts=None: user skips retry forever until the close lands.
+            outcome = await self._close_position_tracked(
+                pos, row, sqlite, mt5_client, comment="skip", label="Skip", fail_counts=None
             )
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                realized_pnl = mt5_client.get_position_realized_pnl(ticket)
-                if realized_pnl is None:
-                    realized_pnl = pos.profit
-                await sqlite.mark_closed(ticket, realized_pnl)
-                logger.info("Skip: closed ticket=%d signal=%d", ticket, row["signal_id"])
-            else:
-                retcode = res.retcode if res else "None"
-                logger.error("Skip close failed ticket=%d retcode=%s", ticket, retcode)
+            if outcome == "failed":
                 result.errors += 1
 
     async def _cancel_pending_after_close(

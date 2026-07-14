@@ -17,17 +17,38 @@ _AVG_LIMITS = 3
 
 # Median cumulative stop-loss distance per instrument, in the instrument's own price
 # units (sum of |limit - SL| across a signal's limits). From signal-history analysis.
-# Keyed by DB instrument; mapped to the broker symbol at compute time.
+# Keyed by DB instrument (e.g. AAPL.NAS); mapped to the broker symbol at compute time.
+# Stocks are included where the history has >= 3 signals for that ticker.
 _INSTRUMENT_MEDIANS: dict[str, float] = {
     "XAUUSD": 25.00,
     "SPX500USD": 52.50,
     "NAS100USD": 826.00,
     "USOILSPOT": 3.47,
     "BTCUSDT": 4485.00,
+    "ETHUSDT": 936.00,
     "JP225": 1565.00,
     "GCQ26": 59.00,
     "DE30EUR": 1058.50,
     "US30USD": 431.00,
+    "UK100USD": 618.72,
+    "AAPL.NAS": 16.38,
+    "NVDA.NAS": 24.60,
+    "AMZN.NAS": 33.66,
+    "AVGO.NAS": 25.25,
+    "CTAS.NAS": 12.57,
+    "TSLA.NAS": 50.94,
+    "ANF.NYSE": 14.49,
+    "AMD.NAS": 34.97,
+    "CRWD.NAS": 107.52,
+    "LRCX.NAS": 87.42,
+    "MSFT.NAS": 34.26,
+    "NKE.NYSE": 3.74,
+    "ACMR.NAS": 17.58,
+    "INTC.NAS": 14.85,
+    "NFLX.NAS": 20.41,
+    "PYPL.NAS": 7.10,
+    "SNPS.NAS": 68.14,
+    "XOM.NYSE": 14.59,
 }
 
 # Forex is aggregated across all pairs as a single median cumulative SL in pips; it's
@@ -52,10 +73,17 @@ _FOREX_PAIRS = [
     "EURAUD",
     "EURCAD",
     "EURCHF",
+    "EURNZD",
     "GBPAUD",
     "GBPCAD",
+    "GBPCHF",
+    "GBPNZD",
     "AUDCAD",
+    "AUDCHF",
     "AUDNZD",
+    "CADCHF",
+    "NZDCAD",
+    "NZDCHF",
 ]
 
 

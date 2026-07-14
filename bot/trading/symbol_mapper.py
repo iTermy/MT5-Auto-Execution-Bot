@@ -3,7 +3,7 @@ from bot.config.settings import OffsetDriftConfig, ProximityConfig, Settings
 from bot.mt5.types import SymbolInfo
 
 _METALS = frozenset({"XAUUSD", "XAGUSD", "GOLD", "SILVER"})
-_OIL_KEYWORDS = ("OIL", "WTI", "BRENT")
+_OIL_KEYWORDS = ("OIL", "WTI", "BRENT", "XTI")
 _INDEX_KEYWORDS = (
     "SPX",
     "NAS",

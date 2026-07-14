@@ -12,9 +12,11 @@ from bot.config.settings import (
     _MIGRATION_STOCK_PROXIMITY,
     _MIGRATION_STOCK_SPREAD_EARLY,
     _MIGRATION_SYMBOL_MAP_BACKFILL,
+    _MIGRATION_TP_INSTRUMENT_OVERRIDES,
     _OFFSET_BACKFILL_SYMBOLS,
     _RISKY_GOLD_CHANNEL_ID,
     _STOCK_PROXIMITY_OVERRIDES,
+    _TP_INSTRUMENT_OVERRIDES,
     migrate_config,
 )
 
@@ -430,10 +432,11 @@ def test_missing_file_is_noop(tmp_path) -> None:
     assert not cfg.exists()
 
 
-def test_migration_leaves_lot_sizing_and_tp_config_untouched(tmp_path) -> None:
+def test_migration_leaves_lot_sizing_and_tp_config_values_untouched(tmp_path) -> None:
     cfg = tmp_path / "config.json"
-    # A user still on the original shipped defaults must keep them after an update —
-    # only "Restore defaults" changes lot sizing / TP behaviour.
+    # A user still on the original shipped defaults must keep their lot-sizing / TP
+    # *values* after an update — only "Restore defaults" changes those. The one
+    # exception is the additive instrument_overrides backfill (asserted separately).
     _write(
         cfg,
         {
@@ -452,3 +455,65 @@ def test_migration_leaves_lot_sizing_and_tp_config_untouched(tmp_path) -> None:
     assert data["lot_sizing"]["mode"] == "risk_percent"  # untouched
     assert data["tp_config"]["partial_close_percent"] == 50  # not flipped
     assert data["tp_config"]["metals"]["partial_close_percent"] == 75  # not flipped
+
+
+def test_tp_instrument_overrides_backfilled_when_absent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"tp_config": {"partial_close_percent": 0}})
+
+    migrate_config(cfg)
+
+    overrides = _read(cfg)["tp_config"]["instrument_overrides"]
+    for sym, override in _TP_INSTRUMENT_OVERRIDES.items():
+        assert overrides[sym] == override
+    assert _MIGRATION_TP_INSTRUMENT_OVERRIDES in _read(cfg)["config_migrations"]
+
+
+def test_tp_instrument_overrides_preserve_existing_and_custom_keys(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    # User already tuned DE40 and has an unrelated custom instrument.
+    custom_de40 = {"standard": {"profit_threshold": 99.0, "trailing_distance": 99.0}}
+    _write(
+        cfg,
+        {
+            "tp_config": {
+                "instrument_overrides": {
+                    "DE40": custom_de40,
+                    "SMCI.NAS": {"profit_threshold": 3.0, "trailing_distance": 3.0},
+                }
+            }
+        },
+    )
+
+    migrate_config(cfg)
+
+    overrides = _read(cfg)["tp_config"]["instrument_overrides"]
+    assert overrides["DE40"] == custom_de40  # user's tuning not overwritten
+    assert overrides["SMCI.NAS"]["profit_threshold"] == 3.0  # unrelated custom kept
+    assert overrides["CRWD.NAS"] == _TP_INSTRUMENT_OVERRIDES["CRWD.NAS"]  # gap still filled
+
+
+def test_tp_instrument_overrides_is_idempotent_and_respects_removal(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"tp_config": {}})
+    migrate_config(cfg)
+
+    # User removes a backfilled override after the one-time migration.
+    data = _read(cfg)
+    del data["tp_config"]["instrument_overrides"]["XOM.NYSE"]
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    overrides = _read(cfg)["tp_config"]["instrument_overrides"]
+    assert "XOM.NYSE" not in overrides  # not re-added
+
+
+def test_tp_instrument_overrides_noop_when_tp_config_absent(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {})
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert "tp_config" not in data  # nothing to backfill onto; template applies at load
+    assert _MIGRATION_TP_INSTRUMENT_OVERRIDES in data["config_migrations"]

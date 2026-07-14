@@ -168,6 +168,36 @@ _MIGRATION_LIVE_PRICE_INTERVAL = "live_price_interval_5s_v1"
 _CRYPTO_PROXIMITY_OVERRIDES = {"ETHUSDT": 40.0}
 _MIGRATION_CRYPTO_PROXIMITY = "crypto_proximity_overrides_v1"
 
+# Backfill TP instrument_overrides for traded instruments that were riding the
+# asset-class base: index aliases (DE40 == DE30EUR, UK100/UK100USD, F40), the XTIUSD
+# oil alias (toll, mirroring USOILSPOT), GOOGL (mirrors GOOG), and higher-priced stocks
+# whose $5 stock-base trail closed them far too early. setdefault per instrument, so a
+# user who already tuned any of these keeps their own value.
+_TP_INSTRUMENT_OVERRIDES: dict[str, dict] = {
+    "DE40": {
+        "standard": {"profit_threshold": 50.0, "trailing_distance": 50.0},
+        "scalp": {"profit_threshold": 30.0, "trailing_distance": 30.0},
+        "swing": {"profit_threshold": 250.0, "trailing_distance": 250.0},
+    },
+    "UK100": {"standard": {"profit_threshold": 10.0, "trailing_distance": 10.0}},
+    "UK100USD": {"standard": {"profit_threshold": 10.0, "trailing_distance": 10.0}},
+    "F40": {"standard": {"profit_threshold": 7.0, "trailing_distance": 7.0}},
+    "XTIUSD": {"toll": {"profit_threshold": 0.4, "trailing_distance": 0.4}},
+    "GOOGL.NAS": {
+        "standard": {"profit_threshold": 2.5, "trailing_distance": 2.5},
+        "scalp": {"profit_threshold": 1.5, "trailing_distance": 1.5},
+        "swing": {"profit_threshold": 12.5, "trailing_distance": 12.5},
+    },
+    "CRWD.NAS": {"profit_threshold": 1.0, "trailing_distance": 1.0, "partial_close_percent": 50},
+    "LRCX.NAS": {"profit_threshold": 1.5, "trailing_distance": 1.5, "partial_close_percent": 50},
+    "SNPS.NAS": {"profit_threshold": 2.5, "trailing_distance": 2.5, "partial_close_percent": 50},
+    "CTAS.NAS": {"profit_threshold": 1.0, "trailing_distance": 1.0, "partial_close_percent": 50},
+    "ANF.NYSE": {"profit_threshold": 0.75, "trailing_distance": 0.75, "partial_close_percent": 50},
+    "XOM.NYSE": {"profit_threshold": 0.3, "trailing_distance": 0.3, "partial_close_percent": 50},
+}
+_MIGRATION_TP_INSTRUMENT_OVERRIDES = "tp_instrument_overrides_backfill_v1"
+
+
 class SymbolSuffixRule(BaseModel):
     suffix: str
     asset_classes: list[str]  # AssetClass values this suffix applies to
@@ -599,6 +629,19 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
             prox["crypto_overrides"] = existing
             data["proximity"] = prox
         applied.append(_MIGRATION_CRYPTO_PROXIMITY)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_TP_INSTRUMENT_OVERRIDES not in applied:
+        tp = data.get("tp_config")
+        if isinstance(tp, dict):
+            overrides = tp.get("instrument_overrides")
+            overrides = overrides if isinstance(overrides, dict) else {}
+            for sym, override in _TP_INSTRUMENT_OVERRIDES.items():
+                overrides.setdefault(sym, override)
+            tp["instrument_overrides"] = overrides
+            data["tp_config"] = tp
+        applied.append(_MIGRATION_TP_INSTRUMENT_OVERRIDES)
         data["config_migrations"] = applied
         changed = True
 

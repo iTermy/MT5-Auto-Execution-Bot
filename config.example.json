@@ -393,6 +393,38 @@
           "trailing_distance": 250.0
         }
       },
+      "DE40": {
+        "standard": {
+          "profit_threshold": 50.0,
+          "trailing_distance": 50.0
+        },
+        "scalp": {
+          "profit_threshold": 30.0,
+          "trailing_distance": 30.0
+        },
+        "swing": {
+          "profit_threshold": 250.0,
+          "trailing_distance": 250.0
+        }
+      },
+      "UK100": {
+        "standard": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
+      },
+      "UK100USD": {
+        "standard": {
+          "profit_threshold": 10.0,
+          "trailing_distance": 10.0
+        }
+      },
+      "F40": {
+        "standard": {
+          "profit_threshold": 7.0,
+          "trailing_distance": 7.0
+        }
+      },
       "JP225": {
         "standard": {
           "profit_threshold": 250.0,
@@ -436,6 +468,12 @@
         }
       },
       "USOILSPOT": {
+        "toll": {
+          "profit_threshold": 0.4,
+          "trailing_distance": 0.4
+        }
+      },
+      "XTIUSD": {
         "toll": {
           "profit_threshold": 0.4,
           "trailing_distance": 0.4
@@ -860,6 +898,50 @@
           "profit_threshold": 7.5,
           "trailing_distance": 7.5
         }
+      },
+      "GOOGL.NAS": {
+        "standard": {
+          "profit_threshold": 2.5,
+          "trailing_distance": 2.5
+        },
+        "scalp": {
+          "profit_threshold": 1.5,
+          "trailing_distance": 1.5
+        },
+        "swing": {
+          "profit_threshold": 12.5,
+          "trailing_distance": 12.5
+        }
+      },
+      "CRWD.NAS": {
+        "profit_threshold": 1.0,
+        "trailing_distance": 1.0,
+        "partial_close_percent": 50
+      },
+      "LRCX.NAS": {
+        "profit_threshold": 1.5,
+        "trailing_distance": 1.5,
+        "partial_close_percent": 50
+      },
+      "SNPS.NAS": {
+        "profit_threshold": 2.5,
+        "trailing_distance": 2.5,
+        "partial_close_percent": 50
+      },
+      "CTAS.NAS": {
+        "profit_threshold": 1.0,
+        "trailing_distance": 1.0,
+        "partial_close_percent": 50
+      },
+      "ANF.NYSE": {
+        "profit_threshold": 0.75,
+        "trailing_distance": 0.75,
+        "partial_close_percent": 50
+      },
+      "XOM.NYSE": {
+        "profit_threshold": 0.3,
+        "trailing_distance": 0.3,
+        "partial_close_percent": 50
       }
     }
   }

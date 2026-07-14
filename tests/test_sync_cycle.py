@@ -48,7 +48,7 @@ def _mock_supabase(
     )
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
-    sb.fetch_mode_gates.return_value = (news_mode, vol_guard)
+    sb.fetch_sync_state.return_value = (news_mode, vol_guard, 1)
     sb.fetch_feed_health.return_value = {}
     return sb
 
@@ -1724,3 +1724,72 @@ async def test_excluded_asset_wildcard_channel(sqlite_db, mock_mt5, sample_confi
 
     assert result.placed == 0
     mock_mt5.order_send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Rev-gated egress caches: the signals_rev watermark drives Supabase refetching
+# ---------------------------------------------------------------------------
+
+
+async def test_unchanged_rev_reuses_signal_set_cache(sqlite_db, mock_mt5, sample_config) -> None:
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1)])
+    scheduler = _mock_scheduler()
+    cycle = SyncCycle()
+
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert supabase.fetch_sync_state.await_count == 2
+    assert supabase.fetch_signal_sets.await_count == 1
+
+
+async def test_rev_change_refetches_and_drops_status_cache(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1)])
+    supabase.fetch_sync_state.side_effect = [(None, None, 1), (None, None, 2)]
+    scheduler = _mock_scheduler()
+    cycle = SyncCycle()
+
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+    cycle._status_cache = {1: {"status": "active", "closed_reason": None}}
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert supabase.fetch_signal_sets.await_count == 2
+    assert cycle._status_cache is None  # no filled positions, so nothing re-primed it
+
+
+async def test_poll_failure_forces_signal_set_refetch(sqlite_db, mock_mt5, sample_config) -> None:
+    # A failed sync-state poll leaves freshness unverifiable: the set cache is
+    # dropped so the next read refetches (or fails and skips placement).
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=1)])
+    scheduler = _mock_scheduler()
+    cycle = SyncCycle()
+
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+    supabase.fetch_sync_state.side_effect = Exception("pooler down")
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert supabase.fetch_signal_sets.await_count == 2
+
+
+async def test_signal_set_max_age_legacy_vs_watermark() -> None:
+    # Legacy DB (no watermark): the old 5s interval drives refetching.
+    cycle = SyncCycle()
+    supabase = _mock_supabase()
+    t0 = 1000.0
+    await cycle._fetch_signal_sets_cached(supabase, set(), t0)
+    await cycle._fetch_signal_sets_cached(supabase, set(), t0 + 3)
+    assert supabase.fetch_signal_sets.await_count == 1
+    await cycle._fetch_signal_sets_cached(supabase, set(), t0 + 6)
+    assert supabase.fetch_signal_sets.await_count == 2
+
+    # Watermark present: no interval refetch until the 60s safety net lapses.
+    cycle = SyncCycle()
+    cycle._signals_rev = 7
+    supabase = _mock_supabase()
+    await cycle._fetch_signal_sets_cached(supabase, set(), t0)
+    await cycle._fetch_signal_sets_cached(supabase, set(), t0 + 30)
+    assert supabase.fetch_signal_sets.await_count == 1
+    await cycle._fetch_signal_sets_cached(supabase, set(), t0 + 61)
+    assert supabase.fetch_signal_sets.await_count == 2

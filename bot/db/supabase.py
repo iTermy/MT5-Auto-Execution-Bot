@@ -6,10 +6,11 @@ import asyncpg
 from bot.db.queries import (
     FETCH_FEED_HEALTH,
     FETCH_LIVE_PRICES,
-    FETCH_MODE_GATES,
     FETCH_SIGNAL_SETS,
     FETCH_SIGNAL_STATUS,
     FETCH_SIGNAL_STATUSES,
+    FETCH_SYNC_STATE,
+    FETCH_SYNC_STATE_LEGACY,
     UPSERT_USER_SNAPSHOT,
 )
 
@@ -22,10 +23,12 @@ _POOL_MIN_SIZE = 1
 _POOL_MAX_SIZE = 3
 _POOL_RETRY_ATTEMPTS = 4
 _POOL_RETRY_DELAY = 8.0
-# Recycle idle connections well before the Supabase pooler reaps them (it kills idle
+# Recycle idle connections before the Supabase pooler reaps them (it kills idle
 # server sessions in ~1-2 min). A connection asyncpg still believes is live but whose
 # socket the pooler/NAT silently dropped is the classic source of a hung query.
-_POOL_INACTIVE_LIFETIME = 30.0
+# Kept above the 30s idle sync cadence so the once-per-cycle sync-state poll reuses
+# the connection instead of paying a fresh TLS handshake (~5KB egress) every cycle.
+_POOL_INACTIVE_LIFETIME = 55.0
 # Hard bound on acquiring a connection (waiting for a free slot AND establishing a new
 # one). command_timeout bounds query execution; together they guarantee no pool call can
 # wedge forever, so a dropped socket surfaces as a caught error the sync loop retries
@@ -37,6 +40,7 @@ class SupabaseDB:
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         self._pool: asyncpg.Pool | None = None
+        self._sync_state_legacy = False
 
     @property
     def is_connected(self) -> bool:
@@ -129,14 +133,31 @@ class SupabaseDB:
             for row in rows
         }
 
-    async def fetch_mode_gates(self) -> tuple[str | None, str | None]:
-        """Return (news_mode, vol_guard) from the single bot_mode_status row. Both are
-        comma-separated token lists (or 'ALL'), NULL when the respective mode is off."""
+    async def fetch_sync_state(self) -> tuple[str | None, str | None, int | None]:
+        """Return (news_mode, vol_guard, signals_rev) from the single bot_mode_status
+        row. The gates are comma-separated token lists (or 'ALL'), NULL when off.
+        signals_rev is the TM-side write watermark; None when the DB predates the
+        column, which drops the sync cycle back to interval-driven fetching."""
         async with self._acquire() as conn:
-            row = await conn.fetchrow(FETCH_MODE_GATES)
+            if self._sync_state_legacy:
+                row = await conn.fetchrow(FETCH_SYNC_STATE_LEGACY)
+            else:
+                try:
+                    row = await conn.fetchrow(FETCH_SYNC_STATE)
+                    if row is None:
+                        return None, None, None
+                    return row["news_mode"], row["vol_guard"], row["signals_rev"]
+                except asyncpg.exceptions.UndefinedColumnError:
+                    # DB not yet migrated (TM restart pending) — don't retry the
+                    # missing column every second for the process lifetime.
+                    self._sync_state_legacy = True
+                    logger.warning(
+                        "bot_mode_status.signals_rev missing — interval-polling fallback"
+                    )
+                    row = await conn.fetchrow(FETCH_SYNC_STATE_LEGACY)
         if row is None:
-            return None, None
-        return row["news_mode"], row["vol_guard"]
+            return None, None, None
+        return row["news_mode"], row["vol_guard"], None
 
     async def fetch_feed_health(self) -> dict[str, str]:
         """Return {feed_name: status} from the feed_health table."""

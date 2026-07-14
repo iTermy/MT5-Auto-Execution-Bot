@@ -40,7 +40,17 @@ FROM live_prices
 WHERE symbol = ANY($1)
 """
 
-FETCH_MODE_GATES = """
+# One tiny row polled every sync cycle: the news/vol gate tokens plus signals_rev,
+# a watermark the TM's triggers bump on every signals/limits write. The sync cycle
+# refetches the (much heavier) signal-set and status queries only when the rev moves,
+# which is what keeps pooler egress flat while the 1s loop stays reactive.
+FETCH_SYNC_STATE = """
+SELECT news_mode, vol_guard, signals_rev FROM bot_mode_status WHERE id = 1
+"""
+
+# Fallback for a DB that predates the signals_rev column (TM not yet migrated):
+# same row without the watermark; the caller drops back to interval-driven fetching.
+FETCH_SYNC_STATE_LEGACY = """
 SELECT news_mode, vol_guard FROM bot_mode_status WHERE id = 1
 """
 
@@ -400,19 +410,49 @@ SELECT id, status, closed_reason FROM signals WHERE id = ANY($1)
 # builds its params from this tuple, so adding a column here is the only edit
 # needed on the query side.
 _TP_OUTCOME_COLUMNS = (
-    "signal_id", "mt5_account", "channel_id", "signal_type", "asset_class",
-    "symbol", "direction",
-    "total_limits", "limits_filled", "limits_pending", "limits_cancelled",
-    "avg_entry_price", "tp_trigger_price", "stop_loss",
-    "threshold_value", "threshold_unit",
-    "move_at_trigger", "realized_pnl", "others_pnl", "total_volume",
-    "partial_close_pct", "trailing_started",
-    "risk_per_limit", "r_multiple", "risk_percent_cfg",
-    "bot_version", "tp_strategy", "notes",
-    "stage", "mfe_price", "mfe_r", "mae_price", "mae_r",
-    "level_sequence", "total_levels", "seconds_to_trigger", "hold_seconds", "exit_reason",
-    "symbol_normalized", "account_equity", "account_balance",
-    "entry_slippage_points", "exit_slippage_points",
+    "signal_id",
+    "mt5_account",
+    "channel_id",
+    "signal_type",
+    "asset_class",
+    "symbol",
+    "direction",
+    "total_limits",
+    "limits_filled",
+    "limits_pending",
+    "limits_cancelled",
+    "avg_entry_price",
+    "tp_trigger_price",
+    "stop_loss",
+    "threshold_value",
+    "threshold_unit",
+    "move_at_trigger",
+    "realized_pnl",
+    "others_pnl",
+    "total_volume",
+    "partial_close_pct",
+    "trailing_started",
+    "risk_per_limit",
+    "r_multiple",
+    "risk_percent_cfg",
+    "bot_version",
+    "tp_strategy",
+    "notes",
+    "stage",
+    "mfe_price",
+    "mfe_r",
+    "mae_price",
+    "mae_r",
+    "level_sequence",
+    "total_levels",
+    "seconds_to_trigger",
+    "hold_seconds",
+    "exit_reason",
+    "symbol_normalized",
+    "account_equity",
+    "account_balance",
+    "entry_slippage_points",
+    "exit_slippage_points",
 )
 
 INSERT_TP_OUTCOME = (

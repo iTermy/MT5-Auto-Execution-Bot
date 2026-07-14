@@ -236,17 +236,20 @@ proper (4:55–6:00 PM, `sl_strip_start`). Cancelled orders marked `spread_cance
 While a symbol is under news the bot (a) cancels its pending orders (same path as the spread gate) and (b) force-closes any filled positions on that symbol (`SyncCycle._check_news_exits`), mirroring the manual-cancel / breakeven force-exit.
 
 ## Volatility Guard (opt-in)
-`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated tokens, or `ALL`, NULL when calm), but per-pair: it writes the full forex pair (e.g. `EURUSD`, matching only that symbol) and `ALL` for gold. It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in a single `bot_mode_status` row fetch (`SupabaseDB.fetch_mode_gates`) and unions its tokens into the same gate set, so volatility tokens cancel pending orders and force-close filled positions through the exact same path, parsing, and crypto/24h exemptions as news. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
+`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated tokens, or `ALL`, NULL when calm), but per-pair: it writes the full forex pair (e.g. `EURUSD`, matching only that symbol) and `ALL` for gold. It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in the per-cycle sync-state poll (`SupabaseDB.fetch_sync_state`) and unions its tokens into the same gate set, so volatility tokens cancel pending orders and force-close filled positions through the exact same path, parsing, and crypto/24h exemptions as news. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
 
 ## Polling Strategy
-| State | MT5 calls/min | Supabase queries/min |
-|-------|--------------|---------------------|
-| Idle (no signals/orders) | 0 | 2 |
-| Pending orders (watching fills) | 120 | 2 |
-| Positions open (TP monitoring) | 120 | 2 |
-| Trailing | 120 + SL mods | 2 |
-
-Scalp strategy — every second matters. 1s polling when any pending orders or positions exist.
+Scalp strategy — every second matters. The sync loop runs at 1s while any pending order or
+position exists (30s idle), but almost all of its Supabase traffic is a single tiny
+`bot_mode_status` row per cycle (`SupabaseDB.fetch_sync_state`): the news/vol gate tokens plus
+`signals_rev`, a watermark that TM-side statement triggers bump on every `signals`/`limits`
+write. The heavy queries — the active signal set (`FETCH_SIGNAL_SETS`) and force-exit statuses
+(`FETCH_SIGNAL_STATUSES`) — are cached and refetched only when the watermark moves (or a
+locally-filled signal set changes), with 60s/30s max-ages as a safety net. Against a DB
+without the column the bot falls back to the old interval polling (5s sets / 2s statuses).
+Live feed prices for offset symbols stay on a 5s pull (values churn, so a watermark can't
+help), and feed health on 60s. This keeps shared-pooler egress flat while reaction time to a
+new signal or status flip is one sync cycle (~1s) after the TM commits it.
 
 ## License System
 - Supabase Edge Function (Deno/TypeScript) at `supabase/functions/validate-license/`
@@ -291,7 +294,10 @@ type(standard/scalp/swing/toll/pa/1-1/risky), closed_reason, total_limits, chann
 **feed_health**: feed(PK), status(idle/healthy/down) — there is no `degraded` status
 **bot_mode_status**: singleton row — comma-separated tokens or `ALL`, NULL when
 inactive. news_mode uses currency/asset tokens (e.g. `EUR, GOLD`); vol_guard uses
-full pairs (e.g. `EURUSD`) plus `ALL` for gold
+full pairs (e.g. `EURUSD`) plus `ALL` for gold. signals_rev is the write watermark
+(TM-side statement triggers bump it on every signals/limits write) that drives the
+rev-gated caches above; when the column is absent the bot logs once and falls back
+to legacy interval polling
 
 ### Vocabularies this bot depends on
 - `signals.closed_reason`: `automatic`, `manual`, `expiry`, `near_miss`, `news:<CAT>`,

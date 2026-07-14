@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 _UNAVAILABLE_COOLDOWN = 300.0  # seconds before retrying a "not in terminal" symbol
 
+# Fallback max-ages for the rev-gated Supabase caches. With the signals_rev watermark
+# present, refetches are change-driven and these only cover a missed trigger bump;
+# against a legacy DB (no watermark) the legacy values reproduce the old interval polling.
+_SIGNAL_SETS_MAX_AGE = 60.0
+_SIGNAL_SETS_MAX_AGE_LEGACY = 5.0
+_STATUS_MAX_AGE = 30.0
+_STATUS_MAX_AGE_LEGACY = 2.0
+
 
 def _within_proximity(
     limit_prices: list[float], mid: float, asset_class: AssetClass, info, prox, db_sym: str = ""
@@ -199,23 +207,26 @@ class SyncCycle:
         # by an earlier routine would still look open to a later one.
         self._closed_tickets: set[int] = set()
         self._feed_health_failed: bool = False
-        # Egress-guard caches: the active-signal set, mode gates, and feed health
-        # change at human speed, so re-pulling them every 1s sync cycle wastes pooler
-        # egress. Each is refreshed only when its interval lapses (see PollingConfig);
-        # downstream placement/gating still runs every cycle against the cached snapshot.
+        # Egress-guard caches: the active-signal set and force-exit statuses change
+        # only when the TM writes signals/limits, so instead of re-pulling them on
+        # short intervals the cycle polls one tiny sync-state row (gates + the
+        # signals_rev watermark) and drops these caches when the rev moves. The
+        # max-age constants below are only a safety net for a missed bump; while
+        # the watermark is unavailable (legacy DB) the legacy intervals drive
+        # refetching exactly as before.
+        self._signals_rev: int | None = None
         self._signal_sets_cache: tuple[list, set[int], dict[int, int]] | None = None
         self._signal_sets_cache_at: float = 0.0
         self._signal_sets_cache_sids: set[int] = set()
         self._gates_cache: tuple[str | None, str | None] | None = None
-        self._gates_cache_at: float = 0.0
         self._stale_feeds_cache: set[str] = set()
         self._feed_health_cache_at: float = 0.0
         self._live_prices_cache: dict = {}
         self._live_prices_cache_at: float = 0.0
         self._live_prices_requested: set[str] = set()
         # Force-exit status snapshot for filled signals (egress guard, same shape as the
-        # caches above): refreshed on forced_exit_status_interval_seconds, or immediately
-        # when a newly filled signal appears so a force-exit directive is never missed.
+        # caches above): dropped on a rev change, and refetched immediately when a newly
+        # filled signal appears so a force-exit directive is never missed.
         self._status_cache: dict[int, dict] | None = None
         self._status_cache_at: float = 0.0
         self._status_requested: set[int] = set()
@@ -326,7 +337,10 @@ class SyncCycle:
         filled_sids = {r["signal_id"] for r in sqlite_active if r["status"] == "filled"}
 
         cache_now = time.monotonic()
-        signal_sets = await self._fetch_signal_sets_cached(supabase, filled_sids, config, cache_now)
+        # Tiny per-cycle poll: news/vol gates + the signals_rev watermark. Runs before
+        # the cached fetches below because a rev change is what invalidates them.
+        await self._poll_sync_state(supabase)
+        signal_sets = await self._fetch_signal_sets_cached(supabase, filled_sids, cache_now)
 
         supabase_rows = None
         hit_limit_ids: set[int] = set()
@@ -369,9 +383,9 @@ class SyncCycle:
             # shut; everything else uses the standard daily_start.
             now = datetime.now(UTC)
 
-            # news_mode is fetched regardless of placement_active so force-exits still
-            # fire while placement is paused.
-            news_symbols = await self._fetch_mode_gates_cached(supabase, config, cache_now)
+            # news_mode comes from the per-cycle sync-state poll regardless of
+            # placement_active so force-exits still fire while placement is paused.
+            news_symbols = self._news_symbols(config)
 
             # 'risky' signals are disabled entirely inside their UTC windows (no
             # crypto/24h exemption — the gate is signal-type based, not instrument based).
@@ -633,9 +647,7 @@ class SyncCycle:
         skip_at = ctx.config.lot_sizing.skip_limits_at
         if skip_at > 0:
             too_many = {
-                lid
-                for lid in new_limit_ids
-                if (by_limit[lid].get("total_limits") or 0) >= skip_at
+                lid for lid in new_limit_ids if (by_limit[lid].get("total_limits") or 0) >= skip_at
             }
             for lid in too_many:
                 sid = by_limit[lid]["signal_id"]
@@ -1209,23 +1221,26 @@ class SyncCycle:
                 ctx.repriced_tickets.add(row["mt5_ticket"])
 
     async def _fetch_signal_sets_cached(
-        self, supabase: SupabaseDB, filled_sids: set[int], config: Settings, cache_now: float
+        self, supabase: SupabaseDB, filled_sids: set[int], cache_now: float
     ) -> tuple[list, set[int], dict[int, int]] | None:
-        """Active-signal fetch behind an egress-guard cache.
+        """Active-signal fetch behind the rev-gated egress cache.
 
-        Pull the active-signal set only when the cache has lapsed; reuse the last
-        snapshot otherwise so the 1s fill/TP loop doesn't re-fetch the whole set
-        every cycle. A change in filled_sids also invalidates the cache so a
-        freshly-filled 'profit' signal's remaining limits are spared immediately
-        rather than waiting out the interval. On a fetch failure returns None —
-        the caller skips the placement phase and runs fill detection only.
+        The sync-state poll drops the cache whenever the signals_rev watermark
+        moves, so a refetch here means the set actually changed; the max-age is
+        only a safety net (and the legacy interval when the watermark is absent).
+        A change in filled_sids also invalidates the cache so a freshly-filled
+        'profit' signal's remaining limits are spared immediately. On a fetch
+        failure returns None — the caller skips the placement phase and runs
+        fill detection only.
         """
+        max_age = (
+            _SIGNAL_SETS_MAX_AGE if self._signals_rev is not None else _SIGNAL_SETS_MAX_AGE_LEGACY
+        )
         signal_sets = self._signal_sets_cache
         if (
             signal_sets is not None
             and filled_sids == self._signal_sets_cache_sids
-            and (cache_now - self._signal_sets_cache_at)
-            < config.polling.signal_fetch_interval_seconds
+            and (cache_now - self._signal_sets_cache_at) < max_age
         ):
             return signal_sets
         try:
@@ -1241,34 +1256,42 @@ class SyncCycle:
         self._signal_sets_cache_sids = filled_sids
         return signal_sets
 
-    async def _fetch_mode_gates_cached(
-        self, supabase: SupabaseDB, config: Settings, cache_now: float
-    ) -> frozenset[str]:
-        """News/volatility gate tokens behind an egress-guard cache.
+    async def _poll_sync_state(self, supabase: SupabaseDB) -> None:
+        """One tiny bot_mode_status row per cycle: the news/vol gate tokens plus the
+        signals_rev watermark, which the TM-side triggers bump on every signals/limits
+        write. A rev change drops the signal-set and status caches so the next read
+        refetches immediately — that change-driven refetch is what lets the heavy
+        queries run long fallback max-ages instead of re-pulling every few seconds.
+        A failed poll leaves signal-set freshness unverifiable, so that cache is
+        dropped too (the refetch either succeeds or skips the placement phase, the
+        pre-watermark failure behavior); the status cache is kept — force-exits
+        deliberately ride out a pooler blip on the last-known snapshot.
+        """
+        try:
+            news_mode, vol_guard, rev = await supabase.fetch_sync_state()
+        except Exception:
+            logger.error("Failed to fetch sync state", exc_info=True)
+            self._signal_sets_cache = None
+            return
+        self._gates_cache = (news_mode, vol_guard)
+        if rev != self._signals_rev:
+            self._signals_rev = rev
+            self._signal_sets_cache = None
+            self._status_cache = None
+
+    def _news_symbols(self, config: Settings) -> frozenset[str]:
+        """News/volatility gate tokens from the last sync-state poll.
 
         news_mode is per-symbol: a comma-separated list of currency/asset tokens
         (or 'ALL'), NULL when there's no news. The volatility guard (vol_guard)
         shares the same token format and gating semantics but is per-pair — its
         tokens are full pairs (e.g. 'EURUSD', substring-matching only that symbol)
         plus 'ALL' for gold. When the user enables it, its tokens are folded into
-        the same set so they cancel/close trades identically. Mode gates track news/vol windows (minute-scale), so they're
-        cached and refreshed on mode_gate_interval_seconds rather than every cycle.
-        A fetch failure reuses the last-known gates so gating survives a brief blip.
+        the same set so they cancel/close trades identically.
         """
-        gates = self._gates_cache
-        if gates is None or (
-            (cache_now - self._gates_cache_at) >= config.polling.mode_gate_interval_seconds
-        ):
-            try:
-                gates = await supabase.fetch_mode_gates()
-                self._gates_cache = gates
-                self._gates_cache_at = cache_now
-            except Exception:
-                logger.error("Failed to fetch bot mode gates", exc_info=True)
-                gates = self._gates_cache
-        if gates is None:
+        if self._gates_cache is None:
             return frozenset()
-        news_mode_raw, vol_guard_raw = gates
+        news_mode_raw, vol_guard_raw = self._gates_cache
         news_symbols = parse_news_symbols(news_mode_raw)
         if config.volatility_guard:
             news_symbols |= parse_news_symbols(vol_guard_raw)
@@ -1694,19 +1717,21 @@ class SyncCycle:
             )
 
     async def _filled_statuses(
-        self, supabase: SupabaseDB, filled_sids: set[int], config: Settings
+        self, supabase: SupabaseDB, filled_sids: set[int]
     ) -> dict[int, dict]:
-        """Force-exit statuses for the filled set, throttled to spare the 1-2s loop from
-        re-querying the pooler every cycle while positions sit filled (common when a close
-        is blocked by spread/market hours). A signal not yet in the cached set forces an
-        immediate refetch — so a fresh fill or a post-restart set is never gated — and a
-        fetch failure reuses the last snapshot so force-exits survive a brief pooler blip."""
+        """Force-exit statuses for the filled set, behind the rev-gated egress cache:
+        the sync-state poll drops the cache when the signals_rev watermark moves (a
+        status flip is a signals write), so the max-age is only a safety net — or the
+        legacy interval when the watermark is absent. A signal not yet in the cached
+        set forces an immediate refetch — so a fresh fill or a post-restart set is
+        never gated — and a fetch failure reuses the last snapshot so force-exits
+        survive a brief pooler blip."""
+        max_age = _STATUS_MAX_AGE if self._signals_rev is not None else _STATUS_MAX_AGE_LEGACY
         cache_now = time.monotonic()
         if (
             self._status_cache is None
             or bool(filled_sids - self._status_requested)
-            or (cache_now - self._status_cache_at)
-            >= config.polling.forced_exit_status_interval_seconds
+            or (cache_now - self._status_cache_at) >= max_age
         ):
             try:
                 self._status_cache = await supabase.fetch_signal_statuses(list(filled_sids))
@@ -1805,7 +1830,7 @@ class SyncCycle:
             self._last_signal_status.clear()
             return
 
-        status_map = await self._filled_statuses(supabase, filled_sids, config)
+        status_map = await self._filled_statuses(supabase, filled_sids)
 
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
         all_filled_rows = filled_rows
@@ -2024,7 +2049,7 @@ class SyncCycle:
         if not filled_sids:
             return
 
-        status_map = await self._filled_statuses(supabase, filled_sids, config)
+        status_map = await self._filled_statuses(supabase, filled_sids)
         pos_by_ticket = {p.ticket: p for p in mt5_positions}
 
         for row in filled_rows:
@@ -2114,9 +2139,7 @@ class SyncCycle:
         if filled_rows is None:
             filled_rows = await sqlite.get_filled_positions()
         open_sids = {
-            row["signal_id"]
-            for row in filled_rows
-            if row["mt5_ticket"] not in self._closed_tickets
+            row["signal_id"] for row in filled_rows if row["mt5_ticket"] not in self._closed_tickets
         }
         filled_ever = await sqlite.get_signals_with_fills()
         for row in pending:

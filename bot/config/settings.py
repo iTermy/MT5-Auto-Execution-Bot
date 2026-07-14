@@ -255,11 +255,10 @@ class PollingConfig(BaseModel):
     tp_active_interval_seconds: int = 1
     tp_trailing_interval_seconds: int = 2
     license_heartbeat_seconds: int = 900
-    # Egress guard: the active-signal set and the news/vol mode gates change at
-    # human speed, so they're re-pulled on these slower intervals even while the
-    # 1s fill/TP loop keeps running against the last cached snapshot.
-    signal_fetch_interval_seconds: int = 5
-    mode_gate_interval_seconds: int = 15
+    # The active-signal set, force-exit statuses, and news/vol gates are no longer
+    # interval knobs: the sync cycle polls one tiny bot_mode_status row per cycle and
+    # refetches the heavy queries only when its signals_rev watermark moves (see
+    # sync_cycle for the fallback max-ages).
     # Feed health flips only on feed degradation and is a dashboard indicator, not a
     # trading gate, so it's pulled far less often than the news/vol mode gates.
     feed_health_interval_seconds: int = 60
@@ -267,11 +266,6 @@ class PollingConfig(BaseModel):
     # row's updated_at and cached 300s, so a few seconds of fetch staleness is
     # immaterial; a newly-appeared offset symbol still forces an immediate refetch.
     live_price_interval_seconds: int = 5
-    # Force-exit status polling for filled positions. Kept short (a manual TM close must
-    # land promptly) but throttled so a filled-but-uncloseable position — held open
-    # through spread/market-hours — doesn't re-query the pooler every 1s cycle. A newly
-    # filled signal forces an immediate refetch so a directive is never missed.
-    forced_exit_status_interval_seconds: int = 2
 
 
 class SpreadHourConfig(BaseModel):

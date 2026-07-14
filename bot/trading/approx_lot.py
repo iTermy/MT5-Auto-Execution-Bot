@@ -30,7 +30,7 @@ _INSTRUMENT_MEDIANS: dict[str, float] = {
     "GCQ26": 59.00,
     "DE30EUR": 1058.50,
     "US30USD": 431.00,
-    "UK100USD": 618.72,
+    "UK100GBP": 618.72,
     "AAPL.NAS": 16.38,
     "NVDA.NAS": 24.60,
     "AMZN.NAS": 33.66,

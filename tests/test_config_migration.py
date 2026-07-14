@@ -13,6 +13,7 @@ from bot.config.settings import (
     _MIGRATION_STOCK_SPREAD_EARLY,
     _MIGRATION_SYMBOL_MAP_BACKFILL,
     _MIGRATION_TP_INSTRUMENT_OVERRIDES,
+    _MIGRATION_UK100_SYMBOL_FIX,
     _OFFSET_BACKFILL_SYMBOLS,
     _RISKY_GOLD_CHANNEL_ID,
     _STOCK_PROXIMITY_OVERRIDES,
@@ -207,9 +208,9 @@ def test_symbol_map_backfill_adds_uk100_offset_and_default_maps(tmp_path) -> Non
     migrate_config(cfg)
 
     data = _read(cfg)
-    assert "UK100USD" in data["offset_instruments"]
+    assert "UK100GBP" in data["offset_instruments"]
     # Every missing default map is backfilled, not just the indices.
-    assert data["symbol_map"]["UK100USD"] == "UK100"
+    assert data["symbol_map"]["UK100GBP"] == "UK100"
     assert data["symbol_map"]["DE30EUR"] == "DE40"
     assert data["symbol_map"]["USOILSPOT"] == "XTIUSD"
     assert data["symbol_map"]["BTCUSDT"] == "BTCUSD"
@@ -228,7 +229,9 @@ def test_symbol_map_backfill_preserves_existing_maps(tmp_path) -> None:
 
     smap = _read(cfg)["symbol_map"]
     assert smap["DE30EUR"] == "GER40"  # custom map not forced to DE40
-    assert smap["UK100USD"] == "FTSE"  # custom map not forced to UK100
+    # The typo'd UK100USD key is renamed to UK100GBP, carrying the user's custom value.
+    assert "UK100USD" not in smap
+    assert smap["UK100GBP"] == "FTSE"  # custom map not forced to UK100
     assert smap["USOILSPOT"] == "XTIUSD"  # absent one still backfilled
 
 
@@ -239,11 +242,58 @@ def test_symbol_map_backfill_is_idempotent_and_respects_removal(tmp_path) -> Non
 
     # User removes the UK100 offset row after the one-time migration.
     data = _read(cfg)
-    data["offset_instruments"].remove("UK100USD")
+    data["offset_instruments"].remove("UK100GBP")
     _write(cfg, data)
 
     migrate_config(cfg)
-    assert "UK100USD" not in _read(cfg)["offset_instruments"]  # not re-added
+    assert "UK100GBP" not in _read(cfg)["offset_instruments"]  # not re-added
+
+
+def test_uk100_symbol_fix_renames_typo_on_existing_installs(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    # An install that already carried the UK100USD typo across all three locations.
+    _write(
+        cfg,
+        {
+            "offset_instruments": ["SPX500USD", "UK100USD"],
+            "symbol_map": {"UK100USD": "UK100"},
+            "tp_config": {
+                "instrument_overrides": {"UK100USD": {"standard": {"profit_threshold": 12.0}}}
+            },
+        },
+    )
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert "UK100USD" not in data["offset_instruments"]
+    assert "UK100GBP" in data["offset_instruments"]
+    assert "UK100USD" not in data["symbol_map"]
+    assert data["symbol_map"]["UK100GBP"] == "UK100"
+    overrides = data["tp_config"]["instrument_overrides"]
+    assert "UK100USD" not in overrides
+    assert overrides["UK100GBP"] == {"standard": {"profit_threshold": 12.0}}
+    assert _MIGRATION_UK100_SYMBOL_FIX in data["config_migrations"]
+
+
+def test_uk100_symbol_fix_drops_duplicate_when_correct_key_present(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    # Both keys present: the typo is dropped, the correct entry's value is kept.
+    _write(
+        cfg,
+        {
+            "offset_instruments": ["UK100USD", "UK100GBP"],
+            "symbol_map": {"UK100USD": "OLD", "UK100GBP": "UK100"},
+        },
+    )
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert data["offset_instruments"].count("UK100GBP") == 1
+    assert "UK100USD" not in data["offset_instruments"]
+    assert "UK100USD" not in data["symbol_map"]
+    assert data["symbol_map"]["UK100GBP"] == "UK100"
 
 
 def test_risky_gold_channel_disabled_by_default(tmp_path) -> None:

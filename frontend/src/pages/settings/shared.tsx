@@ -56,7 +56,7 @@ export const LOCKED_OFFSET_INSTRUMENTS = new Set([
   'US2000USD',
   'USOILSPOT',
   'DE30EUR',
-  'UK100USD',
+  'UK100GBP',
   'JP225',
 ])
 

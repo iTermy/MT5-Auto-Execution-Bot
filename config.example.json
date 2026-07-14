@@ -31,7 +31,7 @@
     "US30USD": "US30",
     "US2000USD": "US2000",
     "DE30EUR": "DE40",
-    "UK100USD": "UK100"
+    "UK100GBP": "UK100"
   },
   "stock_suffix": "-24",
   "symbol_suffixes": [],
@@ -52,7 +52,7 @@
     "US30USD",
     "US2000USD",
     "DE30EUR",
-    "UK100USD"
+    "UK100GBP"
   ],
   "offset_drift": {
     "indices": {
@@ -413,7 +413,7 @@
           "trailing_distance": 10.0
         }
       },
-      "UK100USD": {
+      "UK100GBP": {
         "standard": {
           "profit_threshold": 10.0,
           "trailing_distance": 10.0

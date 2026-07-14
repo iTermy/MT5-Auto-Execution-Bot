@@ -30,7 +30,7 @@ DEFAULT_OFFSET_INSTRUMENTS = [
     "US2000USD",
     "USOILSPOT",
     "DE30EUR",
-    "UK100USD",
+    "UK100GBP",
     "JP225",
 ]
 
@@ -46,7 +46,7 @@ _DEFAULT_SYMBOL_MAP = {
     "US30USD": "US30",
     "US2000USD": "US2000",
     "DE30EUR": "DE40",
-    "UK100USD": "UK100",
+    "UK100GBP": "UK100",
 }
 
 # Symbols every existing install should carry as offset-feed after updating. Applied
@@ -169,7 +169,7 @@ _CRYPTO_PROXIMITY_OVERRIDES = {"ETHUSDT": 40.0}
 _MIGRATION_CRYPTO_PROXIMITY = "crypto_proximity_overrides_v1"
 
 # Backfill TP instrument_overrides for traded instruments that were riding the
-# asset-class base: index aliases (DE40 == DE30EUR, UK100/UK100USD, F40), the XTIUSD
+# asset-class base: index aliases (DE40 == DE30EUR, UK100/UK100GBP, F40), the XTIUSD
 # oil alias (toll, mirroring USOILSPOT), GOOGL (mirrors GOOG), and higher-priced stocks
 # whose $5 stock-base trail closed them far too early. setdefault per instrument, so a
 # user who already tuned any of these keeps their own value.
@@ -180,7 +180,7 @@ _TP_INSTRUMENT_OVERRIDES: dict[str, dict] = {
         "swing": {"profit_threshold": 250.0, "trailing_distance": 250.0},
     },
     "UK100": {"standard": {"profit_threshold": 10.0, "trailing_distance": 10.0}},
-    "UK100USD": {"standard": {"profit_threshold": 10.0, "trailing_distance": 10.0}},
+    "UK100GBP": {"standard": {"profit_threshold": 10.0, "trailing_distance": 10.0}},
     "F40": {"standard": {"profit_threshold": 7.0, "trailing_distance": 7.0}},
     "XTIUSD": {"toll": {"profit_threshold": 0.4, "trailing_distance": 0.4}},
     "GOOGL.NAS": {
@@ -196,6 +196,12 @@ _TP_INSTRUMENT_OVERRIDES: dict[str, dict] = {
     "XOM.NYSE": {"profit_threshold": 0.3, "trailing_distance": 0.3, "partial_close_percent": 50},
 }
 _MIGRATION_TP_INSTRUMENT_OVERRIDES = "tp_instrument_overrides_backfill_v1"
+
+# Fix the UK 100 DB symbol typo (UK100USD → UK100GBP, the actual OANDA feed symbol) for
+# existing installs that carried the wrong key in offset_instruments, symbol_map, and
+# tp_config.instrument_overrides. Renames the entry in place (preserving any user-set
+# value) unless a correct UK100GBP entry already exists. Applied once per install.
+_MIGRATION_UK100_SYMBOL_FIX = "uk100_symbol_fix_v1"
 
 
 class SymbolSuffixRule(BaseModel):
@@ -541,10 +547,27 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
         data["config_migrations"] = applied
         changed = True
 
+    if _MIGRATION_UK100_SYMBOL_FIX not in applied:
+        offset = data.get("offset_instruments")
+        if isinstance(offset, list) and "UK100USD" in offset:
+            if "UK100GBP" in offset:
+                offset.remove("UK100USD")
+            else:
+                offset[offset.index("UK100USD")] = "UK100GBP"
+            data["offset_instruments"] = offset
+        for container, sub in (("symbol_map", None), ("tp_config", "instrument_overrides")):
+            node = data.get(container)
+            target = node.get(sub) if sub and isinstance(node, dict) else node
+            if isinstance(target, dict) and "UK100USD" in target:
+                target.setdefault("UK100GBP", target.pop("UK100USD"))
+        applied.append(_MIGRATION_UK100_SYMBOL_FIX)
+        data["config_migrations"] = applied
+        changed = True
+
     if _MIGRATION_SYMBOL_MAP_BACKFILL not in applied:
         offset = data.get("offset_instruments")
-        if isinstance(offset, list) and "UK100USD" not in offset:
-            offset.append("UK100USD")
+        if isinstance(offset, list) and "UK100GBP" not in offset:
+            offset.append("UK100GBP")
             data["offset_instruments"] = offset
         smap = data.get("symbol_map")
         if isinstance(smap, dict):

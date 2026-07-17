@@ -67,34 +67,23 @@ export function LotSizingSection({
             accent
             value={lotMode}
             options={[
-              { value: 'risk_percent', label: 'Risk %' },
+              {
+                value: 'risk_percent',
+                label: 'Risk %',
+                title:
+                  'Sizes each limit so it risks the chosen percentage of your account balance, based on its distance to the stop loss.',
+              },
               {
                 value: 'fixed',
-                label: (
-                  <>
-                    Fixed lot
-                    <span
-                      style={{ color: 'var(--pos)', marginLeft: 4 }}
-                      title="This lot-sizing method is recommended as it ensures more consistent results. Please find an appropriate fixed lot for all symbol types, and add overrides where necessary."
-                    >
-                      ★
-                    </span>
-                  </>
-                ),
+                label: 'Fixed lot',
+                title:
+                  'Places the same lot size on every limit of a signal. More limits means more total volume.',
               },
               {
                 value: 'total_lot',
-                label: (
-                  <>
-                    Total lot
-                    <span
-                      style={{ color: 'var(--warn)', marginLeft: 4 }}
-                      title="Experimental: The value selected gets distributed among limits. Example: Value = 1, # of Limits = 2, Each limit = 0.5. More limits = lower risk."
-                    >
-                      ★
-                    </span>
-                  </>
-                ),
+                label: 'Total lot',
+                title:
+                  "Splits the chosen lot size evenly across a signal's limits. Value 1 across 2 limits places 0.5 on each, so more limits means less per limit.",
               },
             ]}
             onChange={v => {

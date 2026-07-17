@@ -1,6 +1,7 @@
 interface SegOption {
   value: string
   label: React.ReactNode
+  title?: string
 }
 
 interface SegProps {
@@ -16,8 +17,14 @@ export function Seg({ value, options, onChange, accent }: SegProps) {
       {options.map(o => {
         const v = typeof o === 'string' ? o : o.value
         const label = typeof o === 'string' ? o : o.label
+        const title = typeof o === 'string' ? undefined : o.title
         return (
-          <button key={v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>
+          <button
+            key={v}
+            className={value === v ? 'on' : ''}
+            title={title}
+            onClick={() => onChange(v)}
+          >
             {label}
           </button>
         )

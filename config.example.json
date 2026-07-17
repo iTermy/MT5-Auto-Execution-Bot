@@ -52,7 +52,8 @@
     "US30USD",
     "US2000USD",
     "DE30EUR",
-    "UK100GBP"
+    "UK100GBP",
+    "JP225"
   ],
   "offset_drift": {
     "indices": {

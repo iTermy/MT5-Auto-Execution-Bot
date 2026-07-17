@@ -197,6 +197,13 @@ _TP_INSTRUMENT_OVERRIDES: dict[str, dict] = {
 }
 _MIGRATION_TP_INSTRUMENT_OVERRIDES = "tp_instrument_overrides_backfill_v1"
 
+# JP225 is OANDA-fed but was only ever listed in DEFAULT_OFFSET_INSTRUMENTS — never in
+# the shipped config.example.json nor any backfill — and that default only applies when
+# `offset_instruments` is absent entirely, which no install has. So every install treated
+# it as direct-feed and placed its limits/SL in the OANDA frame on a broker quoting ~150
+# points away. Applied once per install, so a user may still set it back to direct-feed.
+_MIGRATION_JP225_OFFSET = "jp225_offset_backfill_v1"
+
 # Fix the UK 100 DB symbol typo (UK100USD → UK100GBP, the actual OANDA feed symbol) for
 # existing installs that carried the wrong key in offset_instruments, symbol_map, and
 # tp_config.instrument_overrides. Renames the entry in place (preserving any user-set
@@ -575,6 +582,15 @@ def migrate_config(path: Path = _CONFIG_PATH) -> None:
                 smap.setdefault(db_sym, mt5_sym)
             data["symbol_map"] = smap
         applied.append(_MIGRATION_SYMBOL_MAP_BACKFILL)
+        data["config_migrations"] = applied
+        changed = True
+
+    if _MIGRATION_JP225_OFFSET not in applied:
+        offset = data.get("offset_instruments")
+        if isinstance(offset, list) and "JP225" not in offset:
+            offset.append("JP225")
+            data["offset_instruments"] = offset
+        applied.append(_MIGRATION_JP225_OFFSET)
         data["config_migrations"] = applied
         changed = True
 

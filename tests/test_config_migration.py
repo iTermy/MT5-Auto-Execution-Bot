@@ -1,9 +1,11 @@
 import json
+from pathlib import Path
 
 from bot.config.settings import (
     _CRYPTO_PROXIMITY_OVERRIDES,
     _MIGRATION_CRYPTO_PROXIMITY,
     _MIGRATION_INDEX_F40,
+    _MIGRATION_JP225_OFFSET,
     _MIGRATION_LIVE_PRICE_INTERVAL,
     _MIGRATION_OFFSET_BACKFILL,
     _MIGRATION_PROXIMITY_BUMP,
@@ -18,8 +20,11 @@ from bot.config.settings import (
     _RISKY_GOLD_CHANNEL_ID,
     _STOCK_PROXIMITY_OVERRIDES,
     _TP_INSTRUMENT_OVERRIDES,
+    DEFAULT_OFFSET_INSTRUMENTS,
     migrate_config,
 )
+
+_EXAMPLE_CONFIG = Path(__file__).resolve().parents[1] / "config.example.json"
 
 
 def _write(path, data: dict) -> None:
@@ -294,6 +299,49 @@ def test_uk100_symbol_fix_drops_duplicate_when_correct_key_present(tmp_path) -> 
     assert "UK100USD" not in data["offset_instruments"]
     assert "UK100USD" not in data["symbol_map"]
     assert data["symbol_map"]["UK100GBP"] == "UK100"
+
+
+def test_jp225_offset_backfilled_on_existing_installs(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"offset_instruments": ["SPX500USD"]})
+
+    migrate_config(cfg)
+
+    data = _read(cfg)
+    assert "JP225" in data["offset_instruments"]
+    assert "SPX500USD" in data["offset_instruments"]  # existing entries preserved
+    assert _MIGRATION_JP225_OFFSET in data["config_migrations"]
+
+
+def test_jp225_offset_no_duplicate_when_already_present(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"offset_instruments": ["JP225"]})
+
+    migrate_config(cfg)
+
+    assert _read(cfg)["offset_instruments"].count("JP225") == 1
+
+
+def test_jp225_offset_is_idempotent_and_respects_removal(tmp_path) -> None:
+    cfg = tmp_path / "config.json"
+    _write(cfg, {"offset_instruments": ["SPX500USD"]})
+    migrate_config(cfg)
+
+    # User switches JP225 back to direct-feed after the one-time migration.
+    data = _read(cfg)
+    data["offset_instruments"].remove("JP225")
+    _write(cfg, data)
+
+    migrate_config(cfg)
+    assert "JP225" not in _read(cfg)["offset_instruments"]  # not re-added
+
+
+def test_example_config_ships_every_default_offset_instrument() -> None:
+    # DEFAULT_OFFSET_INSTRUMENTS only applies when `offset_instruments` is absent, and
+    # the bundled template always sets it — so a symbol listed only in the default is
+    # silently direct-feed for every install (how JP225 placed in the wrong frame).
+    shipped = json.loads(_EXAMPLE_CONFIG.read_text())["offset_instruments"]
+    assert set(DEFAULT_OFFSET_INSTRUMENTS) == set(shipped)
 
 
 def test_risky_gold_channel_disabled_by_default(tmp_path) -> None:

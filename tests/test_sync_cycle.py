@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot.config.settings import ExcludedChannelAssetConfig
+from bot.config.settings import ExcludedChannelAssetConfig, SymbolSuffixRule
 from bot.core.sync_cycle import SyncCycle, _feed_for_symbol
 from tests.conftest import (
     make_account_info,
@@ -1147,6 +1147,70 @@ async def test_vol_guard_is_per_pair(sqlite_db, mock_mt5, sample_config) -> None
 
     mock_mt5.close_position.assert_not_called()
     assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8501}
+
+
+async def test_vol_guard_closes_crypto_position(sqlite_db, mock_mt5, sample_config) -> None:
+    # Crypto is exempt from news (24/7 markets don't share its liquidity events) but
+    # not from volatility, which is measured straight off the price.
+    sample_config.volatility_guard = True
+    sample_config.symbol_map = {"BTCUSDT": "BTCUSD"}
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8601, signal_id=1, symbol="BTCUSD", db_stop_loss=60000.0
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8601, symbol="BTCUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8601)
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="BTCUSDT")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_vol"
+    assert await sqlite_db.get_filled_positions() == []
+
+
+async def test_news_still_exempts_crypto_while_vol_guard_enabled(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # Splitting the token sets must not leak the news gate onto crypto.
+    sample_config.volatility_guard = True
+    sample_config.symbol_map = {"BTCUSDT": "BTCUSD"}
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8701, signal_id=1, symbol="BTCUSD", db_stop_loss=60000.0
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8701, symbol="BTCUSD")]
+
+    supabase = _mock_supabase(signals=[], news_mode="ALL", vol_guard=None)
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8701}
+
+
+async def test_vol_guard_matches_broker_suffixed_symbol(sqlite_db, mock_mt5, sample_config) -> None:
+    # TM writes the DB symbol (EURUSD); the position carries the broker's suffixed
+    # symbol (EURUSDm). The gate reverse-maps before matching, so the two still meet.
+    sample_config.volatility_guard = True
+    sample_config.symbol_suffixes = [
+        SymbolSuffixRule(suffix="m", asset_classes=["forex", "forex_jpy"])
+    ]
+    await _insert_filled(sqlite_db, mt5_ticket=8801, signal_id=1, symbol="EURUSDm")
+    mock_mt5.positions_get.return_value = [make_position(ticket=8801, symbol="EURUSDm")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8801)
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="EURUSD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert await sqlite_db.get_filled_positions() == []
 
 
 # ---------------------------------------------------------------------------

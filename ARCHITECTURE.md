@@ -236,7 +236,13 @@ proper (4:55–6:00 PM, `sl_strip_start`). Cancelled orders marked `spread_cance
 While a symbol is under news the bot (a) cancels its pending orders (same path as the spread gate) and (b) force-closes any filled positions on that symbol (`SyncCycle._check_news_exits`), mirroring the manual-cancel / breakeven force-exit.
 
 ## Volatility Guard (opt-in)
-`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated tokens, or `ALL`, NULL when calm), but per-pair: it writes the full forex pair (e.g. `EURUSD`, matching only that symbol) and `ALL` for gold. It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in the per-cycle sync-state poll (`SupabaseDB.fetch_sync_state`) and unions its tokens into the same gate set, so volatility tokens cancel pending orders and force-close filled positions through the exact same path, parsing, and crypto/24h exemptions as news. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
+`bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated tokens, or `ALL`, NULL when calm), but per-instrument: it writes the whole DB symbol (`EURUSD`, `NAS100USD`, `BTCUSDT`, `AMD.NAS` — matching only that instrument) and `ALL` for gold, which flags the market as a whole. TM covers forex, gold, indices, crypto, oil and stocks; non-forex thresholds are ~2x the execution bot's proximity distance over a 3-minute window, so an instrument only flags on a move twice the band its limits sit in.
+
+It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in the per-cycle sync-state poll (`SupabaseDB.fetch_sync_state`); volatility tokens cancel pending orders and force-close filled positions through the same path and parsing as news, tagged `force_vol` instead of `force_news`. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
+
+The two token sets stay **separate** (`SyncCycle._gate_symbols` → `_gated_by_news_or_vol`). The crypto / 24h-stock `_gate_exempt` carve-out exists because those markets don't share news' liquidity events — that reasoning doesn't transfer to volatility, which is measured straight off price. So vol tokens are matched *before* the exemption and news tokens *after*: crypto stays live through news but is gated by a real move. Unioning the sets (the original design) silently dropped every crypto and 24h-stock volatility token.
+
+Matching is always on **DB symbols**, never broker symbols: `is_blocked` resolves via `_CycleContext.instr_of` and `_check_news_exits` reverse-maps through `db_symbol_from_mt5`, so a `EURUSD` token gates a suffixed `EURUSDm` position on an Exness-style broker.
 
 ## Polling Strategy
 Scalp strategy — every second matters. The sync loop runs at 1s while any pending order or
@@ -294,7 +300,7 @@ type(standard/scalp/swing/toll/pa/1-1/risky), closed_reason, total_limits, chann
 **feed_health**: feed(PK), status(idle/healthy/down) — there is no `degraded` status
 **bot_mode_status**: singleton row — comma-separated tokens or `ALL`, NULL when
 inactive. news_mode uses currency/asset tokens (e.g. `EUR, GOLD`); vol_guard uses
-full pairs (e.g. `EURUSD`) plus `ALL` for gold. signals_rev is the write watermark
+whole DB instruments (e.g. `EURUSD, NAS100USD, BTCUSDT`) plus `ALL` for gold. signals_rev is the write watermark
 (TM-side statement triggers bump it on every signals/limits write) that drives the
 rev-gated caches above; when the column is absent the bot logs once and falls back
 to legacy interval polling

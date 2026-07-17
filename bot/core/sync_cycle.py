@@ -154,14 +154,15 @@ def _gate_exempt(instr: str, config: Settings) -> bool:
     )
 
 
-def _feed_for_symbol(db_sym: str, config: Settings) -> str:
-    """Return the TM feed name that serves this symbol."""
+def _feed_for_symbol(db_sym: str, config: Settings, live_prices: dict) -> str | None:
+    """The TM feed serving this symbol, read off the live_prices row TM wrote for it.
+    Inferring it from asset class instead got oil wrong (exness-fed, not oanda), so the
+    staleness gate watched the wrong feed's health. None when TM has written no row —
+    the proximity gate reports that case with the accurate reason."""
     if not needs_offset(db_sym, config):
         return "icmarkets"
-    ac = detect_asset_class(db_sym)
-    if ac == AssetClass.CRYPTO:
-        return "binance"
-    return "oanda"
+    row = live_prices.get(db_sym)
+    return row["feed"] if row is not None else None
 
 
 class SyncCycle:
@@ -905,8 +906,8 @@ class SyncCycle:
                 continue  # errors already counted by _resolve_symbols
             if needs_offset(db_sym, config) and db_sym in stale_instruments:
                 continue  # errors already counted by _stale_offset_instruments
-            feed = _feed_for_symbol(db_sym, config)
-            if feed in stale_feeds:
+            feed = _feed_for_symbol(db_sym, config, ctx.live_prices)
+            if feed is not None and feed in stale_feeds:
                 result.skipped += len(lids)
                 logger.info(
                     "Signal %d (%s): feed=%s is stale — skipping %d limit(s)",

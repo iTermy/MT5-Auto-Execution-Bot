@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from bot.config.settings import ExcludedChannelAssetConfig
-from bot.core.sync_cycle import SyncCycle
+from bot.core.sync_cycle import SyncCycle, _feed_for_symbol
 from tests.conftest import (
     make_account_info,
     make_order_info,
@@ -390,7 +390,14 @@ async def test_proximity_uses_feed_mid_for_offset_symbol(
     row["price_level"] = 4590.5
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},
+        live_prices={
+            "SPX500USD": {
+                "bid": 4590.0,
+                "ask": 4591.0,
+                "feed": "oanda",
+                "updated_at": datetime.now(UTC),
+            }
+        },
     )
     supabase.fetch_signal_status.return_value = "active"
     scheduler = _mock_scheduler(cancel_pending=False)
@@ -432,7 +439,14 @@ async def test_offset_drift_cancels_pending(sqlite_db, mock_mt5, sample_config) 
     row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},
+        live_prices={
+            "SPX500USD": {
+                "bid": 4590.0,
+                "ask": 4591.0,
+                "feed": "oanda",
+                "updated_at": datetime.now(UTC),
+            }
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -650,7 +664,14 @@ async def test_offset_drift_skipped_when_signal_marked_hit(
     row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},
+        live_prices={
+            "SPX500USD": {
+                "bid": 4590.0,
+                "ask": 4591.0,
+                "feed": "oanda",
+                "updated_at": datetime.now(UTC),
+            }
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -1368,7 +1389,14 @@ async def test_drift_skipped_when_sibling_already_filled(
     filled_row["price_level"] = 4510.0
     supabase = _mock_supabase(
         signals=[filled_row, pending_row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},
+        live_prices={
+            "SPX500USD": {
+                "bid": 4590.0,
+                "ask": 4591.0,
+                "feed": "oanda",
+                "updated_at": datetime.now(UTC),
+            }
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -1414,7 +1442,14 @@ async def test_drift_check_skipped_within_interval(sqlite_db, mock_mt5, sample_c
     row["price_level"] = 4590.5  # on the feed mid, so proximity drift stays out of it
     supabase = _mock_supabase(
         signals=[row],
-        live_prices={"SPX500USD": {"bid": 4590.0, "ask": 4591.0, "updated_at": datetime.now(UTC)}},
+        live_prices={
+            "SPX500USD": {
+                "bid": 4590.0,
+                "ask": 4591.0,
+                "feed": "oanda",
+                "updated_at": datetime.now(UTC),
+            }
+        },
     )
     scheduler = _mock_scheduler(cancel_pending=False)
 
@@ -1793,3 +1828,23 @@ async def test_signal_set_max_age_legacy_vs_watermark() -> None:
     assert supabase.fetch_signal_sets.await_count == 1
     await cycle._fetch_signal_sets_cached(supabase, set(), t0 + 61)
     assert supabase.fetch_signal_sets.await_count == 2
+
+
+def test_feed_for_symbol_reads_real_feed_not_asset_class(sample_config) -> None:
+    config = sample_config.model_copy(
+        update={"offset_instruments": ["USOILSPOT", "BTCUSDT", "SPX500USD"]}
+    )
+    live_prices = {
+        # Oil is exness-fed; an asset-class guess would call this "oanda" and watch
+        # the wrong feed's health.
+        "USOILSPOT": {"feed": "exness"},
+        "BTCUSDT": {"feed": "binance"},
+        "SPX500USD": {"feed": "oanda"},
+    }
+    assert _feed_for_symbol("USOILSPOT", config, live_prices) == "exness"
+    assert _feed_for_symbol("BTCUSDT", config, live_prices) == "binance"
+    assert _feed_for_symbol("SPX500USD", config, live_prices) == "oanda"
+    # Non-offset symbols are priced by the broker directly.
+    assert _feed_for_symbol("EURUSD", config, live_prices) == "icmarkets"
+    # No row written yet — no feed claim to make; proximity reports the real reason.
+    assert _feed_for_symbol("SPX500USD", config, {}) is None

@@ -1401,6 +1401,45 @@ async def test_expiry_cancel_keeps_position_open_on_weekday(
     assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9701}
 
 
+async def test_forced_exit_cancels_remaining_pending_limits(
+    sqlite_db, mock_mt5, sample_config
+) -> None:
+    # A breakeven force-exit must tear down the signal's still-pending limits in the same
+    # pass, even while the signal-sets fetch still lists that limit as active (its cache
+    # trails the status cache). Otherwise the pending could fill after the signal is dead.
+    await _insert_filled(sqlite_db, mt5_ticket=9801, signal_id=1, symbol="EURUSD")
+    await sqlite_db.insert_order(
+        limit_id=9802,
+        signal_id=1,
+        mt5_ticket=9802,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=9801, symbol="EURUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9801)
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=9802)
+
+    # Signal-sets fetch still shows the pending limit active — so the stale-pending sweep
+    # leaves it alone and only the force-exit path can cancel it.
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=9802, signal_id=1)])
+    supabase.fetch_signal_statuses.return_value = {1: {"status": "breakeven"}}
+    scheduler = _mock_scheduler(cancel_pending=False)
+    scheduler.is_weekend_window.return_value = False
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_breakeven"
+    mock_mt5.cancel_pending_order.assert_called_once_with(9802)
+    assert await sqlite_db.get_filled_positions() == []
+    assert await sqlite_db.get_pending_orders() == []
+
+
 # ---------------------------------------------------------------------------
 # Offset drift interval throttle: skip re-evaluation within 30 min window
 # ---------------------------------------------------------------------------

@@ -1956,6 +1956,17 @@ class SyncCycle:
                 if outcome == "failed":
                     all_handled = False
 
+            # Tear down the signal's remaining pending limits in the same pass, keyed on
+            # the status read that triggered the close — don't wait for the stale-pending
+            # sweep, whose signal-sets cache can trail by up to 60s. During volatility one
+            # of those entries could otherwise fill after the signal is already dead.
+            for prow in await sqlite.get_pending_by_signal(signal_id):
+                ok = await self._canceller.cancel_order(
+                    prow["mt5_ticket"], mt5_client, sqlite, spread=False
+                )
+                if not ok:
+                    all_handled = False
+
             if all_handled:
                 self._last_signal_status[signal_id] = current
             # else: leave previous status so next cycle retries

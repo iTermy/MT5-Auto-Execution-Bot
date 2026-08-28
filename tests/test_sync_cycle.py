@@ -1542,7 +1542,9 @@ async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) ->
 # ---------------------------------------------------------------------------
 
 
-async def _insert_filled(sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_loss=1.08500):
+async def _insert_filled(
+    sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_loss=1.08500, signal_type="standard"
+):
     await sqlite_db.insert_order(
         limit_id=mt5_ticket,
         signal_id=signal_id,
@@ -1551,7 +1553,7 @@ async def _insert_filled(sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_lo
         lot_size=0.10,
         placed_at="2026-01-01T00:00:00+00:00",
         db_stop_loss=db_stop_loss,
-        signal_type="standard",
+        signal_type=signal_type,
         symbol=symbol,
     )
     await sqlite_db.mark_filled(mt5_ticket, "2026-01-01T00:01:00+00:00")
@@ -1607,6 +1609,74 @@ async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_co
 
     mock_mt5.close_position.assert_not_called()
     assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8201}
+
+
+# ---------------------------------------------------------------------------
+# Swing exemption: swings ride out news entirely (pendings stay working, filled
+# positions stay open), but the volatility guard still applies to them.
+# ---------------------------------------------------------------------------
+
+
+async def test_news_does_not_exit_swing_position(sqlite_db, mock_mt5, sample_config) -> None:
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8401, signal_id=1, symbol="EURUSD", signal_type="swing"
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8401, symbol="EURUSD")]
+
+    supabase = _mock_supabase(signals=[], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8401}
+
+
+async def test_news_swing_pending_exempt(sqlite_db, mock_mt5, sample_config) -> None:
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=8501,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="swing",
+        symbol="EURUSD",
+    )
+    row = _make_supabase_row(limit_id=1, signal_id=1)
+    row["signal_type"] = "swing"
+    row["price_level"] = 1.10010  # near the mock mid so proximity drift leaves it alone
+    supabase = _mock_supabase(signals=[row], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_pending_orders()} == {8501}
+
+
+async def test_vol_guard_still_exits_swing_position(sqlite_db, mock_mt5, sample_config) -> None:
+    # The swing carve-out is news-only: volatility is a move that already happened
+    # in price, which hits a multi-day position like any other.
+    sample_config.volatility_guard = True
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8601, signal_id=1, symbol="EURUSD", signal_type="swing"
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8601, symbol="EURUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8601)
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="EURUSD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_vol"
 
 
 # ---------------------------------------------------------------------------

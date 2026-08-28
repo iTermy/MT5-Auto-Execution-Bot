@@ -98,6 +98,7 @@ _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
 # (near_miss, manual, news:*, spread_hour, late_market, risky_window) means the signal
 # was voided or falsely triggered, so we force-close on any day and asset class.
 _ROLLOVER_CANCEL_REASONS = frozenset({"expiry"})
+_NEWS_EXEMPT_TYPES = frozenset({"swing"})
 _SL_FAIL_MAX = 5
 _FORCE_EXIT_MAX_ATTEMPTS = 5
 
@@ -146,7 +147,9 @@ class _CycleContext:
         caller's `window` predicate."""
         if signal_type == "risky" and self.risky_disabled:
             return True
-        if _gated_by_news_or_vol(instr, self.news_symbols, self.vol_symbols, self.config):
+        if _gated_by_news_or_vol(
+            instr, signal_type, self.news_symbols, self.vol_symbols, self.config
+        ):
             return True
         if _gate_exempt(instr, self.config):
             return False
@@ -227,17 +230,25 @@ def _breakeven_in_spread_spike(
 
 
 def _gated_by_news_or_vol(
-    instr: str, news_symbols: frozenset[str], vol_symbols: frozenset[str], config: Settings
+    instr: str,
+    signal_type: str,
+    news_symbols: frozenset[str],
+    vol_symbols: frozenset[str],
+    config: Settings,
 ) -> bool:
     """True when the volatility guard or news mode gates this instrument.
 
-    The 24/7 exemption is news-specific: crypto and 24h stocks don't share the
-    liquidity events news mode guards against. Volatility is measured from price,
-    so a move that already happened applies to them like any other class — the
-    vol tokens are checked before the exemption, news tokens after."""
+    Two carve-outs, both news-only. Crypto and 24h stocks don't share the liquidity
+    events news mode guards against; swings are held for days, so a scheduled event
+    is noise on their horizon and flattening one at market pays the news spread to
+    exit a thesis the news hasn't touched. Volatility is measured straight off price,
+    so a move that already happened applies to every class and horizon alike — the
+    vol tokens are checked before both carve-outs, news tokens after."""
     if instrument_under_news(instr, vol_symbols):
         return True
-    return not _gate_exempt(instr, config) and instrument_under_news(instr, news_symbols)
+    if signal_type in _NEWS_EXEMPT_TYPES or _gate_exempt(instr, config):
+        return False
+    return instrument_under_news(instr, news_symbols)
 
 
 def _feed_for_symbol(db_sym: str, config: Settings, live_prices: dict) -> str | None:
@@ -2267,7 +2278,9 @@ class SyncCycle:
             if pos is None:
                 continue
             instr = db_symbol_from_mt5(row["symbol"] or "", config)
-            if not _gated_by_news_or_vol(instr, news_symbols, vol_symbols, config):
+            if not _gated_by_news_or_vol(
+                instr, row["signal_type"] or "", news_symbols, vol_symbols, config
+            ):
                 continue
             vol = instrument_under_news(instr, vol_symbols)
             await self._close_position_tracked(

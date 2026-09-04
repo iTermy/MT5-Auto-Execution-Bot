@@ -333,6 +333,12 @@ class SyncCycle:
         self.last_live_prices: dict = {}
         self.last_sqlite_pending_limit_ids: set[int] = set()
 
+    @property
+    def active_news_symbols(self) -> tuple[str, ...]:
+        if self._gates_cache is None:
+            return ()
+        return tuple(sorted(parse_news_symbols(self._gates_cache[0])))
+
     def _risky_sl_map(self, supabase_rows: list, config: Settings) -> dict[int, float]:
         """Custom shared stop-loss price per risky signal, or {} when no custom SL is
         configured. Measured from the signal's deepest limit (lowest for longs, highest

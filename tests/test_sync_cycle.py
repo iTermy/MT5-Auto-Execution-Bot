@@ -86,6 +86,15 @@ def _risky_row(signal_id, direction, price_level):
     }
 
 
+def test_active_news_symbols_exposes_cached_news_mode() -> None:
+    cycle = SyncCycle()
+    assert cycle.active_news_symbols == ()
+
+    cycle._gates_cache = ("USD, GOLD", None)
+
+    assert cycle.active_news_symbols == ("GOLD", "USD")
+
+
 def test_risky_sl_map_none_when_no_custom_sl() -> None:
     from tests.conftest import make_settings
 

@@ -49,6 +49,17 @@ function zonedTimeToLocalLabel(hhmm: string, tz: string): string {
 function buildBanners(status: StatusData | null, config: Config | null): BannerDef[] {
   const banners: BannerDef[] = []
 
+  const newsSymbols = status?.news_symbols ?? []
+  if (newsSymbols.length > 0) {
+    const scope = newsSymbols.includes('ALL') ? 'all supported markets' : newsSymbols.join(', ')
+    banners.push({
+      id: 'news-mode',
+      tone: 'danger',
+      title: 'News mode active',
+      text: `Trading is paused for ${scope}. Matching pending orders and filled positions are closed; crypto is exempt.`,
+    })
+  }
+
   // Two consecutive windows, one gate. The earlier daily_start..sl_strip_start slice
   // ("late-market") only blocks new orders — working limits and filled positions carry
   // on. The sl_strip_start..daily_end slice ("spread hour") is the teardown: pendings

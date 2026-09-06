@@ -239,6 +239,9 @@ export interface DashboardData {
 export interface TradeData {
   signal_id: number
   symbol: string
+  /** Backend-resolved asset class. `symbol` is the broker symbol, so never
+   * reclassify it client-side — see utils/assetClass.ts. */
+  asset_class?: string
   direction: string
   total_lots: number
   placed_at: string

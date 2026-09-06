@@ -11,7 +11,7 @@ import {
 } from '../utils/stats'
 import { directionFromOrderType } from '../utils/orderType'
 import { badgeClassFor, formatSignalType } from '../utils/signalType'
-import { ASSET_BASKET_LABELS, getAssetBasket } from '../utils/assetClass'
+import { ASSET_BASKET_LABELS, basketOf } from '../utils/assetClass'
 import { getChannelLabel } from '../utils/channels'
 import type { HistoryData, SignalType, TradeData } from '../types'
 
@@ -38,6 +38,7 @@ function formatTime(iso: string): string {
 interface SignalGroup {
   signalId: number
   symbol: string
+  assetClass: string
   direction: 'long' | 'short'
   totalLots: number
   totalPnl: number
@@ -53,6 +54,7 @@ function tradeToGroup(t: TradeData): SignalGroup {
   return {
     signalId: t.signal_id,
     symbol: t.symbol,
+    assetClass: t.asset_class ?? 'forex',
     direction: directionFromOrderType(t.direction),
     totalLots: t.total_lots,
     totalPnl: t.total_pnl,
@@ -138,7 +140,7 @@ export function HistoryPage() {
   }, [allGroups])
 
   const availableBaskets = useMemo(() => {
-    return [...new Set(allGroups.map(g => getAssetBasket(g.symbol)))].sort((a, b) =>
+    return [...new Set(allGroups.map(g => basketOf(g.assetClass)))].sort((a, b) =>
       ASSET_BASKET_LABELS[a].localeCompare(ASSET_BASKET_LABELS[b])
     )
   }, [allGroups])
@@ -147,7 +149,8 @@ export function HistoryPage() {
     return trades.filter(trade => {
       if (instrumentFilter !== 'all' && trade.symbol !== instrumentFilter) return false
       if (channelFilter !== 'all' && trade.channel_id !== channelFilter) return false
-      if (basketFilter !== 'all' && getAssetBasket(trade.symbol) !== basketFilter) return false
+      if (basketFilter !== 'all' && basketOf(trade.asset_class ?? 'forex') !== basketFilter)
+        return false
       if (typeFilter !== 'all' && trade.signal_type !== typeFilter) return false
       return true
     })
@@ -157,7 +160,7 @@ export function HistoryPage() {
     let rows = allGroups
     if (instrumentFilter !== 'all') rows = rows.filter(g => g.symbol === instrumentFilter)
     if (channelFilter !== 'all') rows = rows.filter(g => g.channelId === channelFilter)
-    if (basketFilter !== 'all') rows = rows.filter(g => getAssetBasket(g.symbol) === basketFilter)
+    if (basketFilter !== 'all') rows = rows.filter(g => basketOf(g.assetClass) === basketFilter)
     if (statusFilter !== 'all') rows = rows.filter(g => g.status === statusFilter)
     if (typeFilter !== 'all') {
       rows = rows.filter(g => g.signalType === typeFilter)
@@ -178,7 +181,7 @@ export function HistoryPage() {
   const basketBreakdown = useMemo(
     () =>
       computePerformanceBreakdown(analysisTrades, trade => {
-        const basket = getAssetBasket(trade.symbol)
+        const basket = basketOf(trade.asset_class ?? 'forex')
         return { key: basket, label: ASSET_BASKET_LABELS[basket] }
       }),
     [analysisTrades]
@@ -512,7 +515,7 @@ export function HistoryPage() {
                   <td>
                     <span className="sym">{g.symbol || '—'}</span>
                     <span className="signal-origin">
-                      {ASSET_BASKET_LABELS[getAssetBasket(g.symbol)]} ·{' '}
+                      {ASSET_BASKET_LABELS[basketOf(g.assetClass)]} ·{' '}
                       {getChannelLabel(g.channelId)}
                     </span>
                   </td>

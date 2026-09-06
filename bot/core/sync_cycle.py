@@ -147,7 +147,9 @@ class _CycleContext:
         caller's `window` predicate."""
         if signal_type == "risky" and self.risky_disabled:
             return True
-        if _gated_by_news_or_vol(instr, self.news_symbols, self.vol_symbols, self.config):
+        if _gated_by_news_or_vol(
+            instr, self.news_symbols, self.vol_symbols, self.config, signal_type
+        ):
             return True
         if _gate_exempt(instr, self.config):
             return False
@@ -228,7 +230,11 @@ def _breakeven_in_spread_spike(
 
 
 def _gated_by_news_or_vol(
-    instr: str, news_symbols: frozenset[str], vol_symbols: frozenset[str], config: Settings
+    instr: str,
+    news_symbols: frozenset[str],
+    vol_symbols: frozenset[str],
+    config: Settings,
+    signal_type: str,
 ) -> bool:
     """True when the volatility guard or news mode gates this instrument.
 
@@ -238,7 +244,11 @@ def _gated_by_news_or_vol(
     vol tokens are checked before the exemption, news tokens after."""
     if instrument_under_news(instr, vol_symbols):
         return True
-    return not _gate_exempt(instr, config) and instrument_under_news(instr, news_symbols)
+    return (
+        signal_type != "swing"
+        and not _gate_exempt(instr, config)
+        and instrument_under_news(instr, news_symbols)
+    )
 
 
 def _feed_for_symbol(db_sym: str, config: Settings, live_prices: dict) -> str | None:
@@ -2288,7 +2298,9 @@ class SyncCycle:
             if pos is None:
                 continue
             instr = db_symbol_from_mt5(row["symbol"] or "", config)
-            if not _gated_by_news_or_vol(instr, news_symbols, vol_symbols, config):
+            if not _gated_by_news_or_vol(
+                instr, news_symbols, vol_symbols, config, row["signal_type"]
+            ):
                 continue
             vol = instrument_under_news(instr, vol_symbols)
             await self._close_position_tracked(

@@ -1544,7 +1544,9 @@ async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) ->
 # ---------------------------------------------------------------------------
 
 
-async def _insert_filled(sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_loss=1.08500):
+async def _insert_filled(
+    sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_loss=1.08500, signal_type="standard"
+):
     await sqlite_db.insert_order(
         limit_id=mt5_ticket,
         signal_id=signal_id,
@@ -1553,7 +1555,7 @@ async def _insert_filled(sqlite_db, *, mt5_ticket, signal_id, symbol, db_stop_lo
         lot_size=0.10,
         placed_at="2026-01-01T00:00:00+00:00",
         db_stop_loss=db_stop_loss,
-        signal_type="standard",
+        signal_type=signal_type,
         symbol=symbol,
     )
     await sqlite_db.mark_filled(mt5_ticket, "2026-01-01T00:01:00+00:00")
@@ -2583,3 +2585,53 @@ def test_feed_for_symbol_reads_real_feed_not_asset_class(sample_config) -> None:
     assert _feed_for_symbol("EURUSD", config, live_prices) == "icmarkets"
     # No row written yet — no feed claim to make; proximity reports the real reason.
     assert _feed_for_symbol("SPX500USD", config, {}) is None
+
+
+@pytest.mark.parametrize("news_mode", ["USD", "ALL"])
+async def test_news_allows_swing_placement_and_keeps_pending(
+    sqlite_db, mock_mt5, sample_config, news_mode
+) -> None:
+    mock_mt5.account_info.return_value = make_account_info()
+    mock_mt5.order_send.return_value = make_order_result(ticket=7001)
+    mock_mt5.order_get_by_ticket.return_value = None
+    swing = _make_supabase_row()
+    swing["signal_type"] = "swing"
+    swing["price_level"] = 1.09990
+    supabase = _mock_supabase(signals=[swing], news_mode=news_mode)
+    supabase.fetch_signal_status.return_value = "active"
+    scheduler = _mock_scheduler(cancel_pending=False)
+    cycle = SyncCycle()
+
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+    assert result.placed == 1
+    assert len(await sqlite_db.get_pending_orders()) == 1
+
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+    mock_mt5.cancel_pending_order.assert_not_called()
+    assert len(await sqlite_db.get_pending_orders()) == 1
+
+
+@pytest.mark.parametrize("news_mode", ["USD", "ALL"])
+@pytest.mark.parametrize("vol_guard", [None, "EURUSD"])
+async def test_swing_news_exemption_preserves_volatility_exits(
+    sqlite_db, mock_mt5, sample_config, news_mode, vol_guard
+) -> None:
+    sample_config.volatility_guard = True
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8001, signal_id=1, symbol="EURUSD", signal_type="swing"
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8001, symbol="EURUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8001)
+    supabase = _mock_supabase(signals=[], news_mode=news_mode, vol_guard=vol_guard)
+
+    await SyncCycle().run(
+        supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler(cancel_pending=False)
+    )
+
+    if vol_guard:
+        mock_mt5.close_position.assert_called_once()
+        assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_vol"
+        assert await sqlite_db.get_filled_positions() == []
+    else:
+        mock_mt5.close_position.assert_not_called()
+        assert len(await sqlite_db.get_filled_positions()) == 1

@@ -51,12 +51,14 @@ function buildBanners(status: StatusData | null, config: Config | null): BannerD
 
   const newsSymbols = status?.news_symbols ?? []
   if (newsSymbols.length > 0) {
-    const scope = newsSymbols.includes('ALL') ? 'all supported markets' : newsSymbols.join(', ')
+    const scope = newsSymbols.includes('ALL') ? 'all symbols' : newsSymbols.join(', ')
     banners.push({
       id: 'news-mode',
       tone: 'danger',
       title: 'News mode active',
-      text: `Trading is paused for ${scope}. Matching pending orders and filled positions are closed; crypto is exempt.`,
+      text: newsSymbols.includes('ALL')
+        ? 'News mode is enabled for all symbols. New orders are blocked on every symbol, including crypto and 24-hour stocks.'
+        : `News mode is enabled for ${scope}. Matching orders are blocked and pending orders and filled positions are closed; crypto and 24-hour stocks are exempt.`,
     })
   }
 
@@ -171,7 +173,7 @@ export function WarningBanners({ status, config }: Props) {
     })
   }, [activeKey])
 
-  const visible = banners.filter(b => !dismissed.has(b.id))
+  const visible = banners.filter(b => b.id === 'news-mode' || !dismissed.has(b.id))
   if (visible.length === 0) return null
 
   return (
@@ -183,13 +185,15 @@ export function WarningBanners({ status, config }: Props) {
             <div className="license-banner-title">{b.title}</div>
             <div className="license-banner-text">{b.text}</div>
           </div>
-          <button
-            className="banner-close"
-            aria-label="Dismiss"
-            onClick={() => setDismissed(s => new Set(s).add(b.id))}
-          >
-            <Icon name="x" size={16} />
-          </button>
+          {b.id !== 'news-mode' && (
+            <button
+              className="banner-close"
+              aria-label="Dismiss"
+              onClick={() => setDismissed(s => new Set(s).add(b.id))}
+            >
+              <Icon name="x" size={16} />
+            </button>
+          )}
         </div>
       ))}
     </>

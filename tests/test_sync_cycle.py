@@ -1520,7 +1520,7 @@ async def test_news_all_cancels_every_pending(sqlite_db, mock_mt5, sample_config
 
 
 async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) -> None:
-    # BTCUSDT pending survives even under ALL news (crypto is 24/7, exempt).
+    # Targeted news retains the crypto exemption.
     await sqlite_db.insert_order(
         limit_id=1,
         signal_id=1,
@@ -1534,7 +1534,7 @@ async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) ->
     )
     btc = _make_supabase_row(limit_id=1, signal_id=1, instrument="BTCUSDT")
     btc["stop_loss"] = 60000.0
-    supabase = _mock_supabase(signals=[btc], news_mode="ALL")
+    supabase = _mock_supabase(signals=[btc], news_mode="BTCUSDT")
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -2558,3 +2558,25 @@ def test_feed_for_symbol_reads_real_feed_not_asset_class(sample_config) -> None:
     assert _feed_for_symbol("EURUSD", config, live_prices) == "icmarkets"
     # No row written yet — no feed claim to make; proximity reports the real reason.
     assert _feed_for_symbol("SPX500USD", config, {}) is None
+
+
+@pytest.mark.parametrize("instrument", ["EURUSD", "BTCUSDT", "AMD.NAS"])
+async def test_all_news_blocks_every_new_order(
+    sqlite_db, mock_mt5, sample_config, instrument
+) -> None:
+    supabase = _mock_supabase(signals=[_make_supabase_row(instrument=instrument)], news_mode="ALL")
+    cycle = SyncCycle()
+    for _ in range(2):
+        result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+        assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert cycle.active_news_symbols == ("ALL",)
+
+
+async def test_failed_news_poll_blocks_new_orders(sqlite_db, mock_mt5, sample_config) -> None:
+    supabase = _mock_supabase(signals=[_make_supabase_row()])
+    supabase.fetch_sync_state.side_effect = RuntimeError("poll unavailable")
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()

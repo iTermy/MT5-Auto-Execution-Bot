@@ -155,7 +155,9 @@ class _CycleContext:
 
     def is_blocked(self, instr: str, signal_type: str = "standard") -> bool:
         """Placement gate — no new exposure from daily_start (late market) on."""
-        return self._gated(instr, signal_type, self.scheduler.should_block_placement)
+        return "ALL" in self.news_symbols or self._gated(
+            instr, signal_type, self.scheduler.should_block_placement
+        )
 
     def cancel_blocked(self, instr: str, signal_type: str = "standard") -> bool:
         """Teardown gate — strictly narrower in time than is_blocked: an existing ladder
@@ -439,7 +441,8 @@ class SyncCycle:
         cache_now = time.monotonic()
         # Tiny per-cycle poll: news/vol gates + the signals_rev watermark. Runs before
         # the cached fetches below because a rev change is what invalidates them.
-        await self._poll_sync_state(supabase)
+        gates_fresh = await self._poll_sync_state(supabase)
+        placement_active = placement_active and gates_fresh
         signal_sets = await self._fetch_signal_sets_cached(supabase, filled_sids, cache_now)
 
         supabase_rows = None
@@ -1468,15 +1471,15 @@ class SyncCycle:
         self._signal_sets_cache_sids = filled_sids
         return signal_sets
 
-    async def _poll_sync_state(self, supabase: SupabaseDB) -> None:
+    async def _poll_sync_state(self, supabase: SupabaseDB) -> bool:
         """One tiny bot_mode_status row per cycle: the news/vol gate tokens plus the
         signals_rev watermark, which the TM-side triggers bump on every signals/limits
         write. A rev change drops the signal-set and status caches so the next read
         refetches immediately — that change-driven refetch is what lets the heavy
         queries run long fallback max-ages instead of re-pulling every few seconds.
         A failed poll leaves signal-set freshness unverifiable, so that cache is
-        dropped too (the refetch either succeeds or skips the placement phase, the
-        pre-watermark failure behavior); the status cache is kept — force-exits
+        dropped too and placement pauses until a successful poll;
+        the status cache is kept — force-exits
         deliberately ride out a pooler blip on the last-known snapshot.
         """
         try:
@@ -1484,12 +1487,13 @@ class SyncCycle:
         except Exception:
             logger.error("Failed to fetch sync state", exc_info=True)
             self._signal_sets_cache = None
-            return
+            return False
         self._gates_cache = (news_mode, vol_guard)
         if rev != self._signals_rev:
             self._signals_rev = rev
             self._signal_sets_cache = None
             self._status_cache = None
+        return True
 
     def _gate_symbols(self, config: Settings) -> tuple[frozenset[str], frozenset[str]]:
         """(news, volatility) gate tokens from the last sync-state poll.

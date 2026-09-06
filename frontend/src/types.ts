@@ -20,6 +20,7 @@ export interface StatusData {
   update_in_progress?: boolean
   update_progress?: number
   update_error?: string | null
+  news_symbols?: string[]
   spread_hour_active?: boolean
   sl_strip_active?: boolean
   market_closed?: boolean

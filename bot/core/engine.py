@@ -790,6 +790,7 @@ class Engine:
             "update_in_progress": self._update_in_progress,
             "update_progress": self._update_progress,
             "update_error": self._update_error,
+            "news_symbols": self._sync_cycle.active_news_symbols,
             # Gate out the weekend so the banner reflects only the genuine daily
             # spread-hour window — is_spread_hour() stays true all weekend (the
             # trading gates rely on that), which the "Market closed" banner covers.

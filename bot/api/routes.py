@@ -41,6 +41,7 @@ _STATUS_DEFAULTS: dict = {
     "update_in_progress": False,
     "update_progress": 0,
     "update_error": None,
+    "news_symbols": [],
     "spread_hour_active": False,
     "sl_strip_active": False,
     "market_closed": False,

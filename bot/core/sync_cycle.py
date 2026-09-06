@@ -239,17 +239,26 @@ def _gated_by_news_or_vol(
 ) -> bool:
     """True when the volatility guard or news mode gates this instrument.
 
-    Two carve-outs, both news-only. Crypto and 24h stocks don't share the liquidity
-    events news mode guards against; swings are held for days, so a scheduled event
-    is noise on their horizon and flattening one at market pays the news spread to
-    exit a thesis the news hasn't touched. Volatility is measured straight off price,
-    so a move that already happened applies to every class and horizon alike — the
-    vol tokens are checked before both carve-outs, news tokens after."""
+    Volatility is measured straight off price, so a move that already happened
+    applies to every class and horizon alike — the vol tokens are checked first.
+
+    Then the swing carve-out, which outranks even an ALL news token: a swing is held
+    for days, so a scheduled event is noise on its horizon and flattening one at market
+    pays the news spread to exit a thesis the news hasn't touched. Breadth doesn't
+    change that — 'market-wide' says how many instruments the event touches, not how
+    long it matters for.
+
+    An ALL token then gates everything else, crypto and 24h stocks included: a
+    market-wide halt is exactly the case where their 24/7 books stop being a reason
+    for exemption. Targeted news keeps that carve-out, since a scheduled release on
+    one currency isn't a liquidity event for them."""
     if instrument_under_news(instr, vol_symbols):
         return True
-    if signal_type in _NEWS_EXEMPT_TYPES or _gate_exempt(instr, config):
+    if signal_type in _NEWS_EXEMPT_TYPES:
         return False
-    return instrument_under_news(instr, news_symbols)
+    if "ALL" in news_symbols:
+        return True
+    return not _gate_exempt(instr, config) and instrument_under_news(instr, news_symbols)
 
 
 def _feed_for_symbol(db_sym: str, config: Settings, live_prices: dict) -> str | None:
@@ -344,6 +353,12 @@ class SyncCycle:
         self.last_supabase_rows: list | None = None
         self.last_live_prices: dict = {}
         self.last_sqlite_pending_limit_ids: set[int] = set()
+
+    @property
+    def active_news_symbols(self) -> tuple[str, ...]:
+        if self._gates_cache is None:
+            return ()
+        return tuple(sorted(parse_news_symbols(self._gates_cache[0])))
 
     def _risky_sl_map(self, supabase_rows: list, config: Settings) -> dict[int, float]:
         """Custom shared stop-loss price per risky signal, or {} when no custom SL is
@@ -445,7 +460,8 @@ class SyncCycle:
         cache_now = time.monotonic()
         # Tiny per-cycle poll: news/vol gates + the signals_rev watermark. Runs before
         # the cached fetches below because a rev change is what invalidates them.
-        await self._poll_sync_state(supabase)
+        gates_fresh = await self._poll_sync_state(supabase)
+        placement_active = placement_active and gates_fresh
         signal_sets = await self._fetch_signal_sets_cached(supabase, filled_sids, cache_now)
 
         supabase_rows = None
@@ -1486,15 +1502,15 @@ class SyncCycle:
         self._signal_sets_cache_sids = filled_sids
         return signal_sets
 
-    async def _poll_sync_state(self, supabase: SupabaseDB) -> None:
+    async def _poll_sync_state(self, supabase: SupabaseDB) -> bool:
         """One tiny bot_mode_status row per cycle: the news/vol gate tokens plus the
         signals_rev watermark, which the TM-side triggers bump on every signals/limits
         write. A rev change drops the signal-set and status caches so the next read
         refetches immediately — that change-driven refetch is what lets the heavy
         queries run long fallback max-ages instead of re-pulling every few seconds.
         A failed poll leaves signal-set freshness unverifiable, so that cache is
-        dropped too (the refetch either succeeds or skips the placement phase, the
-        pre-watermark failure behavior); the status cache is kept — force-exits
+        dropped too and placement pauses until a successful poll;
+        the status cache is kept — force-exits
         deliberately ride out a pooler blip on the last-known snapshot.
         """
         try:
@@ -1502,12 +1518,13 @@ class SyncCycle:
         except Exception:
             logger.error("Failed to fetch sync state", exc_info=True)
             self._signal_sets_cache = None
-            return
+            return False
         self._gates_cache = (news_mode, vol_guard)
         if rev != self._signals_rev:
             self._signals_rev = rev
             self._signal_sets_cache = None
             self._status_cache = None
+        return True
 
     def _gate_symbols(self, config: Settings) -> tuple[frozenset[str], frozenset[str]]:
         """(news, volatility) gate tokens from the last sync-state poll.

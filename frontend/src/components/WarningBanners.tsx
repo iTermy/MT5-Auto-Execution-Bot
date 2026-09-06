@@ -49,6 +49,19 @@ function zonedTimeToLocalLabel(hhmm: string, tz: string): string {
 function buildBanners(status: StatusData | null, config: Config | null): BannerDef[] {
   const banners: BannerDef[] = []
 
+  const newsSymbols = status?.news_symbols ?? []
+  if (newsSymbols.length > 0) {
+    const scope = newsSymbols.includes('ALL') ? 'all symbols' : newsSymbols.join(', ')
+    banners.push({
+      id: 'news-mode',
+      tone: 'danger',
+      title: 'News mode active',
+      text: newsSymbols.includes('ALL')
+        ? 'News mode is enabled for all symbols. New orders are blocked, pending orders are cancelled, and filled positions are closed on every symbol, including crypto and 24-hour stocks. Swing signals are exempt.'
+        : `News mode is enabled for ${scope}. Matching orders are blocked and pending orders and filled positions are closed; crypto, 24-hour stocks and swing signals are exempt.`,
+    })
+  }
+
   // Two consecutive windows, one gate. The earlier daily_start..sl_strip_start slice
   // ("late-market") only blocks new orders — working limits and filled positions carry
   // on. The sl_strip_start..daily_end slice ("spread hour") is the teardown: pendings
@@ -160,7 +173,7 @@ export function WarningBanners({ status, config }: Props) {
     })
   }, [activeKey])
 
-  const visible = banners.filter(b => !dismissed.has(b.id))
+  const visible = banners.filter(b => b.id === 'news-mode' || !dismissed.has(b.id))
   if (visible.length === 0) return null
 
   return (
@@ -172,13 +185,15 @@ export function WarningBanners({ status, config }: Props) {
             <div className="license-banner-title">{b.title}</div>
             <div className="license-banner-text">{b.text}</div>
           </div>
-          <button
-            className="banner-close"
-            aria-label="Dismiss"
-            onClick={() => setDismissed(s => new Set(s).add(b.id))}
-          >
-            <Icon name="x" size={16} />
-          </button>
+          {b.id !== 'news-mode' && (
+            <button
+              className="banner-close"
+              aria-label="Dismiss"
+              onClick={() => setDismissed(s => new Set(s).add(b.id))}
+            >
+              <Icon name="x" size={16} />
+            </button>
+          )}
         </div>
       ))}
     </>

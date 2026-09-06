@@ -20,6 +20,7 @@ export interface StatusData {
   update_in_progress?: boolean
   update_progress?: number
   update_error?: string | null
+  news_symbols?: string[]
   spread_hour_active?: boolean
   sl_strip_active?: boolean
   market_closed?: boolean
@@ -91,7 +92,6 @@ export interface RiskyConfig {
 
 export interface TPConfig {
   follow_server_tp?: boolean
-  follow_server_be?: boolean
   partial_close_percent: number
   forex: AssetTPConfig
   forex_jpy: AssetTPConfig
@@ -238,6 +238,9 @@ export interface DashboardData {
 export interface TradeData {
   signal_id: number
   symbol: string
+  /** Backend-resolved asset class. `symbol` is the broker symbol, so never
+   * reclassify it client-side — see utils/assetClass.ts. */
+  asset_class?: string
   direction: string
   total_lots: number
   placed_at: string

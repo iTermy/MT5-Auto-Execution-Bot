@@ -50,14 +50,12 @@ def _mock_supabase(
     vol_guard=None,
     hit_limit_ids=None,
     profit_limit_ids=None,
-    breakeven_limit_ids=None,
 ):
     sb = AsyncMock()
     sb.fetch_signal_sets.return_value = (
         signals or [],
         set(hit_limit_ids or []),
         dict(profit_limit_ids or {}),
-        dict(breakeven_limit_ids or {}),
     )
     sb.fetch_live_prices.return_value = live_prices or {}
     sb.fetch_signal_statuses.return_value = {}
@@ -86,6 +84,15 @@ def _risky_row(signal_id, direction, price_level):
         "direction": direction,
         "price_level": price_level,
     }
+
+
+def test_active_news_symbols_exposes_cached_news_mode() -> None:
+    cycle = SyncCycle()
+    assert cycle.active_news_symbols == ()
+
+    cycle._gates_cache = ("USD, GOLD", None)
+
+    assert cycle.active_news_symbols == ("GOLD", "USD")
 
 
 def test_risky_sl_map_none_when_no_custom_sl() -> None:
@@ -1513,7 +1520,7 @@ async def test_news_all_cancels_every_pending(sqlite_db, mock_mt5, sample_config
 
 
 async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) -> None:
-    # BTCUSDT pending survives even under ALL news (crypto is 24/7, exempt).
+    # Targeted news retains the crypto exemption.
     await sqlite_db.insert_order(
         limit_id=1,
         signal_id=1,
@@ -1527,7 +1534,7 @@ async def test_news_crypto_pending_exempt(sqlite_db, mock_mt5, sample_config) ->
     )
     btc = _make_supabase_row(limit_id=1, signal_id=1, instrument="BTCUSDT")
     btc["stop_loss"] = 60000.0
-    supabase = _mock_supabase(signals=[btc], news_mode="ALL")
+    supabase = _mock_supabase(signals=[btc], news_mode="BTCUSDT")
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -1603,7 +1610,7 @@ async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_co
     )
     mock_mt5.positions_get.return_value = [make_position(ticket=8201, symbol="BTCUSD")]
 
-    supabase = _mock_supabase(signals=[], news_mode="ALL")
+    supabase = _mock_supabase(signals=[], news_mode="BTCUSDT")
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -1611,6 +1618,74 @@ async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_co
 
     mock_mt5.close_position.assert_not_called()
     assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8201}
+
+
+# ---------------------------------------------------------------------------
+# Swing exemption: swings ride out news entirely (pendings stay working, filled
+# positions stay open), but the volatility guard still applies to them.
+# ---------------------------------------------------------------------------
+
+
+async def test_news_does_not_exit_swing_position(sqlite_db, mock_mt5, sample_config) -> None:
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8401, signal_id=1, symbol="EURUSD", signal_type="swing"
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8401, symbol="EURUSD")]
+
+    supabase = _mock_supabase(signals=[], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {8401}
+
+
+async def test_news_swing_pending_exempt(sqlite_db, mock_mt5, sample_config) -> None:
+    await sqlite_db.insert_order(
+        limit_id=1,
+        signal_id=1,
+        mt5_ticket=8501,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="swing",
+        symbol="EURUSD",
+    )
+    row = _make_supabase_row(limit_id=1, signal_id=1)
+    row["signal_type"] = "swing"
+    row["price_level"] = 1.10010  # near the mock mid so proximity drift leaves it alone
+    supabase = _mock_supabase(signals=[row], news_mode="ALL")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    assert result.cancelled == 0
+    mock_mt5.cancel_pending_order.assert_not_called()
+    assert {r["mt5_ticket"] for r in await sqlite_db.get_pending_orders()} == {8501}
+
+
+async def test_vol_guard_still_exits_swing_position(sqlite_db, mock_mt5, sample_config) -> None:
+    # The swing carve-out is news-only: volatility is a move that already happened
+    # in price, which hits a multi-day position like any other.
+    sample_config.volatility_guard = True
+    await _insert_filled(
+        sqlite_db, mt5_ticket=8601, signal_id=1, symbol="EURUSD", signal_type="swing"
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=8601, symbol="EURUSD")]
+    mock_mt5.close_position.return_value = make_order_result(ticket=8601)
+
+    supabase = _mock_supabase(signals=[], news_mode=None, vol_guard="EURUSD")
+    scheduler = _mock_scheduler(cancel_pending=False)
+
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, scheduler)
+
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_vol"
 
 
 # ---------------------------------------------------------------------------
@@ -1702,7 +1777,7 @@ async def test_news_still_exempts_crypto_while_vol_guard_enabled(
     )
     mock_mt5.positions_get.return_value = [make_position(ticket=8701, symbol="BTCUSD")]
 
-    supabase = _mock_supabase(signals=[], news_mode="ALL", vol_guard=None)
+    supabase = _mock_supabase(signals=[], news_mode="BTCUSDT", vol_guard=None)
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -1988,28 +2063,26 @@ async def test_forced_exit_cancels_remaining_pending_limits(
 
 
 async def _run_breakeven_exit(
-    sqlite_db, mock_mt5, sample_config, *, spike: bool, retain_server_limits: bool = False
+    sqlite_db, mock_mt5, sample_config, *, spike: bool, follow_server_tp: bool = False
 ) -> SyncCycle:
+    sample_config.tp_config.follow_server_tp = follow_server_tp
     await _insert_filled(sqlite_db, mt5_ticket=9811, signal_id=1, symbol="EURUSD")
-    if retain_server_limits:
-        await sqlite_db.insert_order(
-            limit_id=9812,
-            signal_id=1,
-            mt5_ticket=9812,
-            order_type="buy_limit",
-            lot_size=0.10,
-            placed_at="2026-01-01T00:00:00+00:00",
-            db_stop_loss=1.08500,
-            signal_type="standard",
-            symbol="EURUSD",
-        )
+    await sqlite_db.insert_order(
+        limit_id=9812,
+        signal_id=1,
+        mt5_ticket=9812,
+        order_type="buy_limit",
+        lot_size=0.10,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.08500,
+        signal_type="standard",
+        symbol="EURUSD",
+    )
     mock_mt5.positions_get.return_value = [make_position(ticket=9811, symbol="EURUSD")]
     mock_mt5.close_position.return_value = make_order_result(ticket=9811)
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=9812)
 
-    supabase = _mock_supabase(
-        signals=[] if retain_server_limits else [_make_supabase_row(limit_id=9812, signal_id=1)],
-        breakeven_limit_ids={9812: 1} if retain_server_limits else None,
-    )
+    supabase = _mock_supabase(signals=[_make_supabase_row(limit_id=9812, signal_id=1)])
     supabase.fetch_signal_statuses.return_value = {1: {"status": "breakeven"}}
     scheduler = _mock_scheduler(cancel_pending=spike)
     scheduler.is_weekend_window.return_value = False
@@ -2041,19 +2114,22 @@ async def test_breakeven_force_exit_fires_outside_the_spike(
     assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_breakeven"
 
 
-async def test_server_breakeven_is_ignored_when_follow_be_disabled(
+async def test_breakeven_closes_regardless_of_follow_server_tp(
     sqlite_db, mock_mt5, sample_config
 ) -> None:
-    sample_config.tp_config.follow_server_tp = True
-    sample_config.tp_config.follow_server_be = False
-    cycle = await _run_breakeven_exit(
-        sqlite_db, mock_mt5, sample_config, spike=False, retain_server_limits=True
+    """A TM breakeven is the signal service's own call to flatten, so it is
+    unconditional — it is not routed through the TP engine and no take-profit
+    setting can suppress it. Follow-server TP in particular must not: a breakeven
+    signal never reaches status 'profit', so nothing else would ever exit it."""
+    await _run_breakeven_exit(
+        sqlite_db, mock_mt5, sample_config, spike=False, follow_server_tp=True
     )
 
-    mock_mt5.close_position.assert_not_called()
-    assert {r["mt5_ticket"] for r in await sqlite_db.get_filled_positions()} == {9811}
-    assert {r["mt5_ticket"] for r in await sqlite_db.get_pending_orders()} == {9812}
-    assert cycle._last_signal_status.get(1) != "breakeven"
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_breakeven"
+    mock_mt5.cancel_pending_order.assert_called_once_with(9812)
+    assert await sqlite_db.get_filled_positions() == []
+    assert await sqlite_db.get_pending_orders() == []
 
 
 async def test_breakeven_force_exit_not_deferred_for_crypto(
@@ -2635,3 +2711,63 @@ async def test_swing_news_exemption_preserves_volatility_exits(
     else:
         mock_mt5.close_position.assert_not_called()
         assert len(await sqlite_db.get_filled_positions()) == 1
+
+
+@pytest.mark.parametrize("instrument", ["EURUSD", "BTCUSDT", "AMD.NAS"])
+async def test_all_news_blocks_every_new_order(
+    sqlite_db, mock_mt5, sample_config, instrument
+) -> None:
+    supabase = _mock_supabase(signals=[_make_supabase_row(instrument=instrument)], news_mode="ALL")
+    cycle = SyncCycle()
+    for _ in range(2):
+        result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+        assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+    assert cycle.active_news_symbols == ("ALL",)
+
+
+async def test_failed_news_poll_blocks_new_orders(sqlite_db, mock_mt5, sample_config) -> None:
+    supabase = _mock_supabase(signals=[_make_supabase_row()])
+    supabase.fetch_sync_state.side_effect = RuntimeError("poll unavailable")
+    cycle = SyncCycle()
+    result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+    assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "instrument,symbol", [("EURUSD", "EURUSD"), ("BTCUSDT", "BTCUSD"), ("AMD.NAS", "AMD-24")]
+)
+async def test_all_news_closes_fills_and_cancels_remaining_ladder(
+    sqlite_db, mock_mt5, sample_config, instrument, symbol
+) -> None:
+    sample_config.symbol_map = {instrument: symbol}
+    await _insert_filled(sqlite_db, mt5_ticket=9001, signal_id=1, symbol=symbol)
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=1,
+        mt5_ticket=9002,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.085,
+        signal_type="standard",
+        symbol=symbol,
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=9001, symbol=symbol)]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9001)
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=9002)
+    supabase = _mock_supabase(
+        signals=[_make_supabase_row(limit_id=2, instrument=instrument)], news_mode="ALL"
+    )
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_news"
+    mock_mt5.cancel_pending_order.assert_called_once_with(9002)
+    assert await sqlite_db.get_all_active() == []
+    mock_mt5.positions_get.return_value = []
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+    mock_mt5.close_position.assert_called_once()
+    mock_mt5.cancel_pending_order.assert_called_once()
+    mock_mt5.order_send.assert_not_called()

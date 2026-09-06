@@ -91,10 +91,14 @@ auto-TP'd ids on `SyncCycle.server_tp_signals` and `_tp_loop` hands that set to
 `TPEngine.run_cycle`. Manual `profit` is excluded — that path force-closes the whole
 position (see below) rather than running a TP.
 
-### Follow Server Breakeven (`tp_config.follow_server_be`, on by default)
-Controls the server `breakeven` directive independently of follow-server TP. When enabled,
-the bot force-closes filled positions and cancels the signal's remaining pending limits.
-When disabled, the directive is ignored and the trade continues under local management.
+### Server Breakeven (unconditional)
+A `breakeven` status from the signal service force-closes the signal's filled positions
+and cancels its remaining pending limits, and there is no setting that suppresses it —
+it is the service's own call to flatten, not a take-profit, so it never routes through
+the TP engine. Follow-server TP in particular must not gate it: a breakeven signal never
+reaches status `profit`, so nothing else would ever exit the trade. The only thing that
+defers it is the SL-strip window (see `_breakeven_in_spread_spike`), and that is a delay,
+not a cancellation.
 
 ### On Trigger
 - Earlier positions: close 100% at market
@@ -295,12 +299,14 @@ sees DB limit still pending + no active SQLite mapping).
 
 While a symbol is under news the bot (a) cancels its pending orders (same path as the spread gate) and (b) force-closes any filled positions on that symbol (`SyncCycle._check_news_exits`), mirroring the manual-cancel / breakeven force-exit.
 
+**`swing` signals are exempt** (`_NEWS_EXEMPT_TYPES`), alongside crypto and 24h stocks. A swing is held for days, so a scheduled event is noise on its horizon and flattening it at market pays the news spread to exit a thesis the news hasn't touched. The exemption is total — it lives in the one `_gated_by_news_or_vol` predicate that both the gate and the exit sweep call, so swing pendings keep working, new swing orders still place, and filled swings are never closed by news. Only news: the volatility guard, spread hour, late market and every status force-exit treat swings like anything else. The exit sweep reads `signal_type` off the `order_mappings` row, so it is the type captured at placement.
+
 ## Volatility Guard (opt-in)
 `bot_mode_status.vol_guard` is a second token column written by the signal service's volatility monitor — identical format to `news_mode` (comma-separated tokens, or `ALL`, NULL when calm), but per-instrument: it writes the whole DB symbol (`EURUSD`, `NAS100USD`, `BTCUSDT`, `AMD.NAS` — matching only that instrument) and `ALL` for gold, which flags the market as a whole. TM covers forex, gold, indices, crypto, oil and stocks; non-forex thresholds are ~2x the execution bot's proximity distance over a 3-minute window, so an instrument only flags on a move twice the band its limits sit in.
 
 It is **off by default and only consumed when the user enables `volatility_guard` in Misc settings**. When on, the sync cycle reads `vol_guard` alongside `news_mode` in the per-cycle sync-state poll (`SupabaseDB.fetch_sync_state`); volatility tokens cancel pending orders and force-close filled positions through the same path and parsing as news, tagged `force_vol` instead of `force_news`. When off, the column is read but its tokens are dropped, so the guard has no effect. Reaction time tracks the existing sync cadence (1s while any order/position is live).
 
-The two token sets stay **separate** (`SyncCycle._gate_symbols` → `_gated_by_news_or_vol`). The crypto / 24h-stock `_gate_exempt` carve-out exists because those markets don't share news' liquidity events — that reasoning doesn't transfer to volatility, which is measured straight off price. So vol tokens are matched *before* the exemption and news tokens *after*: crypto stays live through news but is gated by a real move. Unioning the sets (the original design) silently dropped every crypto and 24h-stock volatility token.
+The two token sets stay **separate** (`SyncCycle._gate_symbols` → `_gated_by_news_or_vol`). News' carve-outs exist for reasons that don't transfer to volatility: crypto and 24h stocks don't share news' liquidity events, and a swing outlives a scheduled release — but volatility is measured straight off price, so a move that already happened reaches every market and every horizon. Vol tokens are therefore matched *before* both carve-outs and news tokens *after*: crypto and swings stay live through news but are still gated by a real move. Unioning the sets (the original design) silently dropped every crypto and 24h-stock volatility token.
 
 Matching is always on **DB symbols**, never broker symbols: `is_blocked` resolves via `_CycleContext.instr_of` and `_check_news_exits` reverse-maps through `db_symbol_from_mt5`, so a `EURUSD` token gates a suffixed `EURUSDm` position on an Exness-style broker.
 

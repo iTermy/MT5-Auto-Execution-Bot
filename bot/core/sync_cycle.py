@@ -98,6 +98,7 @@ _FORCE_EXIT_STATUSES = frozenset({"cancelled", "breakeven"})
 # (near_miss, manual, news:*, spread_hour, late_market, risky_window) means the signal
 # was voided or falsely triggered, so we force-close on any day and asset class.
 _ROLLOVER_CANCEL_REASONS = frozenset({"expiry"})
+_NEWS_EXEMPT_TYPES = frozenset({"swing"})
 _SL_FAIL_MAX = 5
 _FORCE_EXIT_MAX_ATTEMPTS = 5
 
@@ -119,7 +120,6 @@ class _CycleContext:
     supabase_rows: list  # active pending limits (exclusions applied)
     hit_limit_ids: set[int]  # TM-marked 'hit' limits on live signals
     profit_held_limit_ids: set[int]  # pending limits spared on profit-marked signals
-    ignored_be_limit_ids: set[int]  # pending limits spared when server BE is disabled
     supabase_by_limit: dict[int, dict]
     supabase_limit_ids: set[int]
     sqlite_limit_ids: set[int]
@@ -148,7 +148,7 @@ class _CycleContext:
         if signal_type == "risky" and self.risky_disabled:
             return True
         if _gated_by_news_or_vol(
-            instr, self.news_symbols, self.vol_symbols, self.config, signal_type
+            instr, signal_type, self.news_symbols, self.vol_symbols, self.config
         ):
             return True
         if _gate_exempt(instr, self.config):
@@ -231,24 +231,33 @@ def _breakeven_in_spread_spike(
 
 def _gated_by_news_or_vol(
     instr: str,
+    signal_type: str,
     news_symbols: frozenset[str],
     vol_symbols: frozenset[str],
     config: Settings,
-    signal_type: str,
 ) -> bool:
     """True when the volatility guard or news mode gates this instrument.
 
-    The 24/7 exemption is news-specific: crypto and 24h stocks don't share the
-    liquidity events news mode guards against. Volatility is measured from price,
-    so a move that already happened applies to them like any other class — the
-    vol tokens are checked before the exemption, news tokens after."""
+    Volatility is measured straight off price, so a move that already happened
+    applies to every class and horizon alike — the vol tokens are checked first.
+
+    Then the swing carve-out, which outranks even an ALL news token: a swing is held
+    for days, so a scheduled event is noise on its horizon and flattening one at market
+    pays the news spread to exit a thesis the news hasn't touched. Breadth doesn't
+    change that — 'market-wide' says how many instruments the event touches, not how
+    long it matters for.
+
+    An ALL token then gates everything else, crypto and 24h stocks included: a
+    market-wide halt is exactly the case where their 24/7 books stop being a reason
+    for exemption. Targeted news keeps that carve-out, since a scheduled release on
+    one currency isn't a liquidity event for them."""
     if instrument_under_news(instr, vol_symbols):
         return True
-    return (
-        signal_type != "swing"
-        and not _gate_exempt(instr, config)
-        and instrument_under_news(instr, news_symbols)
-    )
+    if signal_type in _NEWS_EXEMPT_TYPES:
+        return False
+    if "ALL" in news_symbols:
+        return True
+    return not _gate_exempt(instr, config) and instrument_under_news(instr, news_symbols)
 
 
 def _feed_for_symbol(db_sym: str, config: Settings, live_prices: dict) -> str | None:
@@ -316,7 +325,7 @@ class SyncCycle:
         # the watermark is unavailable (legacy DB) the legacy intervals drive
         # refetching exactly as before.
         self._signals_rev: int | None = None
-        self._signal_sets_cache: tuple[list, set[int], dict[int, int], dict[int, int]] | None = None
+        self._signal_sets_cache: tuple[list, set[int], dict[int, int]] | None = None
         self._signal_sets_cache_at: float = 0.0
         self._signal_sets_cache_sids: set[int] = set()
         self._gates_cache: tuple[str | None, str | None] | None = None
@@ -343,6 +352,12 @@ class SyncCycle:
         self.last_supabase_rows: list | None = None
         self.last_live_prices: dict = {}
         self.last_sqlite_pending_limit_ids: set[int] = set()
+
+    @property
+    def active_news_symbols(self) -> tuple[str, ...]:
+        if self._gates_cache is None:
+            return ()
+        return tuple(sorted(parse_news_symbols(self._gates_cache[0])))
 
     def _risky_sl_map(self, supabase_rows: list, config: Settings) -> dict[int, float]:
         """Custom shared stop-loss price per risky signal, or {} when no custom SL is
@@ -444,20 +459,15 @@ class SyncCycle:
         cache_now = time.monotonic()
         # Tiny per-cycle poll: news/vol gates + the signals_rev watermark. Runs before
         # the cached fetches below because a rev change is what invalidates them.
-        await self._poll_sync_state(supabase)
+        gates_fresh = await self._poll_sync_state(supabase)
+        placement_active = placement_active and gates_fresh
         signal_sets = await self._fetch_signal_sets_cached(supabase, filled_sids, cache_now)
 
         supabase_rows = None
         hit_limit_ids: set[int] = set()
         profit_limit_signal: dict[int, int] = {}
-        breakeven_limit_signal: dict[int, int] = {}
         if signal_sets is not None:
-            (
-                supabase_rows,
-                hit_limit_ids,
-                profit_limit_signal,
-                breakeven_limit_signal,
-            ) = signal_sets
+            supabase_rows, hit_limit_ids, profit_limit_signal = signal_sets
             supabase_rows = self._apply_exclusions(supabase_rows, config)
 
             # Skipped/manual signals are dropped from the working pending set so no
@@ -481,17 +491,12 @@ class SyncCycle:
             # still hold a filled position for. The TM marking 'profit' drops the signal
             # out of the active set, but we keep its remaining entries live until our own
             # TP engine closes the trade — once we're flat the signal leaves filled_sids
-            # and the limits fall back to normal stale-cancellation. The same scoped fetch
-            # also exposes breakeven-marked limits so they can be preserved when server BE
-            # is disabled.
+            # and the limits fall back to normal stale-cancellation. Both sets come from
+            # the single fetch_signal_sets round-trip above (its 'profit' branch is already
+            # scoped to filled_sids, so this filter is exact rather than a pruning step).
             profit_held_limit_ids = {
                 lid for lid, sid in profit_limit_signal.items() if sid in filled_sids
             }
-            ignored_be_limit_ids = (
-                {lid for lid, sid in breakeven_limit_signal.items() if sid in filled_sids}
-                if not config.tp_config.follow_server_be
-                else set()
-            )
 
             # Per-symbol spread-hour / news-mode gate. Crypto and 24h stocks are exempt
             # (24/7 markets). Stocks use an earlier cutoff because they close at 16:00 EST
@@ -525,7 +530,6 @@ class SyncCycle:
                 supabase_rows=supabase_rows,
                 hit_limit_ids=hit_limit_ids,
                 profit_held_limit_ids=profit_held_limit_ids,
-                ignored_be_limit_ids=ignored_be_limit_ids,
                 supabase_by_limit=supabase_by_limit,
                 supabase_limit_ids=supabase_limit_ids,
                 sqlite_limit_ids=sqlite_limit_ids,
@@ -1451,7 +1455,7 @@ class SyncCycle:
 
     async def _fetch_signal_sets_cached(
         self, supabase: SupabaseDB, filled_sids: set[int], cache_now: float
-    ) -> tuple[list, set[int], dict[int, int], dict[int, int]] | None:
+    ) -> tuple[list, set[int], dict[int, int]] | None:
         """Active-signal fetch behind the rev-gated egress cache.
 
         The sync-state poll drops the cache whenever the signals_rev watermark
@@ -1485,15 +1489,15 @@ class SyncCycle:
         self._signal_sets_cache_sids = filled_sids
         return signal_sets
 
-    async def _poll_sync_state(self, supabase: SupabaseDB) -> None:
+    async def _poll_sync_state(self, supabase: SupabaseDB) -> bool:
         """One tiny bot_mode_status row per cycle: the news/vol gate tokens plus the
         signals_rev watermark, which the TM-side triggers bump on every signals/limits
         write. A rev change drops the signal-set and status caches so the next read
         refetches immediately — that change-driven refetch is what lets the heavy
         queries run long fallback max-ages instead of re-pulling every few seconds.
         A failed poll leaves signal-set freshness unverifiable, so that cache is
-        dropped too (the refetch either succeeds or skips the placement phase, the
-        pre-watermark failure behavior); the status cache is kept — force-exits
+        dropped too and placement pauses until a successful poll;
+        the status cache is kept — force-exits
         deliberately ride out a pooler blip on the last-known snapshot.
         """
         try:
@@ -1501,12 +1505,13 @@ class SyncCycle:
         except Exception:
             logger.error("Failed to fetch sync state", exc_info=True)
             self._signal_sets_cache = None
-            return
+            return False
         self._gates_cache = (news_mode, vol_guard)
         if rev != self._signals_rev:
             self._signals_rev = rev
             self._signal_sets_cache = None
             self._status_cache = None
+        return True
 
     def _gate_symbols(self, config: Settings) -> tuple[frozenset[str], frozenset[str]]:
         """(news, volatility) gate tokens from the last sync-state poll.
@@ -1607,9 +1612,9 @@ class SyncCycle:
         A limit the TM marked 'hit' on a still-live signal is spared: hold the
         order so a sub-pip price mismatch still fills. Genuine cancels/closes drop
         the signal out of hit_limit_ids, so those orders are still cancelled.
-        Pending limits on a 'profit'-marked signal we still hold a position for are
-        likewise spared until our TP engine closes the trade. Breakeven-marked limits
-        are spared only when the user has disabled follow-server BE.
+        Pending limits on a 'profit'-marked signal we still hold a position for
+        are likewise spared, so the remaining entries keep filling until our own
+        TP engine closes the trade (profit_held_limit_ids).
         """
         for row in ctx.sqlite_pending:
             lid = row["limit_id"]
@@ -1617,7 +1622,6 @@ class SyncCycle:
                 lid in ctx.supabase_limit_ids
                 or lid in ctx.hit_limit_ids
                 or lid in ctx.profit_held_limit_ids
-                or lid in ctx.ignored_be_limit_ids
             ):
                 continue
             ok = await self._canceller.cancel_order(
@@ -2141,13 +2145,6 @@ class SyncCycle:
             # leaves them open for our own TP engine to manage.
             manual_profit = current == "profit" and closed_reason == "manual"
 
-            # Keep server TP and server breakeven independently configurable. Do not
-            # record an ignored breakeven status: enabling the option while that status
-            # is still current should act on the very next cycle.
-            if current == "breakeven" and not config.tp_config.follow_server_be:
-                self._last_force_exit_status.pop(signal_id, None)
-                continue
-
             if current == "profit" and not manual_profit and previous != "profit":
                 logger.info(
                     "Signal %d auto-TP-marked by TM — keeping positions; TP engine continues",
@@ -2299,7 +2296,7 @@ class SyncCycle:
                 continue
             instr = db_symbol_from_mt5(row["symbol"] or "", config)
             if not _gated_by_news_or_vol(
-                instr, news_symbols, vol_symbols, config, row["signal_type"]
+                instr, row["signal_type"] or "", news_symbols, vol_symbols, config
             ):
                 continue
             vol = instrument_under_news(instr, vol_symbols)

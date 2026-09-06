@@ -12,8 +12,6 @@ interface Props {
   setTpTab: (v: 'standard' | OverrideType) => void
   followServerTp: boolean
   setFollowServerTp: (fn: (v: boolean) => boolean) => void
-  followServerBe: boolean
-  setFollowServerBe: (fn: (v: boolean) => boolean) => void
   touch: () => void
   instrumentOverrides: Record<AssetKey, InstrumentOverrideRow[]>
   expandedAsset: AssetKey | null
@@ -50,8 +48,6 @@ export function TpSection({
   setTpTab,
   followServerTp,
   setFollowServerTp,
-  followServerBe,
-  setFollowServerBe,
   touch,
   instrumentOverrides,
   expandedAsset,
@@ -101,24 +97,6 @@ export function TpSection({
             <span className="faint" style={{ fontSize: 12.5, maxWidth: 560 }}>
               Take profit when the alert channel calls TP instead of using your own threshold. Trail
               distances and trailing % still apply; the thresholds below are ignored.
-            </span>
-          </span>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={followServerBe}
-            onChange={() => {
-              setFollowServerBe(v => !v)
-              touch()
-            }}
-            style={{ accentColor: 'var(--accent)', width: 16, height: 16, marginTop: 2 }}
-          />
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 13.5, fontWeight: 600 }}>Follow server BE</span>
-            <span className="faint" style={{ fontSize: 12.5, maxWidth: 560 }}>
-              Close filled positions and cancel remaining limits when the alert channel calls
-              breakeven. Turn this off to keep managing the trade locally.
             </span>
           </span>
         </label>

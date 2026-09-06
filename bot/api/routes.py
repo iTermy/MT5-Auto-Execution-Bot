@@ -16,6 +16,7 @@ else:
 from bot.config.constants import BOT_VERSION
 from bot.config.settings import Settings
 from bot.trading.approx_lot import compute_recommendations
+from bot.trading.symbol_mapper import db_symbol_from_mt5, detect_asset_class
 
 router = APIRouter()
 
@@ -41,6 +42,7 @@ _STATUS_DEFAULTS: dict = {
     "update_in_progress": False,
     "update_progress": 0,
     "update_error": None,
+    "news_symbols": [],
     "spread_hour_active": False,
     "sl_strip_active": False,
     "market_closed": False,
@@ -199,6 +201,18 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
     losses = 0
     breakevens = 0
 
+    # Asset class is resolved here, not in the browser: order_mappings.symbol is the
+    # *broker* symbol, and detect_asset_class reads DB symbols — reversing that needs
+    # symbol_map/suffix config the frontend doesn't have. Cached per symbol because a
+    # history sweep repeats the same handful of instruments across thousands of rows.
+    asset_class_by_symbol: dict[str, str] = {}
+
+    def _asset_class(mt5_symbol: str) -> str:
+        if mt5_symbol not in asset_class_by_symbol:
+            db_sym = db_symbol_from_mt5(mt5_symbol, engine.config)
+            asset_class_by_symbol[mt5_symbol] = detect_asset_class(db_sym).value
+        return asset_class_by_symbol[mt5_symbol]
+
     for row in rows:
         signal_id = row["signal_id"]
         signal_pnl = row["total_pnl"] or 0.0
@@ -216,6 +230,7 @@ async def get_history(request: Request, from_date: str = "", to_date: str = "") 
             {
                 "signal_id": signal_id,
                 "symbol": row["symbol"] or "",
+                "asset_class": _asset_class(row["symbol"] or ""),
                 "direction": row["direction"],
                 "total_lots": row["total_lots"] or 0.0,
                 "placed_at": row["placed_at"],

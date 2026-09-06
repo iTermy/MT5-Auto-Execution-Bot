@@ -91,10 +91,14 @@ auto-TP'd ids on `SyncCycle.server_tp_signals` and `_tp_loop` hands that set to
 `TPEngine.run_cycle`. Manual `profit` is excluded — that path force-closes the whole
 position (see below) rather than running a TP.
 
-### Follow Server Breakeven (`tp_config.follow_server_be`, on by default)
-Controls the server `breakeven` directive independently of follow-server TP. When enabled,
-the bot force-closes filled positions and cancels the signal's remaining pending limits.
-When disabled, the directive is ignored and the trade continues under local management.
+### Server Breakeven (unconditional)
+A `breakeven` status from the signal service force-closes the signal's filled positions
+and cancels its remaining pending limits, and there is no setting that suppresses it —
+it is the service's own call to flatten, not a take-profit, so it never routes through
+the TP engine. Follow-server TP in particular must not gate it: a breakeven signal never
+reaches status `profit`, so nothing else would ever exit the trade. The only thing that
+defers it is the SL-strip window (see `_breakeven_in_spread_spike`), and that is a delay,
+not a cancellation.
 
 ### On Trigger
 - Earlier positions: close 100% at market

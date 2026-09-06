@@ -103,7 +103,6 @@ def _ctx(
         supabase_rows=[],
         hit_limit_ids=set(),
         profit_held_limit_ids={},
-        ignored_be_limit_ids=set(),
         supabase_by_limit={},
         supabase_limit_ids=set(),
         sqlite_limit_ids=set(),

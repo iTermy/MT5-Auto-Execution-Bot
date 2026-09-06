@@ -156,9 +156,7 @@ class _CycleContext:
 
     def is_blocked(self, instr: str, signal_type: str = "standard") -> bool:
         """Placement gate — no new exposure from daily_start (late market) on."""
-        return "ALL" in self.news_symbols or self._gated(
-            instr, signal_type, self.scheduler.should_block_placement
-        )
+        return self._gated(instr, signal_type, self.scheduler.should_block_placement)
 
     def cancel_blocked(self, instr: str, signal_type: str = "standard") -> bool:
         """Teardown gate — strictly narrower in time than is_blocked: an existing ladder
@@ -234,11 +232,11 @@ def _gated_by_news_or_vol(
 ) -> bool:
     """True when the volatility guard or news mode gates this instrument.
 
-    The 24/7 exemption is news-specific: crypto and 24h stocks don't share the
+    ALL news gates every instrument. The targeted-news 24/7 exemption is news-specific: crypto and 24h stocks don't share the
     liquidity events news mode guards against. Volatility is measured from price,
     so a move that already happened applies to them like any other class — the
     vol tokens are checked before the exemption, news tokens after."""
-    if instrument_under_news(instr, vol_symbols):
+    if "ALL" in news_symbols or instrument_under_news(instr, vol_symbols):
         return True
     return not _gate_exempt(instr, config) and instrument_under_news(instr, news_symbols)
 

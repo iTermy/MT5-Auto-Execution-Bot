@@ -1610,7 +1610,7 @@ async def test_news_does_not_exit_crypto_position(sqlite_db, mock_mt5, sample_co
     )
     mock_mt5.positions_get.return_value = [make_position(ticket=8201, symbol="BTCUSD")]
 
-    supabase = _mock_supabase(signals=[], news_mode="ALL")
+    supabase = _mock_supabase(signals=[], news_mode="BTCUSDT")
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -1709,7 +1709,7 @@ async def test_news_still_exempts_crypto_while_vol_guard_enabled(
     )
     mock_mt5.positions_get.return_value = [make_position(ticket=8701, symbol="BTCUSD")]
 
-    supabase = _mock_supabase(signals=[], news_mode="ALL", vol_guard=None)
+    supabase = _mock_supabase(signals=[], news_mode="BTCUSDT", vol_guard=None)
     scheduler = _mock_scheduler(cancel_pending=False)
 
     cycle = SyncCycle()
@@ -2613,4 +2613,42 @@ async def test_failed_news_poll_blocks_new_orders(sqlite_db, mock_mt5, sample_co
     cycle = SyncCycle()
     result = await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
     assert result.placed == 0
+    mock_mt5.order_send.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "instrument,symbol", [("EURUSD", "EURUSD"), ("BTCUSDT", "BTCUSD"), ("AMD.NAS", "AMD-24")]
+)
+async def test_all_news_closes_fills_and_cancels_remaining_ladder(
+    sqlite_db, mock_mt5, sample_config, instrument, symbol
+) -> None:
+    sample_config.symbol_map = {instrument: symbol}
+    await _insert_filled(sqlite_db, mt5_ticket=9001, signal_id=1, symbol=symbol)
+    await sqlite_db.insert_order(
+        limit_id=2,
+        signal_id=1,
+        mt5_ticket=9002,
+        order_type="buy_limit",
+        lot_size=0.1,
+        placed_at="2026-01-01T00:00:00+00:00",
+        db_stop_loss=1.085,
+        signal_type="standard",
+        symbol=symbol,
+    )
+    mock_mt5.positions_get.return_value = [make_position(ticket=9001, symbol=symbol)]
+    mock_mt5.close_position.return_value = make_order_result(ticket=9001)
+    mock_mt5.cancel_pending_order.return_value = make_order_result(ticket=9002)
+    supabase = _mock_supabase(
+        signals=[_make_supabase_row(limit_id=2, instrument=instrument)], news_mode="ALL"
+    )
+    cycle = SyncCycle()
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+    mock_mt5.close_position.assert_called_once()
+    assert mock_mt5.close_position.call_args.kwargs["comment"] == "force_news"
+    mock_mt5.cancel_pending_order.assert_called_once_with(9002)
+    assert await sqlite_db.get_all_active() == []
+    mock_mt5.positions_get.return_value = []
+    await cycle.run(supabase, sqlite_db, mock_mt5, sample_config, _mock_scheduler())
+    mock_mt5.close_position.assert_called_once()
+    mock_mt5.cancel_pending_order.assert_called_once()
     mock_mt5.order_send.assert_not_called()

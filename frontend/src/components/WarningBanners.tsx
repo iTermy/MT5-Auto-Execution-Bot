@@ -57,7 +57,7 @@ function buildBanners(status: StatusData | null, config: Config | null): BannerD
       tone: 'danger',
       title: 'News mode active',
       text: newsSymbols.includes('ALL')
-        ? 'News mode is enabled for all symbols. New orders are blocked on every symbol, including crypto and 24-hour stocks.'
+        ? 'News mode is enabled for all symbols. New orders are blocked, pending orders are cancelled, and filled positions are closed on every symbol, including crypto and 24-hour stocks.'
         : `News mode is enabled for ${scope}. Matching orders are blocked and pending orders and filled positions are closed; crypto and 24-hour stocks are exempt.`,
     })
   }

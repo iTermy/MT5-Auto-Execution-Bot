@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { fetchHistory, clearHistory } from '../api'
+import { fetchHistory, clearHistory, importHistory } from '../api'
 import { Seg } from '../components/Seg'
 import { PerformanceBreakdown } from '../components/PerformanceBreakdown'
 import { money } from '../utils/money'
@@ -19,9 +19,15 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-function monthAgoStr(): string {
+type ReportPeriod = '30d' | '1w' | 'week' | 'month' | 'custom'
+
+function periodStart(period: Exclude<ReportPeriod, 'custom'>): string {
   const d = new Date()
-  d.setMonth(d.getMonth() - 1)
+  if (period === 'month') d.setUTCDate(1)
+  else {
+    const days = period === 'week' ? (d.getUTCDay() + 6) % 7 : period === '1w' ? 6 : 29
+    d.setUTCDate(d.getUTCDate() - days)
+  }
   return d.toISOString().slice(0, 10)
 }
 
@@ -86,7 +92,8 @@ function sortGroups(groups: SignalGroup[], by: SortKey): SignalGroup[] {
 }
 
 export function HistoryPage() {
-  const [fromDate, setFromDate] = useState(monthAgoStr)
+  const [period, setPeriod] = useState<ReportPeriod>('30d')
+  const [fromDate, setFromDate] = useState(() => periodStart('30d'))
   const [toDate, setToDate] = useState(todayStr)
   const [data, setData] = useState<HistoryData | null>(null)
   const [instrumentFilter, setInstrumentFilter] = useState('all')
@@ -97,6 +104,35 @@ export function HistoryPage() {
   const [sortBy, setSortBy] = useState<SortKey>('newest')
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importMessage, setImportMessage] = useState('')
+
+  function selectPeriod(value: ReportPeriod) {
+    setPeriod(value)
+    if (value !== 'custom') {
+      setFromDate(periodStart(value))
+      setToDate(todayStr())
+    }
+  }
+
+  async function handleImport() {
+    setImporting(true)
+    setImportMessage('')
+    try {
+      const result = await importHistory()
+      setImportMessage(
+        `Imported ${result.imported} positions; ${result.existing} already recorded; ${result.skipped} open or incomplete positions skipped.`
+      )
+      setFromDate('1970-01-01')
+      setToDate(todayStr())
+      setPeriod('custom')
+      load()
+    } catch (error) {
+      setImportMessage(error instanceof Error ? error.message : 'History import failed.')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const load = useCallback(() => {
     const from = `${fromDate}T00:00:00`
@@ -224,13 +260,31 @@ export function HistoryPage() {
       <div className="panel pad">
         <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div className="field">
+            <label htmlFor="history-period">Period (UTC)</label>
+            <select
+              id="history-period"
+              className="inp"
+              value={period}
+              onChange={e => selectPeriod(e.target.value as ReportPeriod)}
+            >
+              <option value="30d">Last 30 days</option>
+              <option value="1w">Last 7 days</option>
+              <option value="week">Current week (Mon–today)</option>
+              <option value="month">Current month</option>
+              <option value="custom">Custom dates</option>
+            </select>
+          </div>
+          <div className="field">
             <label htmlFor="history-from">From</label>
             <input
               id="history-from"
               type="date"
               className="inp mono"
               value={fromDate}
-              onChange={e => setFromDate(e.target.value)}
+              onChange={e => {
+                setFromDate(e.target.value)
+                setPeriod('custom')
+              }}
               style={{ width: 160, colorScheme: 'light' }}
             />
           </div>
@@ -241,7 +295,10 @@ export function HistoryPage() {
               type="date"
               className="inp mono"
               value={toDate}
-              onChange={e => setToDate(e.target.value)}
+              onChange={e => {
+                setToDate(e.target.value)
+                setPeriod('custom')
+              }}
               style={{ width: 160, colorScheme: 'light' }}
             />
           </div>
@@ -312,6 +369,7 @@ export function HistoryPage() {
               options={[
                 { value: 'all', label: 'All' },
                 { value: 'standard', label: 'Standard' },
+                { value: 'unknown', label: 'Unknown' },
                 { value: 'scalp', label: 'Scalp' },
                 { value: 'swing', label: 'Swing' },
                 { value: 'toll', label: 'Toll' },
@@ -344,11 +402,25 @@ export function HistoryPage() {
               Reset filters
             </button>
           )}
-          <button className="btn sm danger-solid" onClick={() => setConfirmClear(true)}>
+          <button className="btn sm ghost" onClick={handleImport} disabled={importing || clearing}>
+            {importing ? 'Importing...' : 'Import from MT5'}
+          </button>
+          <button
+            className="btn sm danger-solid"
+            disabled={importing}
+            onClick={() => setConfirmClear(true)}
+          >
             Clear history
           </button>
         </div>
       </div>
+
+      <p>
+        Import completed trades from the connected MT5 account with magic 20250001. Includes all
+        available dates. Signal types and channels cannot be recovered; open positions and unfilled
+        cancellations are excluded.
+      </p>
+      {importMessage && <p role="status">{importMessage}</p>}
 
       {confirmClear && (
         <div className="modal-overlay" onClick={() => !clearing && setConfirmClear(false)}>
@@ -510,13 +582,14 @@ export function HistoryPage() {
             <tbody>
               {filteredGroups.map(g => (
                 <tr key={g.signalId}>
-                  <td className="num mono dim">{g.signalId}</td>
+                  <td className="num mono dim">
+                    {g.signalId < 0 ? `MT5 #${-g.signalId}` : g.signalId}
+                  </td>
                   <td className="t-sub mono">{formatTime(g.closedAt)}</td>
                   <td>
                     <span className="sym">{g.symbol || '—'}</span>
                     <span className="signal-origin">
-                      {ASSET_BASKET_LABELS[basketOf(g.assetClass)]} ·{' '}
-                      {getChannelLabel(g.channelId)}
+                      {ASSET_BASKET_LABELS[basketOf(g.assetClass)]} · {getChannelLabel(g.channelId)}
                     </span>
                   </td>
                   <td>

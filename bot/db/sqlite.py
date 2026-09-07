@@ -5,9 +5,11 @@ import aiosqlite
 
 from bot.db.queries import (
     CLEAR_HISTORY,
+    CLEAR_IMPORTED_HISTORY,
     CLEAR_SIGNAL_FINALIZED,
     CLEAR_SIGNAL_TP_FIRED,
     CLEAR_TRIGGER_RECORDED,
+    CREATE_IMPORTED_HISTORY,
     CREATE_ORDER_MAPPINGS,
     CREATE_SIGNAL_ACTIONS,
     CREATE_SIGNAL_FINALIZED,
@@ -34,6 +36,7 @@ from bot.db.queries import (
     GET_TRAILING_POSITIONS,
     GET_USER_STATS,
     INSERT_CLAIMED_ORDER,
+    INSERT_IMPORTED_HISTORY,
     INSERT_ORDER,
     MARK_CANCELLED,
     MARK_CLOSED,
@@ -81,6 +84,7 @@ class SQLiteDB:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute(CREATE_ORDER_MAPPINGS)
+        await self._db.execute(CREATE_IMPORTED_HISTORY)
         await self._db.execute(CREATE_SIGNAL_FINALIZED)
         await self._db.execute(CREATE_SIGNAL_TP_FIRED)
         await self._db.execute(CREATE_SIGNAL_ACTIONS)
@@ -419,12 +423,13 @@ class SQLiteDB:
     async def clear_history(self) -> int:
         """Reset the account to 'new': delete every closed/cancelled trade row and the
         finalize guard. Open and pending orders are kept. Returns the rows deleted."""
+        imported = await self._db.execute(CLEAR_IMPORTED_HISTORY)
         cursor = await self._db.execute(CLEAR_HISTORY)
         await self._db.execute(CLEAR_SIGNAL_FINALIZED)
         await self._db.execute(CLEAR_SIGNAL_TP_FIRED)
         await self._db.execute(CLEAR_TRIGGER_RECORDED)
         await self._db.commit()
-        return cursor.rowcount
+        return cursor.rowcount + imported.rowcount
 
     async def update_db_stop_loss(
         self, mt5_ticket: int, new_db_sl: float, new_mt5_sl: float
@@ -460,3 +465,10 @@ class SQLiteDB:
             "cancelled": row["cancelled"] or 0,
             "closed": row["closed"] or 0,
         }
+
+    async def import_history(self, rows: list[tuple]) -> int:
+        cursor = await self._db.executemany(
+            INSERT_IMPORTED_HISTORY, [(*row, row[0], row[1]) for row in rows]
+        )
+        await self._db.commit()
+        return cursor.rowcount

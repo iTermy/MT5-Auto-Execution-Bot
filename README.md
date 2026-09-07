@@ -68,3 +68,10 @@ bot.spec         PyInstaller build spec
 ## License
 
 [MIT](LICENSE). The bot is provided as-is; you are responsible for your own trades.
+
+
+### Recover history on another server
+
+Connect the same MT5 account, then open **History > Import from MT5**. This imports all broker-available completed positions opened with magic `20250001`, including partial exits, commission, swap, and fees. Repeat imports skip existing records. Imported trades contribute to history and lifetime statistics but never enter live order management.
+
+Signal IDs are recovered from intact bot comments; otherwise each position appears separately. Signal type and channel are unknown. Open positions, unfilled cancellations, settings, trailing-stop state, and TP analytics cannot be restored by this import. For a complete migration, stop the bot and copy `orders.db` and `config.json` before starting it on the new server.

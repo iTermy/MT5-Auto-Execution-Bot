@@ -279,6 +279,15 @@ async def clear_history(request: Request) -> dict:
     return {"ok": True, "deleted": deleted}
 
 
+@router.post("/api/history/import")
+async def import_history(request: Request) -> dict:
+    task = request.app.state.engine.request_history_import()
+    try:
+        return await asyncio.shield(task)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/api/mt5/terminals")
 async def list_mt5_terminals() -> dict:
     paths = await asyncio.to_thread(_collect_mt5_terminals)

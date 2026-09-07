@@ -520,3 +520,49 @@ SELECT
 FROM order_mappings
 WHERE signal_id = ? AND order_type != 'remainder'
 """
+
+
+CREATE_IMPORTED_HISTORY = """
+CREATE TABLE IF NOT EXISTS imported_history (
+    mt5_ticket INTEGER PRIMARY KEY,
+    limit_id INTEGER,
+    signal_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    order_type TEXT NOT NULL,
+    lot_size REAL NOT NULL,
+    placed_at TEXT NOT NULL,
+    filled_at TEXT NOT NULL,
+    cancelled_at TEXT NOT NULL,
+    realized_pnl REAL NOT NULL,
+    signal_type TEXT NOT NULL DEFAULT 'unknown',
+    channel_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'closed',
+    close_reason TEXT
+)
+"""
+
+INSERT_IMPORTED_HISTORY = """
+INSERT OR IGNORE INTO imported_history
+(mt5_ticket, limit_id, signal_id, symbol, order_type, lot_size,
+ placed_at, filled_at, cancelled_at, realized_pnl)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+    SELECT 1 FROM order_mappings WHERE mt5_ticket = ?
+    OR (limit_id = ? AND status IN ('filled', 'closed'))
+)
+"""
+
+CLEAR_IMPORTED_HISTORY = "DELETE FROM imported_history"
+
+_HISTORY_COLUMNS = (
+    "signal_id, symbol, order_type, lot_size, placed_at, filled_at, cancelled_at, "
+    "realized_pnl, signal_type, channel_id, status, close_reason"
+)
+_HISTORY_SOURCE = (
+    f"(SELECT {_HISTORY_COLUMNS} FROM order_mappings UNION ALL "
+    f"SELECT {_HISTORY_COLUMNS} FROM imported_history i WHERE NOT EXISTS "
+    "(SELECT 1 FROM order_mappings o WHERE o.mt5_ticket = i.mt5_ticket "
+    "OR (o.limit_id = i.limit_id AND o.status IN ('filled', 'closed'))))"
+)
+GET_ORDER_HISTORY = GET_ORDER_HISTORY.replace("FROM order_mappings", f"FROM {_HISTORY_SOURCE}")
+GET_USER_STATS = GET_USER_STATS.replace("FROM order_mappings", f"FROM {_HISTORY_SOURCE}")

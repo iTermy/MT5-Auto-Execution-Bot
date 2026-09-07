@@ -8,6 +8,7 @@ from typing import Any
 from bot.config.constants import BOT_VERSION
 from bot.config.settings import AUTO_LOT_VALUE, Settings, load_config, persist_auto_lot_values
 from bot.core.dashboard_cache import DashboardCache
+from bot.core.history_import import history_rows
 from bot.core.reconciler import Reconciler
 from bot.core.sync_cycle import SyncCycle
 from bot.db.sqlite import SQLiteDB
@@ -108,6 +109,24 @@ class Engine:
         # sync update-progress callback rebuild status without re-querying SQLite.
         self._last_counts: tuple[int, int, int, bool] = (0, 0, 0, False)
         self._last_trade_allowed = True
+        self._history_import_task: asyncio.Task | None = None
+
+    def request_history_import(self) -> asyncio.Task:
+        if self._history_import_task is None or self._history_import_task.done():
+            self._history_import_task = asyncio.create_task(self._import_history())
+            self._tasks.append(self._history_import_task)
+        return self._history_import_task
+
+    async def _import_history(self) -> dict:
+        try:
+            if not self._engine_started or not self._mt5_conn.ensure_connected():
+                raise RuntimeError("Connect MT5 before importing history.")
+            rows, skipped = history_rows(self._mt5.importable_history())
+            imported = await self._sqlite.import_history(rows)
+            return {"imported": imported, "existing": len(rows) - imported, "skipped": skipped}
+        except Exception:
+            logger.error("History import failed", exc_info=True)
+            raise
 
     def start(self) -> None:
         self._trading_active = True

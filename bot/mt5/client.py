@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 import MetaTrader5 as mt5
 
@@ -441,3 +441,9 @@ class MT5Client:
         if not deals:
             return None
         return sum(d.profit + d.swap + d.commission for d in deals)
+
+    def importable_history(self) -> list:
+        raw = mt5.history_deals_get(datetime(1970, 1, 1, tzinfo=UTC), datetime.now(UTC))
+        if raw is None:
+            raise RuntimeError(f"MT5 history unavailable: {mt5.last_error()}")
+        return list(raw)

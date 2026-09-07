@@ -131,3 +131,16 @@ export async function clearHistory(): Promise<void> {
   const r = await fetch('/api/history/clear', { method: 'POST' })
   if (!r.ok) throw new Error(`POST /api/history/clear ${r.status}`)
 }
+
+export async function importHistory(): Promise<{
+  imported: number
+  existing: number
+  skipped: number
+}> {
+  const r = await fetch('/api/history/import', { method: 'POST' })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body.detail || 'History import failed. Check the bot logs and retry.')
+  }
+  return r.json()
+}

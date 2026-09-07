@@ -32,6 +32,7 @@ export const SIGNAL_TYPES: SignalType[] = [
 
 export function formatSignalType(t: SignalType | string | null | undefined): string {
   if (!t) return 'Standard'
+  if (t === 'unknown') return 'Unknown'
   return LABELS[t as SignalType] ?? 'Standard'
 }
 
